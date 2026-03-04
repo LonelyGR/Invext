@@ -243,8 +243,12 @@ async def user_ledger(
 ):
     admin_token_id, _ = await get_admin_context(request)
 
-    # Базовый запрос.
-    query = select(LedgerTransaction).where(LedgerTransaction.user_id == user_id)
+    # Базовый запрос: выбираем только нужные поля, без legacy-полей блокчейна.
+    query = select(
+        LedgerTransaction.created_at,
+        LedgerTransaction.type,
+        LedgerTransaction.amount_usdt,
+    ).where(LedgerTransaction.user_id == user_id)
 
     if type:
         query = query.where(LedgerTransaction.type == type)
@@ -265,18 +269,19 @@ async def user_ledger(
 
     query = query.order_by(desc(LedgerTransaction.created_at))
     result = await db.execute(query)
-    txs = list(result.scalars().all())
+    rows = result.all()
 
-    items = [
-        LedgerItem(
-            created_at=tx.created_at,
-            type=tx.type,
-            amount_usdt=tx.amount_usdt,
-            deal_id=None,
-            comment=None,
+    items = []
+    for created_at, tx_type, amount_usdt in rows:
+        items.append(
+            LedgerItem(
+                created_at=created_at,
+                type=tx_type,
+                amount_usdt=amount_usdt,
+                deal_id=None,
+                comment=None,
+            )
         )
-        for tx in txs
-    ]
 
     await log_admin_action(
         db=db,
@@ -301,21 +306,25 @@ async def export_ledger_csv(
     admin_token_id, _ = await get_admin_context(request)
 
     result = await db.execute(
-        select(LedgerTransaction)
+        select(
+            LedgerTransaction.created_at,
+            LedgerTransaction.type,
+            LedgerTransaction.amount_usdt,
+        )
         .where(LedgerTransaction.user_id == user_id)
         .order_by(LedgerTransaction.created_at.asc())
     )
-    txs = list(result.scalars().all())
+    rows = list(result.all())
 
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(["date", "type", "amount_usdt", "comment", "deal_id"])
-    for tx in txs:
+    for created_at, tx_type, amount_usdt in rows:
         writer.writerow(
             [
-                tx.created_at.isoformat(),
-                tx.type,
-                str(tx.amount_usdt),
+                created_at.isoformat(),
+                tx_type,
+                str(amount_usdt),
                 "",
                 "",
             ]
