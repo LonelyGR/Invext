@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Invext Admin</title>
+  <link rel="stylesheet" href="/database/admin.css">
+</head>
+<body class="dark">
+  <div id="app">
+    <div id="login-view" class="view">
+      <h1>Invext Admin</h1>
+      <form id="login-form">
+        <label for="token">Одноразовый токен</label>
+        <input id="token" name="token" type="text" required />
+        <button type="submit">Войти</button>
+      </form>
+      <div id="login-error" class="error"></div>
+    </div>
+
+    <div id="main-view" class="view hidden">
+      <aside class="sidebar">
+        <h2>Invext</h2>
+        <nav>
+          <a href="#dashboard">Дашборд</a>
+          <a href="#users">Пользователи</a>
+          <a href="#withdrawals">Выводы</a>
+          <a href="#logs">Логи</a>
+        </nav>
+      </aside>
+      <main class="content">
+        <section id="dashboard-section" class="section"></section>
+        <section id="users-section" class="section hidden"></section>
+        <section id="user-section" class="section hidden"></section>
+        <section id="withdrawals-section" class="section hidden"></section>
+        <section id="logs-section" class="section hidden"></section>
+      </main>
+    </div>
+  </div>
+
+  <script src="/database/admin.js"></script>
+</body>
+</html>
+

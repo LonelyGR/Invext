@@ -1,0 +1,82 @@
+"""
+/start [ref_code] — создание/обновление пользователя, описание проекта, личные данные, меню.
+"""
+from aiogram import Router
+from aiogram.types import Message
+from aiogram.filters import CommandStart, CommandObject
+from aiogram.utils.deep_linking import create_start_link
+
+from src.api_client.client import api
+from src.keyboards.menus import main_menu_kb
+from src.texts import WELCOME_ABOUT, format_personal_data
+
+router = Router(name="start")
+
+
+async def _send_welcome_flow(message: Message, telegram_id: int):
+    """Первое сообщение — о проекте, второе — личные данные и меню."""
+    await message.answer(WELCOME_ABOUT)
+
+    try:
+        me = await api.get_me(telegram_id)
+        balances = await api.get_balances(telegram_id)
+    except Exception as e:
+        await message.answer(f"Ошибка загрузки данных: {e}", reply_markup=main_menu_kb())
+        return
+
+    if not me:
+        me = {}
+    if not balances:
+        balances = {"USDT": 0, "USDC": 0}
+
+    ref_code = me.get("ref_code", "—")
+    try:
+        ref_link = await create_start_link(message.bot, ref_code)
+    except Exception:
+        ref_link = f"https://t.me/{(await message.bot.get_me()).username}?start={ref_code}"
+
+    personal_text = format_personal_data(me, balances, ref_link=ref_link)
+    await message.answer(personal_text, reply_markup=main_menu_kb())
+
+
+@router.message(CommandStart(deep_link=True))
+async def cmd_start_with_ref(message: Message, command: CommandObject):
+    """/start ref_code — привязка реферера, описание проекта, личные данные."""
+    ref_code = command.args
+    telegram_id = message.from_user.id
+    username = message.from_user.username
+    name = message.from_user.full_name or message.from_user.username
+
+    try:
+        await api.telegram_auth(
+            telegram_id=telegram_id,
+            username=username,
+            name=name,
+            ref_code_from_start=ref_code,
+        )
+    except Exception as e:
+        await message.answer(f"Ошибка при регистрации: {e}")
+        return
+
+    await _send_welcome_flow(message, telegram_id)
+
+
+@router.message(CommandStart())
+async def cmd_start(message: Message):
+    """/start без реферального кода — описание проекта, личные данные."""
+    telegram_id = message.from_user.id
+    username = message.from_user.username
+    name = message.from_user.full_name or message.from_user.username
+
+    try:
+        await api.telegram_auth(
+            telegram_id=telegram_id,
+            username=username,
+            name=name,
+            ref_code_from_start=None,
+        )
+    except Exception as e:
+        await message.answer(f"Ошибка при регистрации: {e}")
+        return
+
+    await _send_welcome_flow(message, telegram_id)

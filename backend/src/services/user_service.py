@@ -1,0 +1,204 @@
+"""
+Сервис пользователей: создание/обновление по Telegram, привязка реферера.
+"""
+import uuid
+from decimal import Decimal
+from typing import Optional, Tuple
+
+from sqlalchemy import select, func, and_
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.models.user import User
+from src.models.wallet_transaction import WalletTransaction
+from src.models.deposit_request import DepositRequest
+from src.models.withdraw_request import WithdrawRequest
+from src.models.ledger_transaction import LedgerTransaction
+from src.services.ledger_service import (
+    LEDGER_TYPE_DEPOSIT,
+    LEDGER_TYPE_WITHDRAW,
+)
+
+
+def _generate_ref_code() -> str:
+    return uuid.uuid4().hex[:8].upper()
+
+
+async def get_or_create_user(
+    db: AsyncSession,
+    telegram_id: int,
+    username: Optional[str] = None,
+    name: Optional[str] = None,
+    ref_code_from_start: Optional[str] = None,
+) -> Tuple[User, bool]:
+    """
+    Найти пользователя по telegram_id или создать нового.
+    Если передан ref_code_from_start и у пользователя ещё нет referrer_id — привязать реферера.
+    Возвращает (user, created).
+    """
+    result = await db.execute(select(User).where(User.telegram_id == telegram_id))
+    user = result.scalar_one_or_none()
+    if user:
+        # Обновляем данные из Telegram
+        user.username = username or user.username
+        user.name = name or user.name
+        # Привязка реферера только если ещё не привязан и передан код
+        if user.referrer_id is None and ref_code_from_start:
+            ref_result = await db.execute(
+                select(User).where(User.ref_code == ref_code_from_start.upper().strip())
+            )
+            referrer = ref_result.scalar_one_or_none()
+            if referrer and referrer.id != user.id:
+                user.referrer_id = referrer.id
+        return user, False
+
+    referrer_id = None
+    if ref_code_from_start:
+        ref_result = await db.execute(
+            select(User).where(User.ref_code == ref_code_from_start.upper().strip())
+        )
+        referrer = ref_result.scalar_one_or_none()
+        if referrer:
+            referrer_id = referrer.id
+
+    user = User(
+        telegram_id=telegram_id,
+        username=username,
+        name=name,
+        ref_code=_generate_ref_code(),
+        referrer_id=referrer_id,
+    )
+    db.add(user)
+    await db.flush()
+    return user, True
+
+
+async def update_user_profile(
+    db: AsyncSession,
+    telegram_id: int,
+    *,
+    name: Optional[str] = None,
+    email: Optional[str] = None,
+    country: Optional[str] = None,
+) -> Optional[User]:
+    """Обновить имя, email или страну пользователя по telegram_id."""
+    result = await db.execute(select(User).where(User.telegram_id == telegram_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        return None
+    if name is not None:
+        user.name = name.strip() if name else None
+    if email is not None:
+        user.email = email.strip() if email else None
+    if country is not None:
+        user.country = country.strip() if country else None
+    await db.flush()
+    return user
+
+
+async def get_user_with_stats(db: AsyncSession, telegram_id: int) -> Optional[dict]:
+    """
+    Получить пользователя и агрегированную статистику для /me:
+    количество рефералов, оборот команды (депозиты рефералов), свои депозиты/выводы.
+    """
+    result = await db.execute(select(User).where(User.telegram_id == telegram_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        return None
+
+    # Количество рефералов 1 уровня
+    ref_count_result = await db.execute(
+        select(func.count(User.id)).where(User.referrer_id == user.id)
+    )
+    referrals_count = ref_count_result.scalar() or 0
+
+    # Оборот команды: сумма депозитов рефералов (USDT по ledger, USDC по wallet_transactions).
+    # Подзапрос: user_id рефералов
+    ref_ids_result = await db.execute(
+        select(User.id).where(User.referrer_id == user.id)
+    )
+    ref_ids = [r[0] for r in ref_ids_result.all()]
+    team_usdt = Decimal("0")
+    team_usdc = Decimal("0")
+    if ref_ids:
+        # USDT: депозиты через ledger (Crypto Pay и пр.)
+        r_usdt = await db.execute(
+            select(func.coalesce(func.sum(LedgerTransaction.amount_usdt), 0)).where(
+                and_(
+                    LedgerTransaction.user_id.in_(ref_ids),
+                    LedgerTransaction.type == LEDGER_TYPE_DEPOSIT,
+                )
+            )
+        )
+        team_usdt = r_usdt.scalar() or Decimal("0")
+
+        # USDC: legacy по wallet_transactions
+        r_usdc = await db.execute(
+            select(func.coalesce(func.sum(WalletTransaction.amount), 0)).where(
+                and_(
+                    WalletTransaction.user_id.in_(ref_ids),
+                    WalletTransaction.currency == "USDC",
+                    WalletTransaction.type == "DEPOSIT",
+                    WalletTransaction.status == "COMPLETED",
+                )
+            )
+        )
+        team_usdc = r_usdc.scalar() or Decimal("0")
+
+    # Свои депозиты/выводы:
+    # USDT — по ledger, USDC — по wallet_transactions.
+    my_d_usdt_res = await db.execute(
+        select(func.coalesce(func.sum(LedgerTransaction.amount_usdt), 0)).where(
+            and_(
+                LedgerTransaction.user_id == user.id,
+                LedgerTransaction.type == LEDGER_TYPE_DEPOSIT,
+            )
+        )
+    )
+    my_w_usdt_res = await db.execute(
+        select(func.coalesce(func.sum(LedgerTransaction.amount_usdt), 0)).where(
+            and_(
+                LedgerTransaction.user_id == user.id,
+                LedgerTransaction.type == LEDGER_TYPE_WITHDRAW,
+            )
+        )
+    )
+
+    my_d_usdc_res = await db.execute(
+        select(func.coalesce(func.sum(WalletTransaction.amount), 0)).where(
+            and_(
+                WalletTransaction.user_id == user.id,
+                WalletTransaction.currency == "USDC",
+                WalletTransaction.type == "DEPOSIT",
+                WalletTransaction.status == "COMPLETED",
+            )
+        )
+    )
+    my_w_usdc_res = await db.execute(
+        select(func.coalesce(func.sum(WalletTransaction.amount), 0)).where(
+            and_(
+                WalletTransaction.user_id == user.id,
+                WalletTransaction.currency == "USDT",
+                WalletTransaction.type == "WITHDRAW",
+                WalletTransaction.status == "COMPLETED",
+            )
+        )
+    )
+    deposits_count = (await db.execute(
+        select(func.count(DepositRequest.id)).where(DepositRequest.user_id == user.id)
+    )).scalar() or 0
+    withdrawals_count = (await db.execute(
+        select(func.count(WithdrawRequest.id)).where(WithdrawRequest.user_id == user.id)
+    )).scalar() or 0
+
+    return {
+        "user": user,
+        "referrals_count": referrals_count,
+        "team_deposits_usdt": team_usdt,
+        "team_deposits_usdc": team_usdc,
+        "my_deposits_total_usdt": my_d_usdt_res.scalar() or Decimal("0"),
+        "my_deposits_total_usdc": my_d_usdc_res.scalar() or Decimal("0"),
+        "my_withdrawals_total_usdt": my_w_usdt_res.scalar() or Decimal("0"),
+        "my_withdrawals_total_usdc": my_w_usdc_res.scalar() or Decimal("0"),
+        "deposits_count": deposits_count,
+        "withdrawals_count": withdrawals_count,
+    }

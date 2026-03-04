@@ -1,0 +1,271 @@
+body.dark {
+  margin: 0;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background-color: #0f172a;
+  color: #e5e7eb;
+}
+
+.view.hidden {
+  display: none;
+}
+
+#login-view {
+  max-width: 400px;
+  margin: 80px auto;
+  padding: 24px;
+  background: #111827;
+  border-radius: 12px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
+}
+
+#login-view h1 {
+  margin-top: 0;
+  text-align: center;
+}
+
+label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 14px;
+}
+
+input[type="text"] {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid #374151;
+  background: #020617;
+  color: #e5e7eb;
+  box-sizing: border-box;
+}
+
+button {
+  margin-top: 16px;
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: none;
+  background: #2563eb;
+  color: white;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #1d4ed8;
+}
+
+.error {
+  margin-top: 12px;
+  color: #f97373;
+  font-size: 14px;
+}
+
+.layout {
+  display: flex;
+  height: 100vh;
+}
+
+.sidebar {
+  width: 220px;
+  background: #020617;
+  padding: 16px;
+  box-sizing: border-box;
+}
+
+.sidebar h2 {
+  margin-top: 0;
+}
+
+.sidebar nav a {
+  display: block;
+  color: #9ca3af;
+  text-decoration: none;
+  padding: 8px 0;
+}
+
+.sidebar nav a:hover {
+  color: #e5e7eb;
+}
+
+.content {
+  flex: 1;
+  padding: 24px;
+  box-sizing: border-box;
+}
+
+.section.hidden {
+  display: none;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 16px;
+}
+
+th,
+td {
+  padding: 8px 10px;
+  border-bottom: 1px solid #1f2933;
+  text-align: left;
+  font-size: 14px;
+}
+
+th {
+  font-weight: 600;
+  color: #9ca3af;
+}
+
+.amount-positive {
+  color: #16c784;
+}
+
+.amount-negative {
+  color: #ea3943;
+}
+
+.warning {
+  color: #facc15;
+  font-size: 13px;
+}
+
+.toolbar {
+  margin: 8px 0 16px;
+  display: flex;
+  gap: 8px;
+}
+
+.toolbar input {
+  flex: 1;
+}
+
+/* --- Layout polish --- */
+
+body.dark {
+  color: #e5e7eb;
+}
+
+.content {
+  flex: 1;
+  padding: 32px 40px;
+  box-sizing: border-box;
+  max-width: 1200px;
+}
+
+.section h1 {
+  margin: 0 0 16px;
+  font-size: 22px;
+}
+
+/* --- Tables --- */
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 12px;
+  background: #020617;
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+
+thead {
+  background: rgba(15, 23, 42, 0.9);
+}
+
+th,
+td {
+  padding: 10px 14px;
+  border-bottom: 1px solid #111827;
+  font-size: 13px;
+}
+
+tbody tr:nth-child(even) {
+  background-color: rgba(15, 23, 42, 0.6);
+}
+
+tbody tr:hover {
+  background-color: rgba(37, 99, 235, 0.18);
+}
+
+th {
+  font-weight: 600;
+  color: #9ca3af;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 11px;
+}
+
+/* Логи и длинные таблицы */
+
+#logs-section table {
+  table-layout: fixed;
+}
+
+#logs-section th:nth-child(1),
+#logs-section td:nth-child(1) {
+  width: 60px;
+}
+
+#logs-section th:nth-child(4),
+#logs-section td:nth-child(4) {
+  width: 140px;
+}
+
+#logs-section th:nth-child(5),
+#logs-section td:nth-child(5) {
+  width: 200px;
+}
+
+/* --- Dashboard cards --- */
+
+.cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+  margin-top: 12px;
+}
+
+.stat-card {
+  background: #020617;
+  border-radius: 12px;
+  padding: 16px 18px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+}
+
+.stat-card .stat-label {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #9ca3af;
+  margin-bottom: 8px;
+}
+
+.stat-card .stat-value {
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.stat-card .stat-unit {
+  font-size: 14px;
+  font-weight: 400;
+  color: #9ca3af;
+  margin-left: 4px;
+}
+
+.stat-card.stat-wide {
+  grid-column: span 2;
+}
+
+/* --- Clickable user rows --- */
+
+tr.table-row-link {
+  cursor: pointer;
+}
+
+tr.table-row-link td:first-child {
+  font-weight: 600;
+  color: #e5e7eb;
+}
+
