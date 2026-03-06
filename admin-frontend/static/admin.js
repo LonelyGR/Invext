@@ -156,7 +156,7 @@ async function loadUsers() {
 }
 
 function switchSection(hash) {
-  const sections = ["dashboard", "users", "withdrawals", "logs", "user"];
+  const sections = ["dashboard", "users", "deals", "withdrawals", "logs", "user"];
   sections.forEach((name) => {
     const el = document.getElementById(`${name}-section`);
     if (!el) return;
@@ -170,6 +170,8 @@ function switchSection(hash) {
     loadUsers();
   } else if (hash === "#dashboard" || !hash) {
     loadDashboard();
+  } else if (hash === "#deals") {
+    loadDeals();
   } else if (hash.startsWith("#user-")) {
     const id = hash.replace("#user-", "");
     loadUserDetail(id);
@@ -177,6 +179,76 @@ function switchSection(hash) {
     loadWithdrawals();
   } else if (hash === "#logs") {
     loadLogs();
+  }
+}
+
+async function loadDeals() {
+  const section = document.getElementById("deals-section");
+  section.innerHTML = "<h1>Сделки</h1><p>Загрузка...</p>";
+  try {
+    const deals = await apiRequest("/deals");
+    const rows = deals
+      .map(
+        (d) => `
+      <tr data-deal-id="${d.id}">
+        <td>${d.number}</td>
+        <td>${d.status}</td>
+        <td>
+          <input type="number" step="0.01" min="0" value="${d.percent}" class="deal-percent-input" />
+        </td>
+        <td>${d.opened_at ? new Date(d.opened_at).toLocaleString() : ""}</td>
+        <td>${d.closed_at ? new Date(d.closed_at).toLocaleString() : ""}</td>
+        <td>${d.finished_at ? new Date(d.finished_at).toLocaleString() : ""}</td>
+        <td><button class="deal-save-btn">Сохранить %</button></td>
+      </tr>`
+      )
+      .join("");
+
+    section.innerHTML = `
+      <h1>Сделки</h1>
+      <p>Здесь можно скорректировать процент доходности по каждой сделке (open/closed).</p>
+      <table>
+        <thead>
+          <tr>
+            <th>№</th>
+            <th>Статус</th>
+            <th>% дохода</th>
+            <th>Открыта</th>
+            <th>Закрыта</th>
+            <th>Завершена</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    `;
+
+    section.querySelectorAll("button.deal-save-btn").forEach((btn) => {
+      btn.onclick = async () => {
+        const row = btn.closest("tr");
+        if (!row) return;
+        const dealId = row.getAttribute("data-deal-id");
+        const input = row.querySelector("input.deal-percent-input");
+        if (!dealId || !input) return;
+        const value = parseFloat(input.value.replace(",", "."));
+        if (Number.isNaN(value)) {
+          alert("Введите корректное значение процента");
+          return;
+        }
+        try {
+          await apiRequest(`/deals/${dealId}`, {
+            method: "PATCH",
+            body: JSON.stringify({ percent: value }),
+          });
+          alert("Процент обновлён");
+          loadDeals();
+        } catch (e) {
+          alert(e.message);
+        }
+      };
+    });
+  } catch (e) {
+    section.innerHTML = `<h1>Сделки</h1><div class="error">${e.message}</div>`;
   }
 }
 

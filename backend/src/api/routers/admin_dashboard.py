@@ -40,6 +40,8 @@ from src.schemas.admin_dashboard import (
     UserWithdrawRequest,
     PaginatedAdminLogs,
     AdminLogItem,
+    DealRow,
+    DealUpdateRequest,
 )
 from src.services.ledger_service import (
     LEDGER_TYPE_DEPOSIT,
@@ -342,6 +344,88 @@ async def export_ledger_csv(
         content=output.getvalue(),
         media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename=ledger_{user_id}.csv"},
+    )
+
+
+@router.get("/deals", response_model=list[DealRow])
+async def list_deals(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Список сделок: номер, статус, процент и даты."""
+    admin_token_id, _ = await get_admin_context(request)
+
+    result = await db.execute(
+        select(Deal).order_by(desc(Deal.created_at))
+    )
+    deals = result.scalars().all()
+
+    items = [
+        DealRow(
+            id=d.id,
+            number=d.number,
+            percent=d.percent,
+            status=d.status,
+            opened_at=d.opened_at,
+            closed_at=d.closed_at,
+            finished_at=d.finished_at,
+        )
+        for d in deals
+    ]
+
+    await log_admin_action(
+        db=db,
+        admin_token_id=admin_token_id,
+        action_type="VIEW_DEALS",
+        entity_type="DEAL_LIST",
+        entity_id=0,
+    )
+
+    return items
+
+
+@router.patch("/deals/{deal_id}", response_model=DealRow)
+async def update_deal_percent(
+    request: Request,
+    deal_id: int,
+    body: DealUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Обновить процент доходности сделки (для уже созданной сделки)."""
+    admin_token_id, _ = await get_admin_context(request)
+
+    async with db.begin():
+        result = await db.execute(
+            select(Deal).where(Deal.id == deal_id).with_for_update()
+        )
+        deal = result.scalar_one_or_none()
+        if not deal:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Deal not found")
+
+        if deal.status not in ("open", "closed"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Можно менять процент только для сделок в статусе open/closed",
+            )
+
+        deal.percent = body.percent
+
+    await log_admin_action(
+        db=db,
+        admin_token_id=admin_token_id,
+        action_type="UPDATE_DEAL_PERCENT",
+        entity_type="DEAL",
+        entity_id=deal_id,
+    )
+
+    return DealRow(
+        id=deal.id,
+        number=deal.number,
+        percent=deal.percent,
+        status=deal.status,
+        opened_at=deal.opened_at,
+        closed_at=deal.closed_at,
+        finished_at=deal.finished_at,
     )
 
 

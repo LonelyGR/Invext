@@ -23,6 +23,20 @@ class DashboardStats(BaseModel):
     pending_withdrawals_count: int
 
 
+class DealRow(BaseModel):
+    id: int
+    number: int
+    percent: Decimal
+    status: str
+    opened_at: datetime
+    closed_at: Optional[datetime]
+    finished_at: Optional[datetime]
+
+
+class DealUpdateRequest(BaseModel):
+    percent: Decimal
+
+
 class UserRow(BaseModel):
     id: int
     telegram_id: int

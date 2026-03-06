@@ -140,7 +140,12 @@ async def accrue_profits_for_due_deals(db: AsyncSession) -> None:
     )
     deals: Iterable[Deal] = deals_result.scalars().all()
 
+    # Собираем данные для уведомлений после начисления прибыли.
+    finished_notifications: list[tuple[Deal, list[int]]] = []
+
     for deal in deals:
+        investor_tg_ids: list[int] = []
+
         async with db.begin():
             # Лочим сделку.
             d_result = await db.execute(
@@ -192,8 +197,36 @@ async def accrue_profits_for_due_deals(db: AsyncSession) -> None:
                 new_balance = await get_balance_usdt(db, inv.user_id)
                 user.balance_usdt = new_balance
 
+                if user.telegram_id:
+                    investor_tg_ids.append(user.telegram_id)
+
             d.status = "finished"
             d.finished_at = now
+
+        if investor_tg_ids:
+            finished_notifications.append((d, investor_tg_ids))
+
+    # Отправляем уведомления после завершения всех транзакций.
+    if finished_notifications:
+        settings = get_settings()
+        bot_token = settings.bot_token
+        if not bot_token:
+            logger.warning("BOT_TOKEN not configured, skip finished deal notifications")
+        else:
+            api_url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                for deal_obj, tg_ids in finished_notifications:
+                    text = (
+                        f"Сделка #{deal_obj.number} отработана. "
+                        f"Ваш доход {deal_obj.percent}%."
+                    )
+                    for tid in tg_ids:
+                        try:
+                            await client.post(api_url, json={"chat_id": tid, "text": text})
+                        except Exception as e:  # noqa: BLE001
+                            logger.warning(
+                                "Failed to send finished deal message to %s: %s", tid, e
+                            )
 
 
 async def _broadcast_new_deal_to_all_users(db: AsyncSession, deal: Deal) -> None:
@@ -215,7 +248,7 @@ async def _broadcast_new_deal_to_all_users(db: AsyncSession, deal: Deal) -> None
         return
 
     text = (
-        f"Открыта новая сделка #{deal.number} на {deal.percent}%.\n\n"
+        f"Открыт сбор на сделку #{deal.number}.\n\n"
         "Вы можете инвестировать USDT в разделе «💰 Инвестировать» бота."
     )
 
@@ -227,6 +260,40 @@ async def _broadcast_new_deal_to_all_users(db: AsyncSession, deal: Deal) -> None
                 await client.post(api_url, json={"chat_id": tid, "text": text})
             except Exception as e:  # noqa: BLE001
                 logger.warning("Failed to send new deal message to %s: %s", tid, e)
+
+
+async def _broadcast_deal_closed_to_investors(db: AsyncSession, deal: Deal) -> None:
+    """Сообщить инвесторам, что сбор на сделку закрыт и средства ушли в работу."""
+    settings = get_settings()
+    bot_token = settings.bot_token
+    if not bot_token:
+        logger.warning("BOT_TOKEN not configured, skip closed deal notifications")
+        return
+
+    result = await db.execute(
+        select(User.telegram_id)
+        .join(DealInvestment, DealInvestment.user_id == User.id)
+        .where(
+            DealInvestment.deal_id == deal.id,
+            User.telegram_id.is_not(None),
+        )
+        .distinct()
+    )
+    telegram_ids = [row[0] for row in result.fetchall() if row[0]]
+    if not telegram_ids:
+        return
+
+    text = (
+        f"Сбор на сделку #{deal.number} закрыт, средства идут в работу."
+    )
+    api_url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        for tid in telegram_ids:
+            try:
+                await client.post(api_url, json={"chat_id": tid, "text": text})
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Failed to send closed deal message to %s: %s", tid, e)
 
 
 def init_deal_scheduler(scheduler: AsyncIOScheduler, db_factory) -> None:
@@ -242,7 +309,9 @@ def init_deal_scheduler(scheduler: AsyncIOScheduler, db_factory) -> None:
     async def _job_close_deal():
         async with db_factory() as db:  # type: ignore[attr-defined]
             async with db.begin():
-                await close_current_open_deal(db)
+                deal = await close_current_open_deal(db)
+            if deal:
+                await _broadcast_deal_closed_to_investors(db, deal)
 
     async def _job_open_deal():
         async with db_factory() as db:  # type: ignore[attr-defined]
