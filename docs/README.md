@@ -69,7 +69,7 @@
   - Backend проверяет, что есть достаточный баланс USDT.
   - Создаёт запись в ledger с типом INVEST и уменьшает доступный баланс.
 
-Подробно поток пополнения описан в `docs/DEPOSITS_ARCHITECTURE.md`.
+Поток пополнения реализован через Crypto Pay (`/crypto/invoices`) и леджер (`ledger_transactions`).
 
 ---
 

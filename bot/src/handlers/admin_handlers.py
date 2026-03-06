@@ -6,7 +6,7 @@ from aiogram.types import Message, CallbackQuery
 
 from src.config.settings import ADMIN_TELEGRAM_IDS
 from src.api_client.client import api
-from src.keyboards.menus import admin_menu_kb, deposit_actions_kb, withdraw_actions_kb
+from src.keyboards.menus import admin_menu_kb, withdraw_actions_kb
 
 router = Router(name="admin")
 
@@ -30,19 +30,6 @@ async def admin_cmd(message: Message):
         await message.answer("Доступ запрещён.")
         return
     await message.answer("Админ-панель. Выберите раздел:", reply_markup=admin_menu_kb())
-
-
-@router.callback_query(F.data == "admin_deposits")
-async def admin_list_deposits(callback: CallbackQuery):
-    """Ручные заявки на пополнение не используются: пополнение только по депозитному адресу в блокчейне."""
-    if not is_admin(callback.from_user.id):
-        await callback.answer("Доступ запрещён")
-        return
-    await callback.message.edit_text(
-        "Ручные заявки на пополнение отключены.\n"
-        "Пополнение баланса выполняется автоматически при переводе USDT на депозитный адрес пользователя (blockchain watcher)."
-    )
-    await callback.answer()
 
 
 @router.callback_query(F.data == "admin_dashboard_token")
@@ -107,32 +94,6 @@ async def admin_list_withdrawals(callback: CallbackQuery):
             msg_text,
             reply_markup=withdraw_actions_kb(r["id"]),
         )
-    await callback.answer()
-
-
-@router.callback_query(F.data.startswith("admin_d_approve_"))
-async def admin_deposit_approve(callback: CallbackQuery):
-    """Страховочный хендлер: ручные пополнения отключены."""
-    if not is_admin(callback.from_user.id):
-        await callback.answer("Доступ запрещён")
-        return
-    await callback.message.edit_text(
-        "Ручное одобрение пополнений недоступно.\n"
-        "Баланс пополняется автоматически при переводе USDT на депозитный адрес (после подтверждений в сети)."
-    )
-    await callback.answer()
-
-
-@router.callback_query(F.data.startswith("admin_d_reject_"))
-async def admin_deposit_reject(callback: CallbackQuery):
-    """Страховочный хендлер: ручные пополнения отключены."""
-    if not is_admin(callback.from_user.id):
-        await callback.answer("Доступ запрещён")
-        return
-    await callback.message.edit_text(
-        "Ручное отклонение пополнений недоступно.\n"
-        "Пополнение выполняется автоматически по депозитному адресу в блокчейне."
-    )
     await callback.answer()
 
 

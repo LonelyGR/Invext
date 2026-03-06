@@ -27,6 +27,8 @@ from src.models import (
     DealInvestment,
     WithdrawRequest,
     AdminLog,
+    PaymentInvoice,
+    PaymentWebhookEvent,
 )
 from src.schemas.admin_dashboard import (
     DashboardStats,
@@ -42,6 +44,9 @@ from src.schemas.admin_dashboard import (
     AdminLogItem,
     DealRow,
     DealUpdateRequest,
+    DepositRow,
+    DepositDetail,
+    PaginatedDeposits,
 )
 from src.services.ledger_service import (
     LEDGER_TYPE_DEPOSIT,
@@ -345,6 +350,168 @@ async def export_ledger_csv(
         content=output.getvalue(),
         media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename=ledger_{user_id}.csv"},
+    )
+
+
+@router.get("/deposits", response_model=PaginatedDeposits)
+async def list_deposits(
+    request: Request,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=100),
+    status_filter: Optional[str] = Query(None, description="waiting, finished, failed, expired, partially_paid"),
+    provider_filter: Optional[str] = Query(None, description="nowpayments"),
+    user_id_filter: Optional[int] = Query(None),
+    order_id_search: Optional[str] = Query(None),
+    external_id_search: Optional[str] = Query(None),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+    sort: str = Query("created_at_desc", description="created_at_desc, created_at_asc, amount_desc, amount_asc, status"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Список пополнений (PaymentInvoice, NOWPayments) с фильтрацией и поиском."""
+    admin_token_id, _ = await get_admin_context(request)
+
+    query = (
+        select(PaymentInvoice, User.telegram_id, User.username)
+        .join(User, PaymentInvoice.user_id == User.id)
+    )
+    count_stmt = select(func.count(PaymentInvoice.id)).join(User, PaymentInvoice.user_id == User.id)
+
+    if status_filter:
+        query = query.where(PaymentInvoice.status == status_filter.strip().lower())
+        count_stmt = count_stmt.where(PaymentInvoice.status == status_filter.strip().lower())
+    if provider_filter:
+        query = query.where(PaymentInvoice.provider == provider_filter.strip().lower())
+        count_stmt = count_stmt.where(PaymentInvoice.provider == provider_filter.strip().lower())
+    if user_id_filter is not None:
+        query = query.where(PaymentInvoice.user_id == user_id_filter)
+        count_stmt = count_stmt.where(PaymentInvoice.user_id == user_id_filter)
+    if order_id_search and order_id_search.strip():
+        query = query.where(PaymentInvoice.order_id.ilike(f"%{order_id_search.strip()}%"))
+        count_stmt = count_stmt.where(PaymentInvoice.order_id.ilike(f"%{order_id_search.strip()}%"))
+    if external_id_search and external_id_search.strip():
+        query = query.where(PaymentInvoice.external_invoice_id.ilike(f"%{external_id_search.strip()}%"))
+        count_stmt = count_stmt.where(PaymentInvoice.external_invoice_id.ilike(f"%{external_id_search.strip()}%"))
+    if date_from:
+        try:
+            t_from = dt.datetime.fromisoformat(date_from.replace("Z", "+00:00"))
+            query = query.where(PaymentInvoice.created_at >= t_from)
+            count_stmt = count_stmt.where(PaymentInvoice.created_at >= t_from)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid date_from")
+    if date_to:
+        try:
+            t_to = dt.datetime.fromisoformat(date_to.replace("Z", "+00:00"))
+            query = query.where(PaymentInvoice.created_at <= t_to)
+            count_stmt = count_stmt.where(PaymentInvoice.created_at <= t_to)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid date_to")
+
+    total_result = await db.execute(count_stmt)
+    total = int(total_result.scalar() or 0)
+
+    if sort == "created_at_asc":
+        query = query.order_by(PaymentInvoice.created_at.asc())
+    elif sort == "amount_desc":
+        query = query.order_by(PaymentInvoice.price_amount.desc())
+    elif sort == "amount_asc":
+        query = query.order_by(PaymentInvoice.price_amount.asc())
+    elif sort == "status":
+        query = query.order_by(PaymentInvoice.status.asc(), PaymentInvoice.created_at.desc())
+    else:
+        query = query.order_by(desc(PaymentInvoice.created_at))
+
+    query = query.offset((page - 1) * page_size).limit(page_size)
+    result = await db.execute(query)
+    rows = result.all()
+
+    items = [
+        DepositRow(
+            id=inv.id,
+            order_id=inv.order_id,
+            external_invoice_id=inv.external_invoice_id,
+            user_id=inv.user_id,
+            telegram_id=tg_id,
+            username=username,
+            amount=inv.price_amount,
+            asset="USDT",
+            pay_currency=inv.pay_currency,
+            network=inv.network,
+            provider=inv.provider,
+            status=inv.status,
+            created_at=inv.created_at,
+            paid_at=inv.completed_at,
+            completed_at=inv.completed_at,
+            balance_credited=inv.is_balance_applied,
+        )
+        for inv, tg_id, username in rows
+    ]
+
+    await log_admin_action(
+        db=db,
+        admin_token_id=admin_token_id,
+        action_type="VIEW_DEPOSITS",
+        entity_type="DEPOSIT_LIST",
+        entity_id=0,
+    )
+
+    return PaginatedDeposits(items=items, total=total, page=page, page_size=page_size)
+
+
+@router.get("/deposits/{deposit_id}", response_model=DepositDetail)
+async def get_deposit_detail(
+    request: Request,
+    deposit_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Детали одного пополнения (PaymentInvoice) и raw webhook payloads."""
+    admin_token_id, _ = await get_admin_context(request)
+
+    result = await db.execute(
+        select(PaymentInvoice, User.telegram_id, User.username)
+        .join(User, PaymentInvoice.user_id == User.id)
+        .where(PaymentInvoice.id == deposit_id)
+    )
+    row = result.one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="Deposit not found")
+
+    inv, tg_id, username = row
+
+    webhook_events_result = await db.execute(
+        select(PaymentWebhookEvent.payload_json)
+        .where(PaymentWebhookEvent.order_id == inv.order_id)
+        .order_by(PaymentWebhookEvent.created_at.asc())
+    )
+    raw_payloads = [r[0] for r in webhook_events_result.all()]
+
+    await log_admin_action(
+        db=db,
+        admin_token_id=admin_token_id,
+        action_type="VIEW_DEPOSIT",
+        entity_type="PAYMENT_INVOICE",
+        entity_id=deposit_id,
+    )
+
+    return DepositDetail(
+        id=inv.id,
+        order_id=inv.order_id,
+        external_invoice_id=inv.external_invoice_id,
+        invoice_url=inv.invoice_url,
+        user_id=inv.user_id,
+        telegram_id=tg_id,
+        username=username,
+        amount=inv.price_amount,
+        asset="USDT",
+        pay_currency=inv.pay_currency,
+        network=inv.network,
+        provider=inv.provider,
+        status=inv.status,
+        created_at=inv.created_at,
+        paid_at=inv.completed_at,
+        completed_at=inv.completed_at,
+        balance_credited=inv.is_balance_applied,
+        raw_webhook_payloads=raw_payloads if raw_payloads else None,
     )
 
 

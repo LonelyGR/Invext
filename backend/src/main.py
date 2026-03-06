@@ -13,12 +13,11 @@ from src.api.routers import (
     auth,
     wallet,
     user_wallets,
-    deposits,
     withdrawals,
     admin,
     invest,
-    crypto_pay,
     admin_dashboard,
+    payments,
 )
 from src.core.admin_middleware import admin_jwt_middleware
 from src.db.session import async_session_maker
@@ -60,11 +59,10 @@ app.middleware("http")(admin_jwt_middleware)
 app.include_router(auth.router)
 app.include_router(wallet.router)
 app.include_router(user_wallets.router)
-app.include_router(deposits.router)
 app.include_router(withdrawals.router)
 app.include_router(admin.router)
 app.include_router(invest.router)
-app.include_router(crypto_pay.router)
+app.include_router(payments.router)
 app.include_router(admin_dashboard.router)
 
 

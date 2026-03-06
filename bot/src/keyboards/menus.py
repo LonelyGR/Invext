@@ -80,18 +80,6 @@ def admin_menu_kb() -> InlineKeyboardMarkup:
     )
 
 
-def deposit_actions_kb(deposit_id: int) -> InlineKeyboardMarkup:
-    """Кнопки Approve / Reject для одной заявки на пополнение."""
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(text="✅ Approve", callback_data=f"admin_d_approve_{deposit_id}"),
-                InlineKeyboardButton(text="❌ Reject", callback_data=f"admin_d_reject_{deposit_id}"),
-            ],
-        ]
-    )
-
-
 def wallets_list_kb() -> InlineKeyboardMarkup:
     """Кошельки: добавить, назад."""
     return InlineKeyboardMarkup(

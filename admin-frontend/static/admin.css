@@ -359,3 +359,223 @@ tbody tr:hover .row-actions {
   color: #6b7280;
 }
 
+/* --- Status badges (deposits / payments) --- */
+
+.status-badge {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.status-paid {
+  background: rgba(22, 199, 132, 0.2);
+  color: #16c784;
+}
+
+.status-pending {
+  background: rgba(156, 163, 175, 0.25);
+  color: #9ca3af;
+}
+
+.status-expired {
+  background: rgba(234, 57, 67, 0.2);
+  color: #ea3943;
+}
+
+.status-unknown {
+  background: rgba(250, 204, 21, 0.2);
+  color: #facc15;
+}
+
+.credited-yes {
+  color: #16c784;
+  font-weight: 600;
+}
+
+.credited-no {
+  color: #6b7280;
+}
+
+/* --- Filters toolbar --- */
+
+.filters-toolbar {
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.filter-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+.filter-label select,
+.filter-label input[type="date"] {
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid #374151;
+  background: #020617;
+  color: #e5e7eb;
+  font-size: 13px;
+}
+
+#deposits-apply-filters,
+.pagination-btn {
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: none;
+  background: #2563eb;
+  color: white;
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+#deposits-apply-filters:hover,
+.pagination-btn:hover {
+  background: #1d4ed8;
+}
+
+.pagination-toolbar {
+  margin-top: 8px;
+  align-items: center;
+  gap: 12px;
+}
+
+.pagination-info {
+  font-size: 13px;
+  color: #9ca3af;
+}
+
+.section-desc {
+  font-size: 13px;
+  color: #9ca3af;
+  margin: -8px 0 12px;
+}
+
+/* --- Modal --- */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 24px;
+  box-sizing: border-box;
+}
+
+.modal-overlay.hidden {
+  display: none;
+}
+
+.modal-content {
+  background: #111827;
+  border-radius: 12px;
+  box-shadow: 0 25px 50px rgba(0, 0, 0, 0.5);
+  border: 1px solid #1f2937;
+  max-width: 480px;
+  width: 100%;
+  max-height: 90vh;
+  overflow: auto;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid #1f2937;
+}
+
+.modal-header h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  color: #9ca3af;
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+  margin: 0;
+  width: auto;
+}
+
+.modal-close:hover {
+  color: #e5e7eb;
+}
+
+.modal-body {
+  padding: 20px;
+}
+
+.detail-dl {
+  margin: 0;
+}
+
+.detail-dl dt {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #9ca3af;
+  margin-top: 12px;
+}
+
+.detail-dl dt:first-child {
+  margin-top: 0;
+}
+
+.detail-dl dd {
+  margin: 4px 0 0;
+  font-size: 14px;
+}
+
+.detail-dl .link-user {
+  color: #60a5fa;
+  text-decoration: none;
+  margin-left: 8px;
+}
+
+.detail-dl .link-user:hover {
+  text-decoration: underline;
+}
+
+.cell-address {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.btn-approve {
+  background: #16c784 !important;
+  color: #0f172a !important;
+}
+
+.btn-approve:hover {
+  background: #13a870 !important;
+}
+
+.btn-reject {
+  background: #374151 !important;
+  color: #e5e7eb !important;
+}
+
+.btn-reject:hover {
+  background: #ea3943 !important;
+  color: #fff !important;
+}
+

@@ -14,9 +14,10 @@
 """
 from datetime import datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from sqlalchemy import BigInteger, DateTime, ForeignKey, Numeric, String
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -36,6 +37,11 @@ class LedgerTransaction(Base):
 
     type: Mapped[str] = mapped_column(String(32), nullable=False)
     amount_usdt: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
+
+    # Payment provider and external id for audit (e.g. nowpayments, invoice_id/order_id)
+    provider: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, index=True)
+    external_payment_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, index=True)
+    metadata_json: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
 
     # Источник операции (ранее использовался для блокчейн-депозитов, теперь не используется)
     chain_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True, index=True)

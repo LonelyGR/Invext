@@ -1,8 +1,9 @@
 """
 Схемы для балансов (ledger) и сохранённых кошельков пользователя.
 """
+from datetime import datetime
 from decimal import Decimal
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -35,3 +36,22 @@ class BalancesResponse(BaseModel):
     # Для удобства можно вернуть и как dict
     def to_dict(self) -> Dict[str, Decimal]:
         return {"USDT": self.USDT, "USDC": self.USDC}
+
+
+class InvoiceListItem(BaseModel):
+    """Один инвойс в списке «Мои пополнения» (NOWPayments)."""
+    id: int
+    order_id: str
+    amount: Decimal
+    asset: str = "USDT"
+    pay_currency: str = "usdtbsc"
+    network: Optional[str] = None
+    status: str
+    created_at: datetime
+    paid_at: Optional[datetime] = None
+    balance_credited: bool
+
+
+class InvoicesListResponse(BaseModel):
+    """Список пополнений пользователя (NOWPayments)."""
+    items: List[InvoiceListItem]

@@ -5,6 +5,6 @@ from sqlalchemy.orm import DeclarativeBase
 
 
 class Base(DeclarativeBase):
-    """Базовый класс моделей — от него наследуются User, DepositRequest и т.д."""
+    """Базовый класс моделей — от него наследуются все ORM-модели проекта."""
 
     pass

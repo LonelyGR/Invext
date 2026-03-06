@@ -121,31 +121,6 @@ class BackendClient:
                 "USDC": Decimal(str(data.get("USDC", 0))),
             }
 
-    # --- Deposits ---
-    async def create_deposit_request(
-        self, telegram_id: int, currency: str, amount: Decimal
-    ) -> Dict[str, Any]:
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            r = await client.post(
-                self._url("/v1/deposits/request"),
-                json={
-                    "telegram_id": telegram_id,
-                    "currency": currency,
-                    "amount": str(amount),
-                },
-            )
-            r.raise_for_status()
-            return r.json()
-
-    async def get_my_deposits(self, telegram_id: int) -> List[Dict[str, Any]]:
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            r = await client.get(
-                self._url("/v1/deposits/my"),
-                params={"telegram_id": telegram_id},
-            )
-            r.raise_for_status()
-            return r.json()
-
     # --- Withdrawals ---
     async def create_withdraw_request(
         self, telegram_id: int, currency: str, amount: Decimal, address: str
@@ -172,34 +147,48 @@ class BackendClient:
             r.raise_for_status()
             return r.json()
 
-    # --- Crypto Pay deposits (invoice-based) ---
-    async def create_crypto_invoice(
+    # --- NOWPayments deposits (invoice-based) ---
+    async def create_deposit_invoice(
         self,
         telegram_id: int,
         amount: Decimal,
-        asset: str = "USDT",
     ) -> Dict[str, Any]:
-        """Создать инвойс через Crypto Pay для пополнения баланса."""
+        """Создать инвойс NOWPayments для пополнения баланса (USDT BEP20). Сумма в USD."""
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             r = await client.post(
-                self._url("/crypto/invoices"),
+                self._url("/v1/payments/deposit/create-invoice"),
                 json={
                     "telegram_id": telegram_id,
                     "amount": str(amount),
-                    "asset": asset,
                 },
             )
             r.raise_for_status()
             return r.json()
 
-    async def sync_crypto_invoice(self, invoice_id: int) -> Dict[str, Any]:
-        """Ручная проверка статуса инвойса (без вебхука)."""
+    async def get_deposit_invoice(
+        self, invoice_id: int, telegram_id: int
+    ) -> Dict[str, Any]:
+        """Получить статус одного пополнения по внутреннему id."""
         async with httpx.AsyncClient(timeout=self.timeout) as client:
-            r = await client.post(
-                self._url(f"/crypto/invoices/{invoice_id}/sync"),
+            r = await client.get(
+                self._url(f"/v1/payments/deposit/{invoice_id}"),
+                params={"telegram_id": telegram_id},
             )
             r.raise_for_status()
             return r.json()
+
+    async def get_my_invoices(
+        self, telegram_id: int, limit: int = 15
+    ) -> List[Dict[str, Any]]:
+        """Список пополнений пользователя (NOWPayments)."""
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            r = await client.get(
+                self._url("/v1/wallet/invoices"),
+                params={"telegram_id": telegram_id, "limit": limit},
+            )
+            r.raise_for_status()
+            data = r.json()
+            return data.get("items", [])
 
     async def invest(
         self,
@@ -218,39 +207,6 @@ class BackendClient:
             return r.json()
 
     # --- Admin ---
-    async def admin_pending_deposits(self) -> List[Dict[str, Any]]:
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            r = await client.get(
-                self._url("/v1/admin/deposits/pending"),
-                headers=self._admin_headers,
-            )
-            r.raise_for_status()
-            return r.json()
-
-    async def admin_approve_deposit(
-        self, deposit_id: int, decided_by_telegram_id: int
-    ) -> Dict[str, Any]:
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            r = await client.post(
-                self._url(f"/v1/admin/deposits/{deposit_id}/approve"),
-                params={"decided_by_telegram_id": decided_by_telegram_id},
-                headers=self._admin_headers,
-            )
-            r.raise_for_status()
-            return r.json()
-
-    async def admin_reject_deposit(
-        self, deposit_id: int, decided_by_telegram_id: int
-    ) -> Dict[str, Any]:
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            r = await client.post(
-                self._url(f"/v1/admin/deposits/{deposit_id}/reject"),
-                params={"decided_by_telegram_id": decided_by_telegram_id},
-                headers=self._admin_headers,
-            )
-            r.raise_for_status()
-            return r.json()
-
     async def admin_pending_withdrawals(self) -> List[Dict[str, Any]]:
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             r = await client.get(

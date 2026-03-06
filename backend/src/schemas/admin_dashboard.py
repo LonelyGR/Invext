@@ -106,3 +106,52 @@ class PaginatedAdminLogs(BaseModel):
     page: int
     page_size: int
 
+
+class DepositRow(BaseModel):
+    """Строка списка пополнений (PaymentInvoice, NOWPayments)."""
+    id: int
+    order_id: str
+    external_invoice_id: Optional[str] = None
+    user_id: int
+    telegram_id: int
+    username: Optional[str] = None
+    amount: Decimal
+    asset: str  # display: USDT
+    pay_currency: str = "usdtbsc"
+    network: Optional[str] = None
+    provider: str = "nowpayments"
+    status: str
+    created_at: datetime
+    paid_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    balance_credited: bool
+
+
+class DepositDetail(BaseModel):
+    """Детали одного пополнения."""
+    id: int
+    order_id: str
+    external_invoice_id: Optional[str] = None
+    invoice_url: Optional[str] = None
+    user_id: int
+    telegram_id: int
+    username: Optional[str] = None
+    amount: Decimal
+    asset: str
+    pay_currency: str = "usdtbsc"
+    network: Optional[str] = None
+    provider: str = "nowpayments"
+    status: str
+    created_at: datetime
+    paid_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    balance_credited: bool
+    raw_webhook_payloads: Optional[List[dict]] = None
+
+
+class PaginatedDeposits(BaseModel):
+    items: List[DepositRow]
+    total: int
+    page: int
+    page_size: int
+

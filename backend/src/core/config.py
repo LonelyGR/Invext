@@ -28,9 +28,22 @@ class Settings(BaseSettings):
     # --- Bot integration (for notifications from backend) ---
     bot_token: str = Field(..., alias="BOT_TOKEN")
 
-    # --- Crypto Pay (invoice-based deposits) ---
-    crypto_pay_token: str = Field(..., alias="CRYPTO_PAY_TOKEN")
+    # --- Crypto Pay (invoice-based deposits) — deprecated, use NOWPayments ---
+    crypto_pay_token: str = Field(default="", alias="CRYPTO_PAY_TOKEN")
     app_url: str = Field(..., alias="APP_URL")
+
+    # --- NOWPayments (invoice-based deposits) ---
+    nowpayments_api_key: str = Field(default="", alias="NOWPAYMENTS_API_KEY")
+    nowpayments_ipn_secret: str = Field(default="", alias="NOWPAYMENTS_IPN_SECRET")
+    nowpayments_base_url: str = Field(
+        default="https://api.nowpayments.io",
+        alias="NOWPAYMENTS_BASE_URL",
+    )
+    nowpayments_callback_url: str = Field(default="", alias="NOWPAYMENTS_CALLBACK_URL")
+    nowpayments_success_url: str = Field(default="", alias="NOWPAYMENTS_SUCCESS_URL")
+    nowpayments_cancel_url: str = Field(default="", alias="NOWPAYMENTS_CANCEL_URL")
+    default_pay_currency: str = Field(default="usdtbsc", alias="DEFAULT_PAY_CURRENCY")
+    default_pay_network: str = Field(default="BSC", alias="DEFAULT_PAY_NETWORK")
 
     # --- Admin dashboard /database ---
     admin_jwt_secret: str = Field(..., alias="ADMIN_JWT_SECRET")

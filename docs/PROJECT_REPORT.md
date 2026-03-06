@@ -30,7 +30,7 @@
 - **Модели (SQLAlchemy 2, `src/models`):**
   - `User` — пользователи, реферальные связи, поле `balance_usdt`.
   - `UserWallet` — сохранённые адреса кошельков пользователей.
-  - `DepositRequest`, `WithdrawRequest` — заявки на пополнение/вывод.
+  - `WithdrawRequest` — заявки на вывод.
   - `WalletTransaction` — история операций по заявкам (DEPOSIT / WITHDRAW, в основном для USDC и legacy‑учёта).
   - `LedgerTransaction` — журнал операций по USDT (DEPOSIT / WITHDRAW / INVEST).
   - `Invoice` — инвойсы Crypto Pay (invoice_id, amount, asset, status).

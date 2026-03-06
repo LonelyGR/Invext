@@ -13,7 +13,6 @@ from src.core.config import get_settings
 from src.db.base import Base
 from src.models import (
     User,
-    DepositRequest,
     WithdrawRequest,
     WalletTransaction,
     LedgerTransaction,

@@ -13,12 +13,12 @@ from sqlalchemy.sql import func
 from src.db.base import Base
 
 if TYPE_CHECKING:
-    from src.models.deposit_request import DepositRequest
     from src.models.user_wallet import UserWallet
     from src.models.withdraw_request import WithdrawRequest
     from src.models.wallet_transaction import WalletTransaction
     from src.models.ledger_transaction import LedgerTransaction
     from src.models.invoice import Invoice
+    from src.models.payment_invoice import PaymentInvoice
     from src.models.deal_investment import DealInvestment
 
 
@@ -44,7 +44,6 @@ class User(Base):
     # Связи
     referrer: Mapped[Optional["User"]] = relationship("User", remote_side=[id], back_populates="referrals")
     referrals: Mapped[List["User"]] = relationship("User", back_populates="referrer")
-    deposit_requests: Mapped[List["DepositRequest"]] = relationship("DepositRequest", back_populates="user")
     withdraw_requests: Mapped[List["WithdrawRequest"]] = relationship("WithdrawRequest", back_populates="user")
     wallet_transactions: Mapped[List["WalletTransaction"]] = relationship(
         "WalletTransaction", back_populates="user"
@@ -57,6 +56,9 @@ class User(Base):
     )
     invoices: Mapped[List["Invoice"]] = relationship(
         "Invoice", back_populates="user", cascade="all, delete-orphan"
+    )
+    payment_invoices: Mapped[List["PaymentInvoice"]] = relationship(
+        "PaymentInvoice", back_populates="user", cascade="all, delete-orphan"
     )
     deal_investments: Mapped[List["DealInvestment"]] = relationship(
         "DealInvestment", back_populates="user", cascade="all, delete-orphan"

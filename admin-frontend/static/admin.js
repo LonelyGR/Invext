@@ -166,7 +166,7 @@ async function loadUsers() {
 }
 
 function switchSection(hash) {
-  const sections = ["dashboard", "users", "deals", "withdrawals", "logs", "user"];
+  const sections = ["dashboard", "users", "deals", "deposits", "withdrawals", "logs", "user"];
   const sidebarLinks = document.querySelectorAll(".sidebar nav a");
   sections.forEach((name) => {
     const el = document.getElementById(`${name}-section`);
@@ -197,6 +197,8 @@ function switchSection(hash) {
     loadDashboard();
   } else if (hash === "#deals") {
     loadDeals();
+  } else if (hash === "#deposits") {
+    loadDeposits();
   } else if (hash.startsWith("#user-")) {
     const id = hash.replace("#user-", "");
     loadUserDetail(id);
@@ -299,6 +301,238 @@ async function loadDeals() {
     section.innerHTML = `<h1>Сделки</h1><div class="error">${e.message}</div>`;
   }
 }
+
+function buildDepositsQuery(page = 1) {
+  const statusEl = document.getElementById("deposits-status-filter");
+  const dateFromEl = document.getElementById("deposits-date-from");
+  const dateToEl = document.getElementById("deposits-date-to");
+  const sortEl = document.getElementById("deposits-sort");
+  const orderIdEl = document.getElementById("deposits-order-id");
+  const externalIdEl = document.getElementById("deposits-external-id");
+  const userIdEl = document.getElementById("deposits-user-id");
+  const params = new URLSearchParams();
+  params.set("page", String(page));
+  params.set("page_size", "25");
+  if (statusEl && statusEl.value) params.set("status_filter", statusEl.value);
+  if (dateFromEl && dateFromEl.value) params.set("date_from", dateFromEl.value);
+  if (dateToEl && dateToEl.value) params.set("date_to", dateToEl.value);
+  if (orderIdEl && orderIdEl.value.trim()) params.set("order_id_search", orderIdEl.value.trim());
+  if (externalIdEl && externalIdEl.value.trim()) params.set("external_id_search", externalIdEl.value.trim());
+  if (userIdEl && userIdEl.value.trim()) params.set("user_id_filter", userIdEl.value.trim());
+  params.set("sort", sortEl ? sortEl.value : "created_at_desc");
+  return params.toString();
+}
+
+function statusBadgeClass(status) {
+  const s = (status || "").toLowerCase();
+  if (s === "finished" || s === "paid") return "status-badge status-paid";
+  if (s === "waiting" || s === "pending" || s === "partially_paid") return "status-badge status-pending";
+  if (s === "expired" || s === "failed") return "status-badge status-expired";
+  return "status-badge status-unknown";
+}
+
+function statusLabel(status) {
+  const s = (status || "").toLowerCase();
+  if (s === "finished" || s === "paid") return "Оплачен";
+  if (s === "waiting" || s === "pending") return "Ожидает";
+  if (s === "partially_paid") return "Частично оплачен";
+  if (s === "expired") return "Истёк";
+  if (s === "failed") return "Ошибка";
+  return status || "—";
+}
+
+async function loadDeposits(page = 1) {
+  const section = document.getElementById("deposits-section");
+  section.innerHTML = "<h1>Пополнения</h1><p>Загрузка...</p>";
+  try {
+    const q = buildDepositsQuery(page);
+    const data = await apiRequest(`/deposits?${q}`);
+    const items = data.items || [];
+    const total = data.total || 0;
+    const pageSize = data.page_size || 25;
+    const currentPage = data.page || 1;
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
+    const rows = items
+      .map(
+        (d) => `
+      <tr class="table-row-link deposit-row" data-deposit-id="${d.id}">
+        <td>${d.id}</td>
+        <td><code class="order-id-cell">${(d.order_id || "").slice(0, 24)}${(d.order_id && d.order_id.length > 24) ? "…" : ""}</code></td>
+        <td>${d.telegram_id}${d.username ? ` @${d.username}` : ""}</td>
+        <td class="amount-positive">+${d.amount} ${d.asset}</td>
+        <td><span class="${statusBadgeClass(d.status)}">${statusLabel(d.status)}</span></td>
+        <td>${d.balance_credited ? '<span class="credited-yes">Да</span>' : '<span class="credited-no">Нет</span>'}</td>
+        <td>${d.created_at ? new Date(d.created_at).toLocaleString() : ""}</td>
+        <td>${d.paid_at ? new Date(d.paid_at).toLocaleString() : (d.completed_at ? new Date(d.completed_at).toLocaleString() : "—")}</td>
+      </tr>`
+      )
+      .join("");
+
+    let paginationHtml = "";
+    if (totalPages > 1) {
+      let paginationParts = [];
+      if (currentPage > 1) {
+        paginationParts.push(`<button type="button" class="pagination-btn" data-page="${currentPage - 1}">← Назад</button>`);
+      }
+      paginationParts.push(`<span class="pagination-info">Стр. ${currentPage} из ${totalPages} (всего ${total})</span>`);
+      if (currentPage < totalPages) {
+        paginationParts.push(`<button type="button" class="pagination-btn" data-page="${currentPage + 1}">Вперёд →</button>`);
+      }
+      paginationHtml = `<div class="toolbar pagination-toolbar">${paginationParts.join(" ")}</div>`;
+    }
+
+    section.innerHTML = `
+      <h1>Пополнения</h1>
+      <p class="section-desc">NOWPayments (USDT BEP20). Баланс начислен при статусе «Оплачен» (finished).</p>
+      <div class="toolbar filters-toolbar">
+        <label class="filter-label">
+          Статус
+          <select id="deposits-status-filter">
+            <option value="">Все</option>
+            <option value="waiting">Ожидает</option>
+            <option value="finished">Оплачен</option>
+            <option value="partially_paid">Частично оплачен</option>
+            <option value="expired">Истёк</option>
+            <option value="failed">Ошибка</option>
+          </select>
+        </label>
+        <label class="filter-label">
+          User ID
+          <input type="number" id="deposits-user-id" placeholder="ID пользователя" min="1" />
+        </label>
+        <label class="filter-label">
+          Order ID
+          <input type="text" id="deposits-order-id" placeholder="order_id" />
+        </label>
+        <label class="filter-label">
+          External ID
+          <input type="text" id="deposits-external-id" placeholder="external_invoice_id" />
+        </label>
+        <label class="filter-label">
+          Дата от
+          <input type="date" id="deposits-date-from" />
+        </label>
+        <label class="filter-label">
+          Дата до
+          <input type="date" id="deposits-date-to" />
+        </label>
+        <label class="filter-label">
+          Сортировка
+          <select id="deposits-sort">
+            <option value="created_at_desc">Сначала новые</option>
+            <option value="created_at_asc">Сначала старые</option>
+            <option value="amount_desc">Сумма ↓</option>
+            <option value="amount_asc">Сумма ↑</option>
+            <option value="status">По статусу</option>
+          </select>
+        </label>
+        <button type="button" id="deposits-apply-filters">Применить</button>
+      </div>
+      ${paginationHtml}
+      <div class="table-wrapper">
+        <div class="table-wrapper-inner">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Order ID</th>
+                <th>Пользователь</th>
+                <th>Сумма</th>
+                <th>Статус</th>
+                <th>Баланс начислен</th>
+                <th>Создан</th>
+                <th>Завершён</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      </div>
+      ${paginationHtml}
+    `;
+
+    document.getElementById("deposits-apply-filters").addEventListener("click", () => loadDeposits(1));
+    section.querySelectorAll("button.pagination-btn").forEach((btn) => {
+      btn.addEventListener("click", () => loadDeposits(parseInt(btn.getAttribute("data-page"), 10)));
+    });
+    section.querySelectorAll("tr.deposit-row").forEach((row) => {
+      row.addEventListener("click", () => {
+        const id = row.getAttribute("data-deposit-id");
+        if (id) openDepositDetail(id);
+      });
+    });
+  } catch (e) {
+    section.innerHTML = `<h1>Пополнения</h1><div class="error">${e.message}</div>`;
+  }
+}
+
+function closeDepositModal() {
+  const modal = document.getElementById("deposit-detail-modal");
+  if (modal) {
+    modal.classList.add("hidden");
+    modal.setAttribute("aria-hidden", "true");
+  }
+}
+
+async function openDepositDetail(id) {
+  const modal = document.getElementById("deposit-detail-modal");
+  const bodyEl = document.getElementById("deposit-detail-body");
+  const idEl = document.getElementById("modal-deposit-id");
+  if (!modal || !bodyEl || !idEl) return;
+  idEl.textContent = id;
+  bodyEl.innerHTML = "<p>Загрузка...</p>";
+  modal.classList.remove("hidden");
+  modal.setAttribute("aria-hidden", "false");
+  try {
+    const d = await apiRequest(`/deposits/${id}`);
+    const invoiceUrlHtml = d.invoice_url
+      ? `<a href="${d.invoice_url}" target="_blank" rel="noopener">${d.invoice_url.slice(0, 50)}…</a>`
+      : "—";
+    let webhookHtml = "";
+    if (d.raw_webhook_payloads && d.raw_webhook_payloads.length > 0) {
+      webhookHtml = `
+        <dt>Webhook payloads</dt>
+        <dd><pre class="raw-json">${d.raw_webhook_payloads.map((p) => JSON.stringify(p, null, 2)).join("\n\n---\n\n")}</pre></dd>
+      `;
+    }
+    bodyEl.innerHTML = `
+      <dl class="detail-dl">
+        <dt>Order ID</dt>
+        <dd><code>${d.order_id || "—"}</code></dd>
+        <dt>External invoice ID</dt>
+        <dd>${d.external_invoice_id || "—"}</dd>
+        <dt>Ссылка на оплату</dt>
+        <dd>${invoiceUrlHtml}</dd>
+        <dt>Провайдер / сеть</dt>
+        <dd>${d.provider || "nowpayments"} / ${d.network || "BSC"}</dd>
+        <dt>Пользователь</dt>
+        <dd>${d.telegram_id}${d.username ? ` @${d.username}` : ""} <a href="#user-${d.user_id}" class="link-user">Перейти к пользователю</a></dd>
+        <dt>Сумма</dt>
+        <dd class="amount-positive">+${d.amount} ${d.asset} (${d.pay_currency || "usdtbsc"})</dd>
+        <dt>Статус</dt>
+        <dd><span class="${statusBadgeClass(d.status)}">${statusLabel(d.status)}</span></dd>
+        <dt>Баланс начислен</dt>
+        <dd>${d.balance_credited ? '<span class="credited-yes">Да</span>' : '<span class="credited-no">Нет</span>'}</dd>
+        <dt>Создан</dt>
+        <dd>${d.created_at ? new Date(d.created_at).toLocaleString() : "—"}</dd>
+        <dt>Завершён</dt>
+        <dd>${d.completed_at ? new Date(d.completed_at).toLocaleString() : (d.paid_at ? new Date(d.paid_at).toLocaleString() : "—")}</dd>
+        ${webhookHtml}
+      </dl>
+    `;
+    modal.querySelector(".link-user")?.addEventListener("click", () => {
+      closeDepositModal();
+    });
+  } catch (e) {
+    bodyEl.innerHTML = `<div class="error">${e.message}</div>`;
+  }
+}
+
+document.getElementById("modal-deposit-close")?.addEventListener("click", closeDepositModal);
+document.getElementById("deposit-detail-modal")?.addEventListener("click", (e) => {
+  if (e.target.id === "deposit-detail-modal") closeDepositModal();
+});
 
 async function loadUserDetail(userId) {
   const section = document.getElementById("user-section");
@@ -426,11 +660,20 @@ async function loadUserDetail(userId) {
   }
 }
 
+function withdrawalStatusBadge(status) {
+  const s = (status || "").toUpperCase();
+  if (s === "PENDING") return "status-badge status-pending";
+  if (s === "APPROVED") return "status-badge status-paid";
+  if (s === "REJECTED") return "status-badge status-expired";
+  return "status-badge status-unknown";
+}
+
 async function loadWithdrawals() {
   const section = document.getElementById("withdrawals-section");
   section.innerHTML = "<h1>Выводы</h1><p>Загрузка...</p>";
   try {
-    const data = await apiRequest("/withdrawals?status=PENDING");
+    const statusParam = document.getElementById("withdrawals-status-filter")?.value || "PENDING";
+    const data = await apiRequest(`/withdrawals?status=${statusParam}`);
     const rows = data.items
       .map(
         (w) => `
@@ -438,18 +681,29 @@ async function loadWithdrawals() {
         <td>${w.id}</td>
         <td>${w.telegram_id}</td>
         <td>${w.username || ""}</td>
-        <td>${w.amount} ${w.currency}</td>
-        <td>${w.address}</td>
-        <td>${w.status}</td>
+        <td class="amount-negative">−${w.amount} ${w.currency}</td>
+        <td class="cell-address">${w.address}</td>
+        <td><span class="${withdrawalStatusBadge(w.status)}">${w.status}</span></td>
         <td>
-          <button data-id="${w.id}" data-action="approve">Approve</button>
-          <button data-id="${w.id}" data-action="reject">Reject</button>
+          ${w.status === "PENDING" ? `<button data-id="${w.id}" data-action="approve" class="btn-approve">Подтвердить</button> <button data-id="${w.id}" data-action="reject" class="btn-reject">Отклонить</button>` : "—"}
         </td>
       </tr>`
       )
       .join("");
     section.innerHTML = `
-      <h1>Выводы (PENDING)</h1>
+      <h1>Выводы</h1>
+      <p class="section-desc">Заявки на вывод. Фильтр по статусу.</p>
+      <div class="toolbar filters-toolbar">
+        <label class="filter-label">
+          Статус
+          <select id="withdrawals-status-filter">
+            <option value="PENDING" ${statusParam === "PENDING" ? "selected" : ""}>Ожидают</option>
+            <option value="APPROVED" ${statusParam === "APPROVED" ? "selected" : ""}>Подтверждённые</option>
+            <option value="REJECTED" ${statusParam === "REJECTED" ? "selected" : ""}>Отклонённые</option>
+          </select>
+        </label>
+        <button type="button" id="withdrawals-apply-filters">Применить</button>
+      </div>
       <div class="table-wrapper">
         <div class="table-wrapper-inner">
           <table>
@@ -470,6 +724,7 @@ async function loadWithdrawals() {
       </div>
     `;
 
+    document.getElementById("withdrawals-apply-filters")?.addEventListener("click", () => loadWithdrawals());
     section.querySelectorAll("button[data-id]").forEach((btn) => {
       btn.onclick = async () => {
         const id = btn.getAttribute("data-id");

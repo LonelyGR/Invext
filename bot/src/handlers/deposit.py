@@ -1,5 +1,5 @@
 """
-Пополнение баланса через инвойсы Crypto Pay (CryptoBot).
+Пополнение баланса через NOWPayments (USDT BEP20).
 """
 from decimal import Decimal, InvalidOperation
 
@@ -20,6 +20,7 @@ class DepositStates(StatesGroup):
 
 
 def _invoice_kb(pay_url: str, invoice_id: int) -> InlineKeyboardMarkup:
+    """invoice_id — внутренний id (PaymentInvoice.id) для кнопки «Проверить оплату»."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="💳 Оплатить", url=pay_url)],
@@ -28,15 +29,27 @@ def _invoice_kb(pay_url: str, invoice_id: int) -> InlineKeyboardMarkup:
     )
 
 
+def _deposit_history_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="📋 История пополнений", callback_data="deposit_history")],
+        ]
+    )
+
+
 @router.message(F.text == "💳 Пополнить")
 async def deposit_start(message: Message, state: FSMContext):
-    """Начать пополнение: спросить сумму для инвойса Crypto Pay."""
+    """Начать пополнение: спросить сумму для инвойса NOWPayments (USDT BEP20)."""
     await state.clear()
     await state.set_state(DepositStates.entering_amount)
     await message.answer(
-        "Введите сумму пополнения в USDT.\n"
+        "Введите сумму пополнения в USD (оплата в USDT в сети BEP20/BSC).\n"
         f"Минимум: {MIN_DEPOSIT}, максимум: {MAX_DEPOSIT}",
         reply_markup=main_menu_kb(),
+    )
+    await message.answer(
+        "Ниже можно открыть историю своих пополнений.",
+        reply_markup=_deposit_history_kb(),
     )
 
 
@@ -57,7 +70,7 @@ async def deposit_amount_entered(message: Message, state: FSMContext):
     telegram_id = message.from_user.id
 
     try:
-        invoice = await api.create_crypto_invoice(telegram_id, amount, asset="USDT")
+        invoice = await api.create_deposit_invoice(telegram_id, amount)
     except Exception as e:
         err = str(e)
         if hasattr(e, "response") and getattr(e, "response", None) is not None:
@@ -72,35 +85,101 @@ async def deposit_amount_entered(message: Message, state: FSMContext):
         return
 
     invoice_id = invoice.get("invoice_id")
-    pay_url = invoice.get("bot_invoice_url") or invoice.get("pay_url")
+    pay_url = invoice.get("invoice_url")
 
     if not invoice_id or not pay_url:
-        await message.answer("Не удалось получить ссылку на оплату от Crypto Pay.", reply_markup=main_menu_kb())
+        await message.answer("Не удалось получить ссылку на оплату.", reply_markup=main_menu_kb())
         await state.clear()
         return
 
     await message.answer(
-        "💳 <b>Пополнение USDT через Crypto Pay</b>\n\n"
-        f"Сумма: <b>{amount}</b> USDT\n\n"
-        "1) Нажмите «Оплатить» и завершите оплату в CryptoBot.\n"
-        "2) Затем нажмите «Проверить оплату».\n",
+        "💳 <b>Пополнение через NOWPayments (USDT BEP20)</b>\n\n"
+        f"Сумма: <b>{amount}</b> USD → оплата в USDT (сеть BSC)\n\n"
+        "1) Нажмите «Оплатить» и завершите перевод USDT.\n"
+        "2) После оплаты нажмите «Проверить оплату».\n",
         parse_mode="HTML",
         reply_markup=_invoice_kb(pay_url, int(invoice_id)),
     )
     await state.clear()
 
 
+@router.callback_query(F.data == "deposit_history")
+async def deposit_history(callback: CallbackQuery):
+    """Показать историю пополнений пользователя."""
+    telegram_id = callback.from_user.id if callback.from_user else 0
+    try:
+        items = await api.get_my_invoices(telegram_id, limit=15)
+    except Exception as e:
+        err = str(e)
+        if hasattr(e, "response") and getattr(e, "response", None) is not None:
+            try:
+                body = e.response.json()
+                if isinstance(body, dict) and "detail" in body:
+                    err = body["detail"] if isinstance(body["detail"], str) else str(body["detail"])
+            except Exception:
+                pass
+        await callback.answer(f"Ошибка: {err}", show_alert=True)
+        return
+
+    if not items:
+        await callback.message.edit_text(
+            "У вас пока нет пополнений.\n\nВведите сумму выше, чтобы создать инвойс на пополнение.",
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_menu")],
+                ]
+            ),
+        )
+        await callback.answer()
+        return
+
+    lines = ["📋 <b>История пополнений</b> (USDT BEP20)\n"]
+    status_ru = {
+        "finished": "✅ Оплачен",
+        "waiting": "⏳ Ожидает",
+        "partially_paid": "⏳ Частично оплачен",
+        "expired": "❌ Истёк",
+        "failed": "❌ Ошибка",
+    }
+    for inv in items:
+        st = status_ru.get(inv.get("status", "").lower(), inv.get("status", ""))
+        cred = " (баланс начислен)" if inv.get("balance_credited") else ""
+        dt_str = ""
+        if inv.get("created_at"):
+            try:
+                dt_str = " " + inv["created_at"][:16].replace("T", " ")
+            except Exception:
+                dt_str = ""
+        lines.append(
+            f"• +{inv.get('amount', 0)} USDT — {st}{cred}{dt_str}"
+        )
+    text = "\n".join(lines)
+    if len(text) > 4000:
+        text = "\n".join(lines[:12]) + "\n\n… и ещё."
+    await callback.message.edit_text(
+        text,
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_menu")],
+            ]
+        ),
+    )
+    await callback.answer()
+
+
 @router.callback_query(F.data.startswith("check_invoice_"))
 async def check_invoice_status(callback: CallbackQuery):
-    """Ручная проверка статуса инвойса (без вебхука)."""
+    """Проверка статуса пополнения (GET deposit by id)."""
     try:
         invoice_id = int(callback.data.replace("check_invoice_", ""))
     except ValueError:
         await callback.answer("Некорректный инвойс.", show_alert=True)
         return
 
+    telegram_id = callback.from_user.id if callback.from_user else 0
     try:
-        invoice = await api.sync_crypto_invoice(invoice_id)
+        invoice = await api.get_deposit_invoice(invoice_id, telegram_id)
     except Exception as e:
         err = str(e)
         if hasattr(e, "response") and getattr(e, "response", None) is not None:
@@ -114,12 +193,13 @@ async def check_invoice_status(callback: CallbackQuery):
         return
 
     status = (invoice.get("status") or "").lower()
-    if status == "paid":
+    balance_credited = invoice.get("balance_credited", False)
+    if status == "finished" or balance_credited:
         await callback.message.edit_text(
-            "✅ Оплата получена, баланс будет обновлён.\n"
+            "✅ Оплата получена, баланс начислен.\n"
             "Проверьте раздел «Профиль», чтобы увидеть новый баланс.",
             reply_markup=main_menu_kb(),
         )
         await callback.answer()
     else:
-        await callback.answer("Инвойс ещё не оплачен или не подтверждён.", show_alert=True)
+        await callback.answer("Инвойс ещё не оплачен или не подтверждён в сети.", show_alert=True)

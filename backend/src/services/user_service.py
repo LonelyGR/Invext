@@ -10,9 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.user import User
 from src.models.wallet_transaction import WalletTransaction
-from src.models.deposit_request import DepositRequest
 from src.models.withdraw_request import WithdrawRequest
 from src.models.ledger_transaction import LedgerTransaction
+from src.models.payment_invoice import PaymentInvoice
 from src.services.ledger_service import (
     LEDGER_TYPE_DEPOSIT,
     LEDGER_TYPE_WITHDRAW,
@@ -183,12 +183,16 @@ async def get_user_with_stats(db: AsyncSession, telegram_id: int) -> Optional[di
             )
         )
     )
-    deposits_count = (await db.execute(
-        select(func.count(DepositRequest.id)).where(DepositRequest.user_id == user.id)
-    )).scalar() or 0
-    withdrawals_count = (await db.execute(
+
+    deposits_count_res = await db.execute(
+        select(func.count(PaymentInvoice.id)).where(PaymentInvoice.user_id == user.id)
+    )
+    deposits_count = deposits_count_res.scalar() or 0
+
+    withdrawals_count_res = await db.execute(
         select(func.count(WithdrawRequest.id)).where(WithdrawRequest.user_id == user.id)
-    )).scalar() or 0
+    )
+    withdrawals_count = withdrawals_count_res.scalar() or 0
 
     return {
         "user": user,
