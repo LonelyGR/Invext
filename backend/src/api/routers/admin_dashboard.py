@@ -356,7 +356,7 @@ async def list_deals(
     admin_token_id, _ = await get_admin_context(request)
 
     result = await db.execute(
-        select(Deal).order_by(desc(Deal.created_at))
+        select(Deal).order_by(desc(Deal.opened_at))
     )
     deals = result.scalars().all()
 
