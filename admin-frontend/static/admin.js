@@ -70,7 +70,7 @@ async function loadDashboard() {
           <div class="stat-value">${data.pending_withdrawals_count}</div>
         </div>
         <div class="stat-card stat-wide">
-          <div class="stat-label">Сделка</div>
+          <div class="stat-label">Текущая сделка</div>
           <div class="stat-value">
             ${
               data.active_deal_number
@@ -91,7 +91,10 @@ async function loadUsers() {
   section.innerHTML = `
     <h1>Пользователи</h1>
     <div class="toolbar">
-      <input id="users-search" type="text" placeholder="Поиск по username / Telegram ID" />
+      <div class="search-field">
+        <span class="search-field-icon">🔍</span>
+        <input id="users-search" type="text" placeholder="Поиск по username / Telegram ID" />
+      </div>
       <button id="users-search-btn">Искать</button>
     </div>
     <p>Загрузка...</p>
@@ -120,22 +123,29 @@ async function loadUsers() {
     section.innerHTML = `
       <h1>Пользователи</h1>
       <div class="toolbar">
-        <input id="users-search" type="text" placeholder="Поиск по username / Telegram ID" />
+        <div class="search-field">
+          <span class="search-field-icon">🔍</span>
+          <input id="users-search" type="text" placeholder="Поиск по username / Telegram ID" />
+        </div>
         <button id="users-search-btn">Искать</button>
       </div>
-      <table>
-        <thead>
-          <tr>
-            <th>ID</th>
-            <th>Telegram ID</th>
-            <th>Username</th>
-            <th>balance_usdt</th>
-            <th>ledger_balance</th>
-            <th>invested_now</th>
-          </tr>
-        </thead>
-        <tbody>${rows}</tbody>
-      </table>
+      <div class="table-wrapper">
+        <div class="table-wrapper-inner">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Telegram ID</th>
+                <th>Username</th>
+                <th>balance_usdt</th>
+                <th>ledger_balance</th>
+                <th>invested_now</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      </div>
     `;
 
     const btn = document.getElementById("users-search-btn");
@@ -157,6 +167,7 @@ async function loadUsers() {
 
 function switchSection(hash) {
   const sections = ["dashboard", "users", "deals", "withdrawals", "logs", "user"];
+  const sidebarLinks = document.querySelectorAll(".sidebar nav a");
   sections.forEach((name) => {
     const el = document.getElementById(`${name}-section`);
     if (!el) return;
@@ -164,6 +175,20 @@ function switchSection(hash) {
       el.classList.remove("hidden");
     } else {
       el.classList.add("hidden");
+    }
+  });
+
+  sidebarLinks.forEach((link) => {
+    const target = link.getAttribute("data-section");
+    if (!target) return;
+    if (
+      hash === `#${target}` ||
+      (target === "user" && hash.startsWith("#user-")) ||
+      (!hash && target === "dashboard")
+    ) {
+      link.classList.add("active");
+    } else {
+      link.classList.remove("active");
     }
   });
   if (hash === "#users") {
@@ -199,29 +224,52 @@ async function loadDeals() {
         <td>${d.opened_at ? new Date(d.opened_at).toLocaleString() : ""}</td>
         <td>${d.closed_at ? new Date(d.closed_at).toLocaleString() : ""}</td>
         <td>${d.finished_at ? new Date(d.finished_at).toLocaleString() : ""}</td>
-        <td><button class="deal-save-btn">Сохранить %</button></td>
+        <td>
+          <div class="row-actions">
+            <button class="deal-save-btn">Сохранить %</button>
+          </div>
+        </td>
       </tr>`
       )
       .join("");
 
     section.innerHTML = `
       <h1>Сделки</h1>
+      <div class="toolbar">
+        <button id="deal-open-now-btn">Открыть новую сделку</button>
+      </div>
       <p>Здесь можно скорректировать процент доходности по каждой сделке (open/closed).</p>
-      <table>
-        <thead>
-          <tr>
-            <th>№</th>
-            <th>Статус</th>
-            <th>% дохода</th>
-            <th>Открыта</th>
-            <th>Закрыта</th>
-            <th>Завершена</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>${rows}</tbody>
-      </table>
+      <div class="table-wrapper">
+        <div class="table-wrapper-inner">
+          <table>
+            <thead>
+              <tr>
+                <th>№</th>
+                <th>Статус</th>
+                <th>% дохода</th>
+                <th>Открыта</th>
+                <th>Закрыта</th>
+                <th>Завершена</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      </div>
     `;
+
+    const openBtn = document.getElementById("deal-open-now-btn");
+    if (openBtn) {
+      openBtn.onclick = async () => {
+        try {
+          await apiRequest("/deals/open-now", { method: "POST" });
+          loadDeals();
+        } catch (e) {
+          alert(e.message);
+        }
+      };
+    }
 
     section.querySelectorAll("button.deal-save-btn").forEach((btn) => {
       btn.onclick = async () => {
@@ -316,43 +364,55 @@ async function loadUserDetail(userId) {
       <div class="toolbar">
         <button id="ledger-export-btn">Экспорт CSV</button>
       </div>
-      <table>
-        <thead>
-          <tr>
-            <th>Дата</th>
-            <th>Тип</th>
-            <th>Сумма</th>
-          </tr>
-        </thead>
-        <tbody>${ledgerRows}</tbody>
-      </table>
+      <div class="table-wrapper">
+        <div class="table-wrapper-inner">
+          <table>
+            <thead>
+              <tr>
+                <th>Дата</th>
+                <th>Тип</th>
+                <th>Сумма</th>
+              </tr>
+            </thead>
+            <tbody>${ledgerRows}</tbody>
+          </table>
+        </div>
+      </div>
       <h2>Инвестиции</h2>
-      <table>
-        <thead>
-          <tr>
-            <th>Сделка</th>
-            <th>Статус</th>
-            <th>Сумма</th>
-            <th>Профит</th>
-            <th>Создано</th>
-          </tr>
-        </thead>
-        <tbody>${invRows}</tbody>
-      </table>
+      <div class="table-wrapper">
+        <div class="table-wrapper-inner">
+          <table>
+            <thead>
+              <tr>
+                <th>Сделка</th>
+                <th>Статус</th>
+                <th>Сумма</th>
+                <th>Профит</th>
+                <th>Создано</th>
+              </tr>
+            </thead>
+            <tbody>${invRows}</tbody>
+          </table>
+        </div>
+      </div>
       <h2>Заявки на вывод</h2>
-      <table>
-        <thead>
-          <tr>
-            <th>ID</th>
-            <th>Сумма</th>
-            <th>Валюта</th>
-            <th>Кошелек</th>
-            <th>Статус</th>
-            <th>Создано</th>
-          </tr>
-        </thead>
-        <tbody>${wRows}</tbody>
-      </table>
+      <div class="table-wrapper">
+        <div class="table-wrapper-inner">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Сумма</th>
+                <th>Валюта</th>
+                <th>Кошелек</th>
+                <th>Статус</th>
+                <th>Создано</th>
+              </tr>
+            </thead>
+            <tbody>${wRows}</tbody>
+          </table>
+        </div>
+      </div>
     `;
 
     const exportBtn = document.getElementById("ledger-export-btn");
@@ -390,20 +450,24 @@ async function loadWithdrawals() {
       .join("");
     section.innerHTML = `
       <h1>Выводы (PENDING)</h1>
-      <table>
-        <thead>
-          <tr>
-            <th>ID</th>
-            <th>Telegram ID</th>
-            <th>Username</th>
-            <th>Сумма</th>
-            <th>Кошелек</th>
-            <th>Статус</th>
-            <th>Действия</th>
-          </tr>
-        </thead>
-        <tbody>${rows}</tbody>
-      </table>
+      <div class="table-wrapper">
+        <div class="table-wrapper-inner">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Telegram ID</th>
+                <th>Username</th>
+                <th>Сумма</th>
+                <th>Кошелек</th>
+                <th>Статус</th>
+                <th>Действия</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      </div>
     `;
 
     section.querySelectorAll("button[data-id]").forEach((btn) => {
@@ -444,18 +508,22 @@ async function loadLogs() {
       .join("");
     section.innerHTML = `
       <h1>Логи</h1>
-      <table>
-        <thead>
-          <tr>
-            <th>ID</th>
-            <th>Действие</th>
-            <th>Тип сущности</th>
-            <th>Entity ID</th>
-            <th>Дата</th>
-          </tr>
-        </thead>
-        <tbody>${rows}</tbody>
-      </table>
+      <div class="table-wrapper">
+        <div class="table-wrapper-inner">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Действие</th>
+                <th>Тип сущности</th>
+                <th>Entity ID</th>
+                <th>Дата</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      </div>
     `;
   } catch (e) {
     section.innerHTML = `<h1>Логи</h1><div class="error">${e.message}</div>`;

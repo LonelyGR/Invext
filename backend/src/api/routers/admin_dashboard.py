@@ -50,6 +50,7 @@ from src.services.ledger_service import (
     LEDGER_TYPE_WITHDRAW,
     get_balance_usdt,
 )
+from src.services.deal_service import open_new_deal
 
 
 router = APIRouter(prefix="/database/api", tags=["admin-dashboard"])
@@ -427,6 +428,36 @@ async def update_deal_percent(
         closed_at=deal.closed_at,
         finished_at=deal.finished_at,
     )
+
+
+@router.post("/deals/open-now", response_model=DealRow)
+async def open_deal_now(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+  """Открыть новую сделку вручную из админки."""
+  admin_token_id, _ = await get_admin_context(request)
+
+  async with db.begin():
+      deal = await open_new_deal(db)
+
+  await log_admin_action(
+      db=db,
+      admin_token_id=admin_token_id,
+      action_type="OPEN_DEAL_MANUAL",
+      entity_type="DEAL",
+      entity_id=deal.id,
+  )
+
+  return DealRow(
+      id=deal.id,
+      number=deal.number,
+      percent=deal.percent,
+      status=deal.status,
+      opened_at=deal.opened_at,
+      closed_at=deal.closed_at,
+      finished_at=deal.finished_at,
+  )
 
 
 @router.get("/users/{user_id}", response_model=UserDetail)
