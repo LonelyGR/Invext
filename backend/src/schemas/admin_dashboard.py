@@ -26,15 +26,28 @@ class DashboardStats(BaseModel):
 class DealRow(BaseModel):
     id: int
     number: int
-    percent: Decimal
+    title: Optional[str] = None
+    start_at: Optional[datetime] = None
+    end_at: Optional[datetime] = None
     status: str
-    opened_at: datetime
-    closed_at: Optional[datetime]
-    finished_at: Optional[datetime]
+    profit_percent: Optional[Decimal] = None
+    referral_processed: bool = False
+    close_notification_sent: bool = False
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    # Legacy
+    percent: Optional[Decimal] = None
+    opened_at: Optional[datetime] = None
+    closed_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
 
 
 class DealUpdateRequest(BaseModel):
-    percent: Decimal
+    percent: Optional[Decimal] = None  # legacy
+    profit_percent: Optional[Decimal] = None
+    title: Optional[str] = None
+    start_at: Optional[datetime] = None
+    end_at: Optional[datetime] = None
 
 
 class UserRow(BaseModel):

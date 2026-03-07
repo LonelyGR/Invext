@@ -21,7 +21,7 @@ from src.api.routers import (
 )
 from src.core.admin_middleware import admin_jwt_middleware
 from src.db.session import async_session_maker
-from src.services.deal_service import init_deal_scheduler
+from src.services.deal_scheduler import init_deal_scheduler
 
 setup_logging()
 

@@ -13,7 +13,7 @@ from src.db.session import get_db
 from src.models.user import User
 from src.schemas.invest import InvestRequest, InvestResponse
 from src.services.ledger_service import get_balance_usdt
-from src.services.deal_service import invest_into_active_deal
+from src.services.deal_service import participate_in_deal
 
 logger = logging.getLogger(__name__)
 
@@ -52,15 +52,15 @@ async def invest(
         )
 
     try:
-        inv = await invest_into_active_deal(db, user, amount)
+        participation = await participate_in_deal(db, user, amount)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
     new_balance = await get_balance_usdt(db, user.id)
     logger.info(
-        "Deal investment created: user_id=%s deal_id=%s amount=%s new_balance=%s",
+        "Deal participation created: user_id=%s deal_id=%s amount=%s new_balance=%s",
         user.id,
-        inv.deal_id,
+        participation.deal_id,
         amount,
         new_balance,
     )
@@ -69,3 +69,4 @@ async def invest(
         invested_amount_usdt=amount,
         balance_usdt=new_balance,
     )
+

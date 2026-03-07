@@ -25,6 +25,7 @@ from src.models import (
     LedgerTransaction,
     Deal,
     DealInvestment,
+    DealParticipation,
     WithdrawRequest,
     AdminLog,
     PaymentInvoice,
@@ -55,7 +56,7 @@ from src.services.ledger_service import (
     LEDGER_TYPE_WITHDRAW,
     get_balance_usdt,
 )
-from src.services.deal_service import open_new_deal
+from src.services.deal_service import get_active_deal, get_active_deal_legacy, open_new_deal
 
 
 router = APIRouter(prefix="/database/api", tags=["admin-dashboard"])
@@ -126,27 +127,29 @@ async def get_dashboard_stats(
     debits = invest_withdraw_result.scalar() or Decimal("0")
     total_balance = credits - debits
 
-    # Активная сделка.
-    active_deal_result = await db.execute(
-        select(Deal).where(Deal.status == "open").order_by(Deal.opened_at.desc()).limit(1)
-    )
-    active_deal = active_deal_result.scalar_one_or_none()
+    # Активная сделка (новая логика: active + окно, или legacy: open).
+    active_deal = await get_active_deal(db) or await get_active_deal_legacy(db)
     active_deal_number = None
     active_deal_percent: Optional[Decimal] = None
     active_deal_invested: Optional[Decimal] = None
     active_deal_closes_at = None
     if active_deal:
         active_deal_number = active_deal.number
-        active_deal_percent = active_deal.percent
-        active_deal_closes_at = active_deal.closed_at
+        active_deal_percent = active_deal.profit_percent or active_deal.percent
+        active_deal_closes_at = active_deal.end_at or active_deal.closed_at
 
-        invested_result = await db.execute(
+        invested_p = await db.execute(
+            select(func.coalesce(func.sum(DealParticipation.amount), 0)).where(
+                DealParticipation.deal_id == active_deal.id,
+            )
+        )
+        invested_i = await db.execute(
             select(func.coalesce(func.sum(DealInvestment.amount), 0)).where(
                 DealInvestment.deal_id == active_deal.id,
                 DealInvestment.status == "active",
             )
         )
-        active_deal_invested = invested_result.scalar() or Decimal("0")
+        active_deal_invested = (invested_p.scalar() or Decimal("0")) + (invested_i.scalar() or Decimal("0"))
 
     # Pending выводы.
     pending_withdrawals_result = await db.execute(
@@ -205,8 +208,16 @@ async def list_users(
     for u in users:
         ledger_balance = await get_balance_usdt(db, u.id)
 
-        # Текущие активные инвестиции пользователя.
-        invested_result = await db.execute(
+        # Текущие активные участия (deal_participations в active + deal_investments в open/closed).
+        invested_p = await db.execute(
+            select(func.coalesce(func.sum(DealParticipation.amount), 0))
+            .join(Deal, DealParticipation.deal_id == Deal.id)
+            .where(
+                DealParticipation.user_id == u.id,
+                Deal.status == "active",
+            )
+        )
+        invested_i = await db.execute(
             select(func.coalesce(func.sum(DealInvestment.amount), 0))
             .join(Deal, DealInvestment.deal_id == Deal.id)
             .where(
@@ -215,7 +226,7 @@ async def list_users(
                 Deal.status.in_(("open", "closed")),
             )
         )
-        invested_now = invested_result.scalar() or Decimal("0")
+        invested_now = (invested_p.scalar() or Decimal("0")) + (invested_i.scalar() or Decimal("0"))
 
         items.append(
             UserRow(
@@ -520,11 +531,11 @@ async def list_deals(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
-    """Список сделок: номер, статус, процент и даты."""
+    """Список сделок: номер, статус, profit_percent, даты окна."""
     admin_token_id, _ = await get_admin_context(request)
 
     result = await db.execute(
-        select(Deal).order_by(desc(Deal.opened_at))
+        select(Deal).order_by(desc(Deal.updated_at))
     )
     deals = result.scalars().all()
 
@@ -532,8 +543,16 @@ async def list_deals(
         DealRow(
             id=d.id,
             number=d.number,
-            percent=d.percent,
+            title=d.title,
+            start_at=d.start_at,
+            end_at=d.end_at,
             status=d.status,
+            profit_percent=d.profit_percent,
+            referral_processed=d.referral_processed,
+            close_notification_sent=d.close_notification_sent,
+            created_at=getattr(d, "created_at", None),
+            updated_at=getattr(d, "updated_at", None),
+            percent=d.percent,
             opened_at=d.opened_at,
             closed_at=d.closed_at,
             finished_at=d.finished_at,
@@ -559,7 +578,7 @@ async def update_deal_percent(
     body: DealUpdateRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    """Обновить процент доходности сделки (для уже созданной сделки)."""
+    """Обновить сделку: profit_percent, title, start_at, end_at (для draft/active)."""
     admin_token_id, _ = await get_admin_context(request)
 
     async with db.begin():
@@ -570,18 +589,27 @@ async def update_deal_percent(
         if not deal:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Deal not found")
 
-        if deal.status not in ("open", "closed"):
+        if deal.status not in ("draft", "active", "open", "closed"):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Можно менять процент только для сделок в статусе open/closed",
+                detail="Можно менять только для сделок в статусе draft/active/open/closed",
             )
 
-        deal.percent = body.percent
+        if body.profit_percent is not None:
+            deal.profit_percent = body.profit_percent
+        if body.percent is not None:
+            deal.percent = body.percent
+        if body.title is not None:
+            deal.title = body.title
+        if body.start_at is not None:
+            deal.start_at = body.start_at
+        if body.end_at is not None:
+            deal.end_at = body.end_at
 
     await log_admin_action(
         db=db,
         admin_token_id=admin_token_id,
-        action_type="UPDATE_DEAL_PERCENT",
+        action_type="UPDATE_DEAL",
         entity_type="DEAL",
         entity_id=deal_id,
     )
@@ -589,8 +617,16 @@ async def update_deal_percent(
     return DealRow(
         id=deal.id,
         number=deal.number,
-        percent=deal.percent,
+        title=deal.title,
+        start_at=deal.start_at,
+        end_at=deal.end_at,
         status=deal.status,
+        profit_percent=deal.profit_percent,
+        referral_processed=deal.referral_processed,
+        close_notification_sent=deal.close_notification_sent,
+        created_at=getattr(deal, "created_at", None),
+        updated_at=getattr(deal, "updated_at", None),
+        percent=deal.percent,
         opened_at=deal.opened_at,
         closed_at=deal.closed_at,
         finished_at=deal.finished_at,
@@ -602,29 +638,37 @@ async def open_deal_now(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
-  """Открыть новую сделку вручную из админки."""
-  admin_token_id, _ = await get_admin_context(request)
+    """Создать новую сделку вручную (draft без окна)."""
+    admin_token_id, _ = await get_admin_context(request)
 
-  async with db.begin():
-      deal = await open_new_deal(db)
+    async with db.begin():
+        deal = await open_new_deal(db)
 
-  await log_admin_action(
-      db=db,
-      admin_token_id=admin_token_id,
-      action_type="OPEN_DEAL_MANUAL",
-      entity_type="DEAL",
-      entity_id=deal.id,
-  )
+    await log_admin_action(
+        db=db,
+        admin_token_id=admin_token_id,
+        action_type="OPEN_DEAL_MANUAL",
+        entity_type="DEAL",
+        entity_id=deal.id,
+    )
 
-  return DealRow(
-      id=deal.id,
-      number=deal.number,
-      percent=deal.percent,
-      status=deal.status,
-      opened_at=deal.opened_at,
-      closed_at=deal.closed_at,
-      finished_at=deal.finished_at,
-  )
+    return DealRow(
+        id=deal.id,
+        number=deal.number,
+        title=deal.title,
+        start_at=deal.start_at,
+        end_at=deal.end_at,
+        status=deal.status,
+        profit_percent=deal.profit_percent,
+        referral_processed=deal.referral_processed,
+        close_notification_sent=deal.close_notification_sent,
+        created_at=getattr(deal, "created_at", None),
+        updated_at=getattr(deal, "updated_at", None),
+        percent=deal.percent,
+        opened_at=deal.opened_at,
+        closed_at=deal.closed_at,
+        finished_at=deal.finished_at,
+    )
 
 
 @router.get("/users/{user_id}", response_model=UserDetail)
@@ -642,24 +686,42 @@ async def get_user_detail(
 
     ledger_balance = await get_balance_usdt(db, u.id)
 
-    invested_result = await db.execute(
+    investments = []
+    part_result = await db.execute(
+        select(DealParticipation, Deal)
+        .join(Deal, DealParticipation.deal_id == Deal.id)
+        .where(DealParticipation.user_id == u.id)
+        .order_by(desc(DealParticipation.created_at))
+    )
+    for p, deal in part_result.all():
+        investments.append(
+            UserInvestment(
+                deal_id=deal.id,
+                deal_number=deal.number,
+                deal_status=deal.status,
+                amount=p.amount,
+                profit_amount=None,
+                created_at=p.created_at,
+            )
+        )
+    inv_result = await db.execute(
         select(DealInvestment, Deal)
         .join(Deal, DealInvestment.deal_id == Deal.id)
         .where(DealInvestment.user_id == u.id)
         .order_by(desc(DealInvestment.created_at))
     )
-    investments_rows = invested_result.all()
-    investments = [
-        UserInvestment(
-            deal_id=deal.id,
-            deal_number=deal.number,
-            deal_status=deal.status,
-            amount=inv.amount,
-            profit_amount=inv.profit_amount,
-            created_at=inv.created_at,
+    for inv, deal in inv_result.all():
+        investments.append(
+            UserInvestment(
+                deal_id=deal.id,
+                deal_number=deal.number,
+                deal_status=deal.status,
+                amount=inv.amount,
+                profit_amount=inv.profit_amount,
+                created_at=inv.created_at,
+            )
         )
-        for inv, deal in investments_rows
-    ]
+    investments.sort(key=lambda x: x.created_at, reverse=True)
 
     withdraw_result = await db.execute(
         select(WithdrawRequest)

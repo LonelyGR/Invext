@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from src.models.invoice import Invoice
     from src.models.payment_invoice import PaymentInvoice
     from src.models.deal_investment import DealInvestment
+    from src.models.deal_participation import DealParticipation
 
 
 def _short_ref_code() -> str:
@@ -62,6 +63,9 @@ class User(Base):
     )
     deal_investments: Mapped[List["DealInvestment"]] = relationship(
         "DealInvestment", back_populates="user", cascade="all, delete-orphan"
+    )
+    deal_participations: Mapped[List["DealParticipation"]] = relationship(
+        "DealParticipation", back_populates="user", cascade="all, delete-orphan"
     )
 
     def __repr__(self) -> str:

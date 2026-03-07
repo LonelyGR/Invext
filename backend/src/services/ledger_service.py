@@ -21,6 +21,7 @@ LEDGER_TYPE_DEPOSIT = "DEPOSIT"
 LEDGER_TYPE_WITHDRAW = "WITHDRAW"
 LEDGER_TYPE_INVEST = "INVEST"
 LEDGER_TYPE_PROFIT = "PROFIT"
+LEDGER_TYPE_REFERRAL_BONUS = "REFERRAL_BONUS"
 
 # Для обратной совместимости со старыми данными.
 LEDGER_TYPE_DEPOSIT_BLOCKCHAIN = "DEPOSIT_BLOCKCHAIN"
@@ -35,6 +36,7 @@ async def get_balance_usdt(db: AsyncSession, user_id: int) -> Decimal:
     credit_types = (
         LEDGER_TYPE_DEPOSIT,
         LEDGER_TYPE_PROFIT,
+        LEDGER_TYPE_REFERRAL_BONUS,
         LEDGER_TYPE_DEPOSIT_BLOCKCHAIN,
     )
     debit_types = (LEDGER_TYPE_WITHDRAW, LEDGER_TYPE_INVEST)

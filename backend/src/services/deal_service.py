@@ -1,343 +1,315 @@
+"""
+Сделки: активная сделка по окну (start_at — end_at), участие через deal_participations,
+закрытие, реферальные начисления, уведомления.
+"""
 from __future__ import annotations
 
 import datetime as dt
 import logging
 from decimal import Decimal
-from typing import Iterable, Optional
+from typing import List, Optional
 
-import httpx
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.cron import CronTrigger
-from apscheduler.triggers.interval import IntervalTrigger
-import pytz
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.config import get_settings
-from src.models import Deal, DealInvestment, LedgerTransaction, User
+from src.models import Deal, DealParticipation, LedgerTransaction, ReferralReward, User
+from src.models.deal import DEAL_STATUS_ACTIVE, DEAL_STATUS_CLOSED
+from src.models.referral_reward import STATUS_PAID
 from src.services.ledger_service import (
-    LEDGER_TYPE_DEPOSIT,
     LEDGER_TYPE_INVEST,
-    LEDGER_TYPE_PROFIT,
+    LEDGER_TYPE_REFERRAL_BONUS,
     get_balance_usdt,
 )
+from src.services.notification_service import broadcast_deal_closed
 
-
-TZ_UTC1 = pytz.FixedOffset(60)  # UTC+1
 logger = logging.getLogger(__name__)
+
+# Проценты реферального бонуса по уровням (1–10)
+REFERRAL_LEVEL_PERCENTS: List[float] = [
+    7.0, 2.0, 1.0, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5,
+]
+MAX_REFERRAL_LEVELS = 10
 
 
 async def get_active_deal(db: AsyncSession) -> Optional[Deal]:
+    """Сделка с открытым окном сбора: status=active и now между start_at и end_at."""
+    now = dt.datetime.now(dt.timezone.utc)
     result = await db.execute(
         select(Deal)
-        .where(Deal.status == "open")
-        .order_by(Deal.opened_at.desc())
+        .where(
+            Deal.status == DEAL_STATUS_ACTIVE,
+            Deal.start_at.isnot(None),
+            Deal.end_at.isnot(None),
+            Deal.start_at <= now,
+            Deal.end_at > now,
+        )
+        .order_by(Deal.start_at.desc())
         .limit(1)
     )
     return result.scalar_one_or_none()
 
 
-async def open_new_deal(db: AsyncSession, percent: Decimal = Decimal("3.0")) -> Deal:
-    """Создать новую сделку со статусом open."""
-    result = await db.execute(select(func.coalesce(func.max(Deal.number), 0)))
-    last_number = result.scalar() or 0
-    deal = Deal(
-        number=int(last_number) + 1,
-        percent=percent,
-        status="open",
-    )
-    db.add(deal)
-    await db.flush()
-    return deal
-
-
-async def close_current_open_deal(db: AsyncSession) -> Optional[Deal]:
-    """Закрыть текущую открытую сделку (status: open -> closed)."""
-    result = await db.execute(
-        select(Deal)
-        .where(Deal.status == "open")
-        .order_by(Deal.opened_at.desc())
-        .limit(1)
-        .with_for_update()
-    )
-    deal = result.scalar_one_or_none()
-    if not deal:
-        return None
-    if deal.status != "open":
-        return deal
-    now = dt.datetime.now(dt.timezone.utc)
-    deal.status = "closed"
-    deal.closed_at = now
-    await db.flush()
-    return deal
-
-
-async def invest_into_active_deal(
+async def participate_in_deal(
     db: AsyncSession,
     user: User,
     amount: Decimal,
-) -> DealInvestment:
-    """Создать инвестицию пользователя в текущую открытую сделку."""
+) -> DealParticipation:
+    """
+    Участие пользователя в текущей активной сделке.
+    Один пользователь — одно участие в одной сделке (unique deal_id, user_id).
+    """
     async with db.begin():
-        # Лочим активную сделку.
-        result = await db.execute(
+        deal = await db.execute(
             select(Deal)
-            .where(Deal.status == "open")
-            .order_by(Deal.opened_at.desc())
+            .where(
+                Deal.status == DEAL_STATUS_ACTIVE,
+                Deal.start_at.isnot(None),
+                Deal.end_at.isnot(None),
+                Deal.start_at <= dt.datetime.now(dt.timezone.utc),
+                Deal.end_at > dt.datetime.now(dt.timezone.utc),
+            )
+            .order_by(Deal.start_at.desc())
             .limit(1)
             .with_for_update()
         )
-        deal = result.scalar_one_or_none()
+        deal = deal.scalar_one_or_none()
         if not deal:
-            raise ValueError("Нет активной сделки для инвестирования")
+            raise ValueError("Нет активной сделки для участия")
 
-        # Проверяем баланс по ledger.
+        existing = await db.execute(
+            select(DealParticipation).where(
+                DealParticipation.deal_id == deal.id,
+                DealParticipation.user_id == user.id,
+            )
+        )
+        if existing.scalar_one_or_none():
+            raise ValueError("Вы уже участвуете в этой сделке")
+
         current_balance = await get_balance_usdt(db, user.id)
         if current_balance < amount:
-            raise ValueError("Недостаточно средств для инвестирования")
+            raise ValueError("Недостаточно средств для участия")
 
-        # Списываем через ledger.
         tx = LedgerTransaction(
             user_id=user.id,
             type=LEDGER_TYPE_INVEST,
             amount_usdt=amount,
+            metadata_json={"deal_id": deal.id},
         )
         db.add(tx)
 
-        inv = DealInvestment(
+        participation = DealParticipation(
             deal_id=deal.id,
             user_id=user.id,
             amount=amount,
-            status="active",
         )
-        db.add(inv)
-
-        # Обновляем кэш баланса.
-        new_balance = current_balance - amount
-        user.balance_usdt = new_balance
-
+        db.add(participation)
         await db.flush()
 
-    return inv
+        user.balance_usdt = current_balance - amount
+        await db.flush()
 
-
-async def accrue_profits_for_due_deals(db: AsyncSession) -> None:
-    """
-    Начислить прибыль по всем сделкам, для которых прошло >=24 часа после закрытия,
-    но ещё не проставлен статус finished.
-    """
-    now = dt.datetime.now(dt.timezone.utc)
-    day_ago = now - dt.timedelta(hours=24)
-
-    # Выбираем сделки, которые закрыты, но ещё не завершены и уже "созрели".
-    deals_result = await db.execute(
-        select(Deal)
-        .where(
-            Deal.status == "closed",
-            Deal.closed_at <= day_ago,
-            Deal.finished_at.is_(None),
-        )
+    logger.info(
+        "Deal participation created: deal_id=%s user_id=%s amount=%s",
+        deal.id, user.id, amount,
     )
-    deals: Iterable[Deal] = deals_result.scalars().all()
+    return participation
 
-    # Собираем данные для уведомлений после начисления прибыли.
-    finished_notifications: list[tuple[Deal, list[int]]] = []
 
-    for deal in deals:
-        investor_tg_ids: list[int] = []
+async def _get_referrer_chain(db: AsyncSession, user_id: int) -> List[User]:
+    """Цепочка рефереров до MAX_REFERRAL_LEVELS."""
+    chain: List[User] = []
+    current_id: Optional[int] = user_id
+    for _ in range(MAX_REFERRAL_LEVELS):
+        if current_id is None:
+            break
+        result = await db.execute(select(User).where(User.id == current_id))
+        u = result.scalar_one_or_none()
+        if not u or u.referrer_id is None:
+            break
+        current_id = u.referrer_id
+        result_ref = await db.execute(select(User).where(User.id == current_id))
+        referrer = result_ref.scalar_one_or_none()
+        if referrer:
+            chain.append(referrer)
+    return chain
 
-        async with db.begin():
-            # Лочим сделку.
-            d_result = await db.execute(
-                select(Deal).where(Deal.id == deal.id).with_for_update()
-            )
-            d = d_result.scalar_one_or_none()
-            if not d or d.status != "closed":
+
+async def _process_referral_rewards_for_deal(db: AsyncSession, deal: Deal) -> None:
+    """
+    По всем участникам сделки: обход цепочки рефереров до 10 уровней.
+    Если реферер участвовал в этой же сделке — начислить бонус (referral_rewards + ledger).
+    """
+    participants_result = await db.execute(
+        select(DealParticipation).where(DealParticipation.deal_id == deal.id)
+    )
+    participants = list(participants_result.scalars().all())
+    participant_user_ids = {p.user_id for p in participants}
+    participation_by_user = {p.user_id: p for p in participants}
+
+    for participation in participants:
+        from_user_id = participation.user_id
+        referrers = await _get_referrer_chain(db, from_user_id)
+        amount = participation.amount
+
+        for level_index, referrer in enumerate(referrers):
+            level = level_index + 1
+            if referrer.id not in participant_user_ids:
+                continue
+            if level > len(REFERRAL_LEVEL_PERCENTS):
+                break
+            pct = REFERRAL_LEVEL_PERCENTS[level_index]
+            reward_amount = (amount * Decimal(str(pct)) / Decimal("100")).quantize(Decimal("0.01"))
+            if reward_amount <= 0:
                 continue
 
-            inv_result = await db.execute(
-                select(DealInvestment)
-                .where(
-                    DealInvestment.deal_id == d.id,
-                    DealInvestment.status == "active",
-                )
-                .with_for_update()
+            reward = ReferralReward(
+                deal_id=deal.id,
+                from_user_id=from_user_id,
+                to_user_id=referrer.id,
+                level=level,
+                amount=reward_amount,
+                status=STATUS_PAID,
             )
-            investments: Iterable[DealInvestment] = inv_result.scalars().all()
+            db.add(reward)
+            await db.flush()
 
-            for inv in investments:
-                user = await db.get(User, inv.user_id, with_for_update=True)
-                if not user:
-                    continue
+            ledger_tx = LedgerTransaction(
+                user_id=referrer.id,
+                type=LEDGER_TYPE_REFERRAL_BONUS,
+                amount_usdt=reward_amount,
+                metadata_json={
+                    "deal_id": deal.id,
+                    "from_user_id": from_user_id,
+                    "level": level,
+                    "referral_reward_id": reward.id,
+                },
+            )
+            db.add(ledger_tx)
 
-                profit = (inv.amount * (d.percent / Decimal("100"))).quantize(
-                    Decimal("0.01")
-                )
+            referrer_user = await db.get(User, referrer.id, with_for_update=True)
+            if referrer_user:
+                new_balance = await get_balance_usdt(db, referrer_user.id)
+                referrer_user.balance_usdt = new_balance
 
-                # Возвращаем тело инвестиции.
-                tx_body = LedgerTransaction(
-                    user_id=inv.user_id,
-                    type=LEDGER_TYPE_DEPOSIT,
-                    amount_usdt=inv.amount,
-                )
-                db.add(tx_body)
-
-                # Начисляем прибыль.
-                tx_profit = LedgerTransaction(
-                    user_id=inv.user_id,
-                    type=LEDGER_TYPE_PROFIT,
-                    amount_usdt=profit,
-                )
-                db.add(tx_profit)
-
-                inv.profit_amount = profit
-                inv.status = "paid"
-
-                # Обновляем кэш баланса пользователя.
-                new_balance = await get_balance_usdt(db, inv.user_id)
-                user.balance_usdt = new_balance
-
-                if user.telegram_id:
-                    investor_tg_ids.append(user.telegram_id)
-
-            d.status = "finished"
-            d.finished_at = now
-
-        if investor_tg_ids:
-            finished_notifications.append((d, investor_tg_ids))
-
-    # Отправляем уведомления после завершения всех транзакций.
-    if finished_notifications:
-        settings = get_settings()
-        bot_token = settings.bot_token
-        if not bot_token:
-            logger.warning("BOT_TOKEN not configured, skip finished deal notifications")
-        else:
-            api_url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                for deal_obj, tg_ids in finished_notifications:
-                    text = (
-                        f"Сделка #{deal_obj.number} отработана. "
-                        f"Ваш доход {deal_obj.percent}%."
-                    )
-                    for tid in tg_ids:
-                        try:
-                            await client.post(api_url, json={"chat_id": tid, "text": text})
-                        except Exception as e:  # noqa: BLE001
-                            logger.warning(
-                                "Failed to send finished deal message to %s: %s", tid, e
-                            )
+            logger.info(
+                "Referral reward: deal_id=%s from_user=%s to_user=%s level=%s amount=%s",
+                deal.id, from_user_id, referrer.id, level, reward_amount,
+            )
 
 
-async def _broadcast_new_deal_to_all_users(db: AsyncSession, deal: Deal) -> None:
+async def close_deal_flow(db: AsyncSession, deal: Deal) -> None:
     """
-    Отправить сообщение о новой сделке всем пользователям в Telegram.
-    Выполняется внутри джоба планировщика после создания сделки.
+    Закрытие сделки: статус closed, реферальные начисления (один раз),
+    рассылка уведомлений (один раз), установка флагов.
     """
-    settings = get_settings()
-    bot_token = settings.bot_token
-    if not bot_token:
-        logger.warning("BOT_TOKEN not configured, skip new deal broadcast")
-        return
+    now = dt.datetime.now(dt.timezone.utc)
 
-    result = await db.execute(select(User.telegram_id).where(User.telegram_id.is_not(None)))
-    telegram_ids = [row[0] for row in result.fetchall() if row[0]]
+    deal.status = DEAL_STATUS_CLOSED
+    deal.updated_at = now
+    if deal.closed_at is None:
+        deal.closed_at = now
+    await db.flush()
 
-    if not telegram_ids:
-        logger.info("No users to notify about new deal")
-        return
+    if not deal.referral_processed:
+        await _process_referral_rewards_for_deal(db, deal)
+        deal.referral_processed = True
+        await db.flush()
 
-    text = (
-        f"Открыт сбор на сделку #{deal.number}.\n\n"
-        "Вы можете инвестировать USDT в разделе «💰 Инвестировать» бота."
-    )
-
-    api_url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        for tid in telegram_ids:
-            try:
-                await client.post(api_url, json={"chat_id": tid, "text": text})
-            except Exception as e:  # noqa: BLE001
-                logger.warning("Failed to send new deal message to %s: %s", tid, e)
-
-
-async def _broadcast_deal_closed_to_investors(db: AsyncSession, deal: Deal) -> None:
-    """Сообщить инвесторам, что сбор на сделку закрыт и средства ушли в работу."""
-    settings = get_settings()
-    bot_token = settings.bot_token
-    if not bot_token:
-        logger.warning("BOT_TOKEN not configured, skip closed deal notifications")
-        return
-
-    result = await db.execute(
-        select(User.telegram_id)
-        .join(DealInvestment, DealInvestment.user_id == User.id)
-        .where(
-            DealInvestment.deal_id == deal.id,
-            User.telegram_id.is_not(None),
+    if not deal.close_notification_sent:
+        participant_user_ids_result = await db.execute(
+            select(DealParticipation.user_id).where(DealParticipation.deal_id == deal.id)
         )
-        .distinct()
-    )
-    telegram_ids = [row[0] for row in result.fetchall() if row[0]]
-    if not telegram_ids:
-        return
+        participant_user_ids = {r[0] for r in participant_user_ids_result.all()}
 
-    text = (
-        f"Сбор на сделку #{deal.number} закрыт, средства идут в работу."
-    )
-    api_url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+        users_result = await db.execute(
+            select(User.telegram_id, User.id).where(User.telegram_id.isnot(None))
+        )
+        rows = users_result.all()
+        telegram_ids = [r[0] for r in rows if r[0]]
+        participant_telegram_ids = {
+            r[0] for r in rows
+            if r[1] in participant_user_ids and r[0]
+        }
 
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        for tid in telegram_ids:
-            try:
-                await client.post(api_url, json={"chat_id": tid, "text": text})
-            except Exception as e:  # noqa: BLE001
-                logger.warning("Failed to send closed deal message to %s: %s", tid, e)
+        profit_pct = float(deal.profit_percent) if deal.profit_percent is not None else None
+        await broadcast_deal_closed(
+            telegram_ids,
+            deal.number,
+            profit_pct,
+            participant_telegram_ids,
+        )
+        deal.close_notification_sent = True
+        await db.flush()
+
+    logger.info("Deal closed: deal_id=%s number=%s", deal.id, deal.number)
 
 
-def init_deal_scheduler(scheduler: AsyncIOScheduler, db_factory) -> None:
+async def process_due_deals(db: AsyncSession) -> int:
     """
-    Настроить APScheduler:
-    - 12:00 (UTC+1) — закрыть открытую сделку.
-    - 13:00 (UTC+1) — открыть новую сделку.
-    - каждые 5 минут — проверять сделки для начисления прибыли.
-
-    db_factory — асинхронная фабрика получения AsyncSession (обычно sessionmaker).
+    Найти сделки с status=active и end_at <= now, для каждой выполнить close_deal_flow.
+    Возвращает количество обработанных сделок.
     """
-
-    async def _job_close_deal():
-        async with db_factory() as db:  # type: ignore[attr-defined]
-            async with db.begin():
-                deal = await close_current_open_deal(db)
-            if deal:
-                await _broadcast_deal_closed_to_investors(db, deal)
-
-    async def _job_open_deal():
-        async with db_factory() as db:  # type: ignore[attr-defined]
-            # Создаём сделку в транзакции, затем рассылаем уведомления.
-            async with db.begin():
-                deal = await open_new_deal(db)
-            await _broadcast_new_deal_to_all_users(db, deal)
-
-    async def _job_accrue():
-        async with db_factory() as db:  # type: ignore[attr-defined]
-            async with db.begin():
-                await accrue_profits_for_due_deals(db)
-
-    scheduler.add_job(
-        _job_close_deal,
-        CronTrigger(hour=12, minute=0, timezone=TZ_UTC1),
-        name="close_current_deal",
+    now = dt.datetime.now(dt.timezone.utc)
+    result = await db.execute(
+        select(Deal).where(
+            Deal.status == DEAL_STATUS_ACTIVE,
+            Deal.end_at.isnot(None),
+            Deal.end_at <= now,
+        )
     )
-    scheduler.add_job(
-        _job_open_deal,
-        CronTrigger(hour=13, minute=0, timezone=TZ_UTC1),
-        name="open_new_deal",
-    )
-    scheduler.add_job(
-        _job_accrue,
-        IntervalTrigger(minutes=5),
-        name="accrue_profits_for_due_deals",
-    )
+    deals = list(result.scalars().all())
+    for deal in deals:
+        async with db.begin():
+            locked = await db.execute(
+                select(Deal).where(Deal.id == deal.id).with_for_update()
+            )
+            d = locked.scalar_one_or_none()
+            if not d or d.status != DEAL_STATUS_ACTIVE:
+                continue
+            await close_deal_flow(db, d)
+    return len(deals)
 
+
+# --- Совместимость со старым API (админка может ещё использовать) ---
+
+async def get_active_deal_legacy(db: AsyncSession) -> Optional[Deal]:
+    """Активная сделка: либо новая (active + окно), либо старая (status=open)."""
+    deal = await get_active_deal(db)
+    if deal:
+        return deal
+    result = await db.execute(
+        select(Deal).where(Deal.status == "open").order_by(Deal.opened_at.desc()).limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def open_new_deal(
+    db: AsyncSession,
+    title: Optional[str] = None,
+    start_at: Optional[dt.datetime] = None,
+    end_at: Optional[dt.datetime] = None,
+    profit_percent: Optional[Decimal] = None,
+) -> Deal:
+    """Создать новую сделку (draft или active при переданных start_at/end_at)."""
+    from src.models.deal import DEAL_STATUS_ACTIVE, DEAL_STATUS_DRAFT
+
+    result = await db.execute(select(func.coalesce(func.max(Deal.number), 0)))
+    last_number = result.scalar_one_or_none() or 0
+    number = int(last_number) + 1
+
+    now = dt.datetime.now(dt.timezone.utc)
+    status = DEAL_STATUS_DRAFT
+    if start_at is not None and end_at is not None and start_at <= now < end_at:
+        status = DEAL_STATUS_ACTIVE
+
+    deal = Deal(
+        number=number,
+        title=title or f"Сделка #{number}",
+        start_at=start_at,
+        end_at=end_at,
+        status=status,
+        profit_percent=profit_percent or Decimal("0"),
+    )
+    db.add(deal)
+    await db.flush()
+    return deal

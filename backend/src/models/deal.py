@@ -4,7 +4,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, List, Optional
 
-from sqlalchemy import DateTime, Numeric, String
+from sqlalchemy import Boolean, DateTime, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -12,36 +12,56 @@ from src.db.base import Base
 
 if TYPE_CHECKING:
     from src.models.deal_investment import DealInvestment
+    from src.models.deal_participation import DealParticipation
+    from src.models.referral_reward import ReferralReward
+
+# Статусы сделки (новый поток)
+DEAL_STATUS_DRAFT = "draft"
+DEAL_STATUS_ACTIVE = "active"
+DEAL_STATUS_CLOSED = "closed"
+DEAL_STATUS_COMPLETED = "completed"
 
 
 class Deal(Base):
-    """Инвестиционная сделка.
-
-    number  — порядковый номер (для пользователя);
-    percent — доходность в % (по умолчанию 3);
-    status  — open / closed / finished.
-    """
+    """Сделка с окном сбора (start_at — end_at). Участие через deal_participations."""
 
     __tablename__ = "deals"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    number: Mapped[int] = mapped_column(unique=True, index=True)  # для отображения «Сделка #N»
 
-    number: Mapped[int] = mapped_column(unique=True, index=True)
-    percent: Mapped[Decimal] = mapped_column(
-        Numeric(5, 2), nullable=False
-    )  # например, 3.00 = 3%
-    status: Mapped[str] = mapped_column(String(16), nullable=False, default="open")
+    title: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    start_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    end_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default=DEAL_STATUS_DRAFT, index=True)
 
-    opened_at: Mapped[datetime] = mapped_column(
+    profit_percent: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2), nullable=True)
+    referral_processed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    close_notification_sent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
-    closed_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    finished_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True), nullable=True
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
 
+    # Legacy (для обратной совместимости с данными до рефакторинга)
+    percent: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2), nullable=True)
+    opened_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    participations: Mapped[List["DealParticipation"]] = relationship(
+        "DealParticipation",
+        back_populates="deal",
+        cascade="all, delete-orphan",
+    )
+    referral_rewards: Mapped[List["ReferralReward"]] = relationship(
+        "ReferralReward",
+        back_populates="deal",
+        cascade="all, delete-orphan",
+    )
     investments: Mapped[List["DealInvestment"]] = relationship(
         "DealInvestment",
         back_populates="deal",
@@ -49,5 +69,5 @@ class Deal(Base):
     )
 
     def __repr__(self) -> str:
-        return f"<Deal id={self.id} number={self.number} status={self.status} percent={self.percent}>"
+        return f"<Deal id={self.id} number={self.number} status={self.status}>"
 

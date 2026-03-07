@@ -8,6 +8,8 @@ from src.models.payment_invoice import PaymentInvoice
 from src.models.payment_webhook_event import PaymentWebhookEvent
 from src.models.deal import Deal
 from src.models.deal_investment import DealInvestment
+from src.models.deal_participation import DealParticipation
+from src.models.referral_reward import ReferralReward
 from src.models.admin_token import AdminToken
 from src.models.admin_log import AdminLog
 
@@ -22,6 +24,8 @@ __all__ = [
     "PaymentWebhookEvent",
     "Deal",
     "DealInvestment",
+    "DealParticipation",
+    "ReferralReward",
     "AdminToken",
     "AdminLog",
 ]
