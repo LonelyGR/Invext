@@ -59,15 +59,16 @@ class NowPaymentsService:
         order_description: Optional[str] = None,
     ) -> CreateInvoiceResult:
         """
-        Create invoice for user deposit. Amount in USDT (BSC); no USD conversion.
-        User pays exactly amount_usdt. Validation (min 10, step 1) is done in client.
+        Create invoice for user deposit. Sends price_currency=usd + pay_currency=usdtbsc
+        (invoice-compatible; usdt->usdtbsc fails in NOWPayments checkout). Amount sent
+        as USD; validation (min 10, step 1) done in client.
         """
         order_id = generate_order_id(user_id)
 
         normalized = await self.client.create_invoice(
             order_id=order_id,
             price_amount=amount_usdt,
-            price_currency="usdt",
+            price_currency="usd",
             pay_currency="usdtbsc",
             ipn_callback_url=ipn_callback_url,
             success_url=success_url,
@@ -81,13 +82,14 @@ class NowPaymentsService:
             pay_amount_decimal = Decimal(normalized.pay_amount)
         except Exception:
             pass
+        price_amount_decimal = Decimal(normalized.price_amount)
 
         return CreateInvoiceResult(
             order_id=order_id,
             external_invoice_id=normalized.invoice_id or None,
             invoice_url=normalized.invoice_url,
-            price_amount=amount_usdt,
-            price_currency="usdt",
+            price_amount=price_amount_decimal,
+            price_currency=normalized.price_currency,
             pay_currency=normalized.pay_currency,
             pay_amount=pay_amount_decimal,
             network="BSC",

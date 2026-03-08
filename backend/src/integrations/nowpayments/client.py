@@ -4,7 +4,11 @@ HTTP client for NOWPayments REST API.
 - All requests go through this client.
 - Timeouts and error handling centralized.
 - No logging of API keys; log request/response without secrets.
-- Invoice creation: USDT only (BSC), exact amount, Decimal-based.
+- Invoice creation: NOWPayments invoice flow expects a base price currency (e.g. USD)
+  and a separate pay currency (e.g. usdtbsc). Using price_currency=usdt with
+  pay_currency=usdtbsc causes checkout to fail with "Can not get estimate from
+  USDT to USDTBSC". Use price_currency=usd + pay_currency=usdtbsc for
+  invoice-compatible payload. Amounts handled as Decimal internally.
 """
 from __future__ import annotations
 
@@ -99,17 +103,19 @@ class NowPaymentsClient:
         }
 
     def _safe_log_response(self, response: httpx.Response, response_json: Any) -> None:
-        """Log response without leaking API key or full payload."""
+        """Log response without leaking API key. On non-2xx, log full response body."""
         logger.info(
             "NOWPayments API response status=%s path=%s",
             response.status_code,
             response.url.path,
         )
         if response.status_code >= 400:
+            body_str = response.text if response_json is None else str(response_json)
             logger.warning(
-                "NOWPayments API error: status=%s body_preview=%s",
+                "NOWPayments API non-2xx response body: status=%s path=%s body=%s",
                 response.status_code,
-                str(response_json)[:500] if response_json else response.text[:500],
+                response.url.path,
+                body_str,
             )
 
     async def create_invoice(
@@ -126,16 +132,15 @@ class NowPaymentsClient:
     ) -> CreateInvoiceNormalizedResponse:
         """
         Create an invoice via POST /v1/invoice.
-
-        - Amount is exact USDT (no USD conversion). User sees the same amount they entered.
-        - price_amount sent as string; no pay_amount in request.
-        - Validates: amount > 0, min 10 USDT, step 1 USDT; sanitizes order_id.
-        - Logs payload before request; raises on API errors.
+        Uses price_currency=usd + pay_currency=usdtbsc (invoice-compatible; usdt->usdtbsc fails).
+        price_amount as string; no pay_amount in request. Decimal used internally.
         """
         _validate_deposit_amount(price_amount)
         safe_order_id = _sanitize_order_id(order_id)
 
-        # Build payload: price_amount as string. Do not send fixed_rate — API rejects it.
+        # Invoice-compatible payload: base price currency (e.g. USD) + pay currency (usdtbsc).
+        # Do NOT use price_currency=usdt with pay_currency=usdtbsc — causes "Can not get
+        # estimate from USDT to USDTBSC" in checkout.
         payload: dict[str, Any] = {
             "price_amount": str(price_amount),
             "price_currency": price_currency,
@@ -152,10 +157,8 @@ class NowPaymentsClient:
             payload["order_description"] = order_description
 
         logger.info(
-            "NOWPayments create_invoice request order_id=%s price_amount=%s pay_currency=%s",
-            safe_order_id,
-            payload["price_amount"],
-            pay_currency,
+            "NOWPayments create_invoice outgoing payload: %s",
+            payload,
         )
 
         url = f"{self.base_url}/v1/invoice"
@@ -223,7 +226,7 @@ class NowPaymentsClient:
 
 
 def _normalize_invoice_response(raw: dict[str, Any]) -> CreateInvoiceNormalizedResponse:
-    """Map NOWPayments response to normalized fields: invoice_id, invoice_url, pay_address, pay_amount, pay_currency."""
+    """Map NOWPayments response to normalized fields: invoice_id, invoice_url, pay_currency, price_amount, price_currency (+ pay_address, pay_amount)."""
     invoice_id = raw.get("id") or raw.get("invoice_id")
     if invoice_id is not None and not isinstance(invoice_id, str):
         invoice_id = str(invoice_id)
@@ -234,6 +237,11 @@ def _normalize_invoice_response(raw: dict[str, Any]) -> CreateInvoiceNormalizedR
         pay_amount = str(pay_amount)
     pay_amount = pay_amount or "0"
     pay_currency = raw.get("pay_currency") or "usdtbsc"
+    price_amount = raw.get("price_amount")
+    if price_amount is not None and not isinstance(price_amount, str):
+        price_amount = str(price_amount)
+    price_amount = price_amount or "0"
+    price_currency = raw.get("price_currency") or "usd"
 
     return CreateInvoiceNormalizedResponse(
         invoice_id=invoice_id or "",
@@ -241,4 +249,6 @@ def _normalize_invoice_response(raw: dict[str, Any]) -> CreateInvoiceNormalizedR
         pay_address=pay_address,
         pay_amount=pay_amount,
         pay_currency=pay_currency,
+        price_amount=price_amount,
+        price_currency=price_currency,
     )

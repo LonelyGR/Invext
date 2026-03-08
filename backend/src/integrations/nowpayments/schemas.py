@@ -12,10 +12,10 @@ from pydantic import BaseModel, Field
 
 # --- API request (create invoice) ---
 class NowPaymentsCreateInvoiceRequest(BaseModel):
-    """Body for POST /v1/invoice (NOWPayments API). USDT only; price_amount as string in payload."""
+    """Body for POST /v1/invoice. Use price_currency=usd + pay_currency=usdtbsc (usdt->usdtbsc fails in checkout)."""
     order_id: str
     price_amount: Decimal
-    price_currency: str = "usdt"
+    price_currency: str = "usd"
     pay_currency: str = "usdtbsc"
     ipn_callback_url: Optional[str] = None
     success_url: Optional[str] = None
@@ -32,6 +32,8 @@ class CreateInvoiceNormalizedResponse(BaseModel):
     pay_address: str
     pay_amount: str
     pay_currency: str
+    price_amount: str
+    price_currency: str
 
 
 # --- API response (create invoice) ---
