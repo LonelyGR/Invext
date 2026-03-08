@@ -135,13 +135,12 @@ class NowPaymentsClient:
         _validate_deposit_amount(price_amount)
         safe_order_id = _sanitize_order_id(order_id)
 
-        # Build payload: price_amount as string; exclude None optional fields
+        # Build payload: price_amount as string. Do not send fixed_rate — API rejects it.
         payload: dict[str, Any] = {
             "price_amount": str(price_amount),
             "price_currency": price_currency,
             "pay_currency": pay_currency,
             "order_id": safe_order_id,
-            "fixed_rate": fixed_rate,
         }
         if ipn_callback_url is not None:
             payload["ipn_callback_url"] = ipn_callback_url
