@@ -116,7 +116,7 @@ class NowPaymentsClient:
         self,
         order_id: str,
         price_amount: Decimal,
-        price_currency: str = "usdt",
+        price_currency: str = "usd",
         pay_currency: str = "usdtbsc",
         ipn_callback_url: Optional[str] = None,
         success_url: Optional[str] = None,
