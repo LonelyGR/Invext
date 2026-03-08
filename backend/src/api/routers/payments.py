@@ -13,8 +13,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.config import get_settings
 from src.db.session import get_db
-from src.integrations.nowpayments import NowPaymentsClient, NowPaymentsService, verify_ipn_signature
-from src.integrations.nowpayments.client import NowPaymentsAPIError
+from src.integrations.nowpayments import (
+    NowPaymentsAPIError,
+    NowPaymentsClient,
+    NowPaymentsService,
+    NowPaymentsValidationError,
+    verify_ipn_signature,
+)
 from src.models import PaymentInvoice, PaymentWebhookEvent, User
 from src.models.payment_invoice import PROVIDER_NOWPAYMENTS
 from src.models.payment_webhook_event import (
@@ -56,7 +61,7 @@ async def create_deposit_invoice(
 ):
     """
     Create NOWPayments invoice for user deposit (USDT BEP20).
-    Caller (bot/frontend) passes telegram_id and amount in USD.
+    Caller passes telegram_id and amount in USDT; user pays exactly that amount.
     """
     settings = get_settings()
     if not settings.nowpayments_api_key or not settings.nowpayments_callback_url:
@@ -70,16 +75,11 @@ async def create_deposit_invoice(
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-    amount_float = float(payload.amount)
-    if amount_float < settings.min_deposit:
+    # Schema already enforces min 10 USDT, step 1; enforce max from config
+    if payload.amount > Decimal(str(settings.max_deposit)):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Amount must be at least {settings.min_deposit}",
-        )
-    if amount_float > settings.max_deposit:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Amount must not exceed {settings.max_deposit}",
+            detail=f"Amount must not exceed {settings.max_deposit} USDT",
         )
 
     callback_url = settings.nowpayments_callback_url.rstrip("/")
@@ -90,12 +90,17 @@ async def create_deposit_invoice(
     try:
         create_result = await service.create_invoice(
             user_id=user.id,
-            amount_usd=payload.amount,
+            amount_usdt=payload.amount,
             ipn_callback_url=f"{callback_url}/v1/payments/webhook/nowpayments",
             success_url=success_url,
             cancel_url=cancel_url,
             order_description=f"Deposit user {user.id}",
         )
+    except NowPaymentsValidationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e.args[0]) if e.args else "Invalid deposit amount or order",
+        ) from e
     except NowPaymentsAPIError as e:
         logger.exception("NOWPayments create invoice failed user_id=%s: %s", user.id, e)
         raise HTTPException(

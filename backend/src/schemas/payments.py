@@ -10,10 +10,20 @@ from typing import List, Optional
 from pydantic import BaseModel, Field
 
 
+# Deposit rules: exact USDT amounts only (min 10, step 1)
+MIN_DEPOSIT_USDT = Decimal("10")
+STEP_DEPOSIT_USDT = Decimal("1")
+
+
 class CreateDepositInvoiceRequest(BaseModel):
-    """Body for POST /v1/payments/deposit/create-invoice."""
+    """Body for POST /v1/payments/deposit/create-invoice. Amount in USDT (BSC)."""
     telegram_id: int = Field(..., description="Telegram ID пользователя")
-    amount: Decimal = Field(..., gt=0, description="Сумма пополнения в USD")
+    amount: Decimal = Field(
+        ...,
+        ge=MIN_DEPOSIT_USDT,
+        multiple_of=STEP_DEPOSIT_USDT,
+        description="Сумма пополнения в USDT (минимум 10, шаг 1)",
+    )
 
 
 class DepositInvoiceResponse(BaseModel):
@@ -22,8 +32,8 @@ class DepositInvoiceResponse(BaseModel):
     order_id: str = Field(..., description="Unique order id for tracing")
     external_invoice_id: Optional[str] = None
     invoice_url: str = Field(..., description="URL for user to pay")
-    amount: Decimal = Field(..., description="Price amount (USD)")
-    currency: str = Field(default="usd")
+    amount: Decimal = Field(..., description="Price amount (USDT)")
+    currency: str = Field(default="usdt")
     pay_currency: str = Field(default="usdtbsc", description="Payment currency (USDT BEP20)")
     network: str = Field(default="BSC")
     status: str = Field(..., description="waiting | partially_paid | finished | failed | expired")

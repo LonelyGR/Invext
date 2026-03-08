@@ -12,16 +12,26 @@ from pydantic import BaseModel, Field
 
 # --- API request (create invoice) ---
 class NowPaymentsCreateInvoiceRequest(BaseModel):
-    """Body for POST /v1/invoice (NOWPayments API)."""
+    """Body for POST /v1/invoice (NOWPayments API). USDT only; price_amount as string in payload."""
     order_id: str
-    price_amount: float
-    price_currency: str = "usd"
+    price_amount: Decimal
+    price_currency: str = "usdt"
     pay_currency: str = "usdtbsc"
     ipn_callback_url: Optional[str] = None
     success_url: Optional[str] = None
     cancel_url: Optional[str] = None
     order_description: Optional[str] = None
-    is_fixed_rate: bool = True
+    fixed_rate: bool = True
+
+
+# --- Normalized create-invoice response (for consumers) ---
+class CreateInvoiceNormalizedResponse(BaseModel):
+    """Normalized response from create_invoice: exact fields for payment flow."""
+    invoice_id: str
+    invoice_url: str
+    pay_address: str
+    pay_amount: str
+    pay_currency: str
 
 
 # --- API response (create invoice) ---
@@ -31,12 +41,12 @@ class NowPaymentsInvoiceResponse(BaseModel):
     order_id: Optional[str] = None
     invoice_id: Optional[str] = None
     invoice_url: Optional[str] = None
-    price_amount: Optional[float] = None
+    price_amount: Optional[Decimal] = None
     price_currency: Optional[str] = None
     pay_currency: Optional[str] = None
-    pay_amount: Optional[float] = None
-    actually_paid: Optional[float] = None
-    outcome_amount: Optional[float] = None
+    pay_amount: Optional[Decimal] = None
+    actually_paid: Optional[Decimal] = None
+    outcome_amount: Optional[Decimal] = None
     outcome_currency: Optional[str] = None
     order_description: Optional[str] = None
     created_at: Optional[str] = None
@@ -53,20 +63,19 @@ class NowPaymentsIPNPayload(BaseModel):
     payment_id: Optional[int] = None
     payment_status: Optional[str] = None
     pay_address: Optional[str] = None
-    price_amount: Optional[float] = None
+    price_amount: Optional[Decimal] = None
     price_currency: Optional[str] = None
-    pay_amount: Optional[float] = None
-    actually_paid: Optional[float] = None
+    pay_amount: Optional[Decimal] = None
+    actually_paid: Optional[Decimal] = None
     pay_currency: Optional[str] = None
     order_id: Optional[str] = None
     order_description: Optional[str] = None
-    outcome_amount: Optional[float] = None
+    outcome_amount: Optional[Decimal] = None
     outcome_currency: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 
-    class Config:
-        extra = "allow"
+    model_config = {"extra": "allow"}
 
     @classmethod
     def from_raw(cls, data: dict[str, Any]) -> "NowPaymentsIPNPayload":
