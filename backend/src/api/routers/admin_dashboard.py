@@ -30,6 +30,7 @@ from src.models import (
     AdminLog,
     PaymentInvoice,
     PaymentWebhookEvent,
+    SystemSettings,
 )
 from src.schemas.admin_dashboard import (
     DashboardStats,
@@ -57,6 +58,7 @@ from src.services.ledger_service import (
     get_balance_usdt,
 )
 from src.services.deal_service import get_active_deal, get_active_deal_legacy, open_new_deal
+from src.services.settings_service import invalidate_system_settings_cache
 
 
 router = APIRouter(prefix="/database/api", tags=["admin-dashboard"])
@@ -956,4 +958,97 @@ async def list_admin_logs(
         page=page,
         page_size=page_size,
     )
+
+
+@router.get("/system-settings")
+async def get_system_settings_admin(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    admin_token_id, _ = await get_admin_context(request)
+
+    result = await db.execute(select(SystemSettings).limit(1))
+    row = result.scalar_one()
+
+    await log_admin_action(
+        db=db,
+        admin_token_id=admin_token_id,
+        action_type="VIEW_SYSTEM_SETTINGS",
+        entity_type="SYSTEM_SETTINGS",
+        entity_id=0,
+    )
+
+    return {
+        "min_deposit_usdt": str(row.min_deposit_usdt),
+        "max_deposit_usdt": str(row.max_deposit_usdt),
+        "min_withdraw_usdt": str(row.min_withdraw_usdt),
+        "max_withdraw_usdt": str(row.max_withdraw_usdt),
+        "min_invest_usdt": str(row.min_invest_usdt),
+        "max_invest_usdt": str(row.max_invest_usdt),
+        "deal_amount_usdt": str(row.deal_amount_usdt),
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+    }
+
+
+@router.patch("/system-settings")
+async def update_system_settings_admin(
+    request: Request,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    admin_token_id, _ = await get_admin_context(request)
+
+    field = (str(body.get("field", "")).strip() if body.get("field") is not None else "")
+    raw_value = str(body.get("value", "")).replace(",", ".").strip()
+
+    if not field:
+        raise HTTPException(status_code=400, detail="field is required")
+    try:
+        value = Decimal(raw_value)
+    except Exception:
+        raise HTTPException(status_code=400, detail="value must be a number")
+    if value <= 0:
+        raise HTTPException(status_code=400, detail="value must be greater than 0")
+
+    allowed_fields = {
+        "min_deposit_usdt",
+        "max_deposit_usdt",
+        "min_withdraw_usdt",
+        "max_withdraw_usdt",
+        "min_invest_usdt",
+        "max_invest_usdt",
+        "deal_amount_usdt",
+    }
+    if field not in allowed_fields:
+        raise HTTPException(status_code=400, detail="unknown field")
+
+    async with db.begin():
+        result = await db.execute(select(SystemSettings).limit(1).with_for_update())
+        row = result.scalar_one()
+
+        if field == "min_deposit_usdt" and value >= row.max_deposit_usdt:
+            raise HTTPException(status_code=400, detail="Минимальный депозит должен быть меньше максимального")
+        if field == "max_deposit_usdt" and value <= row.min_deposit_usdt:
+            raise HTTPException(status_code=400, detail="Максимальный депозит должен быть больше минимального")
+        if field == "min_withdraw_usdt" and value >= row.max_withdraw_usdt:
+            raise HTTPException(status_code=400, detail="Минимальный вывод должен быть меньше максимального")
+        if field == "max_withdraw_usdt" and value <= row.min_withdraw_usdt:
+            raise HTTPException(status_code=400, detail="Максимальный вывод должен быть больше минимального")
+        if field == "min_invest_usdt" and value >= row.max_invest_usdt:
+            raise HTTPException(status_code=400, detail="Минимальная инвестиция должна быть меньше максимальной")
+        if field == "max_invest_usdt" and value <= row.min_invest_usdt:
+            raise HTTPException(status_code=400, detail="Максимальная инвестиция должна быть больше минимальной")
+
+        setattr(row, field, value)
+
+        await log_admin_action(
+            db=db,
+            admin_token_id=admin_token_id,
+            action_type="UPDATE_SYSTEM_SETTINGS",
+            entity_type="SYSTEM_SETTINGS",
+            entity_id=row.id,
+        )
+
+    invalidate_system_settings_cache()
+    return {"ok": True}
 

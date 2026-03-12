@@ -166,7 +166,7 @@ async function loadUsers() {
 }
 
 function switchSection(hash) {
-  const sections = ["dashboard", "users", "deals", "deposits", "withdrawals", "logs", "user"];
+  const sections = ["dashboard", "users", "deals", "deposits", "withdrawals", "logs", "settings", "user"];
   const sidebarLinks = document.querySelectorAll(".sidebar nav a");
   sections.forEach((name) => {
     const el = document.getElementById(`${name}-section`);
@@ -206,6 +206,8 @@ function switchSection(hash) {
     loadWithdrawals();
   } else if (hash === "#logs") {
     loadLogs();
+  } else if (hash === "#settings") {
+    loadSettings();
   }
 }
 
@@ -741,6 +743,97 @@ async function loadWithdrawals() {
     });
   } catch (e) {
     section.innerHTML = `<h1>Выводы</h1><div class="error">${e.message}</div>`;
+  }
+}
+
+async function loadSettings() {
+  const section = document.getElementById("settings-section");
+  section.innerHTML = "<h1>Настройки</h1><p>Загрузка...</p>";
+  try {
+    const s = await apiRequest("/system-settings");
+    section.innerHTML = `
+      <h1>Финансовые настройки</h1>
+      <p class="section-desc">Глобальные лимиты депозитов, выводов и инвестиций.</p>
+      <form id="settings-form" class="settings-form">
+        <div class="settings-grid">
+          <label>
+            Мин. депозит (USDT)
+            <input type="number" step="0.01" min="0" id="min_deposit_usdt" value="${s.min_deposit_usdt}" />
+          </label>
+          <label>
+            Макс. депозит (USDT)
+            <input type="number" step="0.01" min="0" id="max_deposit_usdt" value="${s.max_deposit_usdt}" />
+          </label>
+          <label>
+            Мин. вывод (USDT)
+            <input type="number" step="0.01" min="0" id="min_withdraw_usdt" value="${s.min_withdraw_usdt}" />
+          </label>
+          <label>
+            Макс. вывод (USDT)
+            <input type="number" step="0.01" min="0" id="max_withdraw_usdt" value="${s.max_withdraw_usdt}" />
+          </label>
+          <label>
+            Мин. инвестиция (USDT)
+            <input type="number" step="0.01" min="0" id="min_invest_usdt" value="${s.min_invest_usdt}" />
+          </label>
+          <label>
+            Макс. инвестиция (USDT)
+            <input type="number" step="0.01" min="0" id="max_invest_usdt" value="${s.max_invest_usdt}" />
+          </label>
+          <label>
+            Сумма участия в сделке (USDT)
+            <input type="number" step="0.01" min="0" id="deal_amount_usdt" value="${s.deal_amount_usdt}" />
+          </label>
+        </div>
+        <div class="toolbar">
+          <button type="submit">Сохранить</button>
+        </div>
+      </form>
+      <p class="section-desc small">Последнее обновление: ${s.updated_at ? new Date(s.updated_at).toLocaleString() : "—"}</p>
+    `;
+
+    const form = document.getElementById("settings-form");
+    if (form) {
+      form.onsubmit = async (e) => {
+        e.preventDefault();
+        const fields = [
+          "min_deposit_usdt",
+          "max_deposit_usdt",
+          "min_withdraw_usdt",
+          "max_withdraw_usdt",
+          "min_invest_usdt",
+          "max_invest_usdt",
+          "deal_amount_usdt",
+        ];
+        try {
+          for (const field of fields) {
+            const input = document.getElementById(field);
+            if (!input) continue;
+            const raw = input.value.trim().replace(",", ".");
+            const num = parseFloat(raw);
+            if (Number.isNaN(num) || num <= 0) {
+              alert(`Поле ${field} должно быть числом > 0`);
+              return;
+            }
+          }
+          for (const field of fields) {
+            const input = document.getElementById(field);
+            if (!input) continue;
+            const raw = input.value.trim().replace(",", ".");
+            await apiRequest("/system-settings", {
+              method: "PATCH",
+              body: JSON.stringify({ field, value: raw }),
+            });
+          }
+          alert("Настройки сохранены");
+          loadSettings();
+        } catch (e) {
+          alert(e.message);
+        }
+      };
+    }
+  } catch (e) {
+    section.innerHTML = `<h1>Настройки</h1><div class="error">${e.message}</div>`;
   }
 }
 
