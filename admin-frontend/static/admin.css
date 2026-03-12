@@ -288,14 +288,14 @@ body.dark {
 
 .content {
   flex: 1;
-  padding: 20px 40px 32px;
+  padding: 12px 40px 28px;
   box-sizing: border-box;
   max-width: 1200px;
   margin: 0 auto;
 }
 
 .section h1 {
-  margin: 4px 0 12px;
+  margin: 0 0 10px;
   font-size: 22px;
 }
 
@@ -417,7 +417,7 @@ th {
 /* --- Generic panel card (for sections) --- */
 
 .panel-card {
-  margin-top: 10px;
+  margin-top: 4px;
   background: radial-gradient(circle at 0% 0%, rgba(15, 23, 42, 0.92), #020617);
   border-radius: 14px;
   padding: 16px 18px 18px;
@@ -617,7 +617,7 @@ tbody tr:hover .row-actions {
 .section-desc {
   font-size: 13px;
   color: #9ca3af;
-  margin: -8px 0 12px;
+  margin: -2px 0 10px;
 }
 
 /* --- Settings (system settings) --- */
