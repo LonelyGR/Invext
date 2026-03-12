@@ -77,6 +77,14 @@ async def participate_in_deal(
         if not deal:
             raise ValueError("Нет активной сделки для участия")
 
+        # Лочим пользователя, чтобы защититься от гонок при списании баланса.
+        user_locked_result = await db.execute(
+            select(User).where(User.id == user.id).with_for_update()
+        )
+        user_locked = user_locked_result.scalar_one_or_none()
+        if not user_locked:
+            raise ValueError("User not found")
+
         existing = await db.execute(
             select(DealParticipation).where(
                 DealParticipation.deal_id == deal.id,
@@ -86,12 +94,12 @@ async def participate_in_deal(
         if existing.scalar_one_or_none():
             raise ValueError("Вы уже участвуете в этой сделке")
 
-        current_balance = await get_balance_usdt(db, user.id)
+        current_balance = await get_balance_usdt(db, user_locked.id)
         if current_balance < amount:
             raise ValueError("Недостаточно средств для участия")
 
         tx = LedgerTransaction(
-            user_id=user.id,
+            user_id=user_locked.id,
             type=LEDGER_TYPE_INVEST,
             amount_usdt=amount,
             metadata_json={"deal_id": deal.id},
@@ -100,18 +108,18 @@ async def participate_in_deal(
 
         participation = DealParticipation(
             deal_id=deal.id,
-            user_id=user.id,
+            user_id=user_locked.id,
             amount=amount,
         )
         db.add(participation)
         await db.flush()
 
-        user.balance_usdt = current_balance - amount
+        user_locked.balance_usdt = current_balance - amount
         await db.flush()
 
     logger.info(
         "Deal participation created: deal_id=%s user_id=%s amount=%s",
-        deal.id, user.id, amount,
+        deal.id, user_locked.id, amount,
     )
     return participation
 

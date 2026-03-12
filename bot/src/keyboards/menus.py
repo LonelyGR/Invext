@@ -7,14 +7,16 @@ from src.config.settings import ALLOWED_CURRENCIES
 
 
 def main_menu_kb() -> ReplyKeyboardMarkup:
-    """Главное меню: Профиль, Кошельки, Пополнить, Вывести, Партнеры, Оборот, Статистика, Инвестировать, Админка."""
+    """Главное меню: финансы, сделка, партнёрка, настройки, статистика, админка."""
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="👤 Профиль"), KeyboardButton(text="💼 Кошельки")],
-            [KeyboardButton(text="💳 Пополнить"), KeyboardButton(text="📤 Вывести")],
-            [KeyboardButton(text="👥 Партнеры"), KeyboardButton(text="📊 Оборот команды")],
-            [KeyboardButton(text="📈 Статистика"), KeyboardButton(text="💰 Инвестировать")],
-            [KeyboardButton(text="🔧 Админка")],
+            # ФИНАНСЫ
+            [KeyboardButton(text="💰 Баланс"), KeyboardButton(text="📈 Сделка")],
+            [KeyboardButton(text="📥 Пополнить"), KeyboardButton(text="📤 Вывести")],
+            # ПАРТНЁРКА / НАСТРОЙКИ
+            [KeyboardButton(text="👥 Рефералы"), KeyboardButton(text="⚙️ Кошелек")],
+            # СТАТИСТИКА / АДМИНКА
+            [KeyboardButton(text="📊 Статистика"), KeyboardButton(text="🔧 Админка")],
         ],
         resize_keyboard=True,
     )

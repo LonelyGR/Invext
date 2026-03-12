@@ -55,7 +55,7 @@ async def _send_wallets_list(target, telegram_id: int, text_prefix: str = "", ca
         await target.answer(text, reply_markup=kb)
 
 
-@router.message(F.text == "💼 Кошельки")
+@router.message(F.text == "⚙️ Кошелек")
 async def wallets_main(message: Message):
     await _send_wallets_list(message, message.from_user.id, can_edit=False)
 

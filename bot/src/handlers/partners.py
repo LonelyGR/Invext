@@ -36,7 +36,7 @@ def _get_partners_main_text(me: dict, link: str) -> str:
     return "\n".join(lines)
 
 
-@router.message(F.text == "👥 Партнеры")
+@router.message(F.text == "👥 Рефералы")
 async def partners(message: Message):
     telegram_id = message.from_user.id
     try:

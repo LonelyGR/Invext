@@ -10,8 +10,11 @@ from aiogram.fsm.state import State, StatesGroup
 from src.api_client.client import api
 from src.config.settings import MIN_WITHDRAW, MAX_WITHDRAW, ALLOWED_CURRENCIES
 from src.keyboards.menus import currency_kb, main_menu_kb
+from src.utils.locks import with_double_click_protection, release_double_click_lock
+import logging
 
 router = Router(name="withdraw")
+logger = logging.getLogger(__name__)
 
 
 class WithdrawStates(StatesGroup):
@@ -66,6 +69,8 @@ async def withdraw_amount_entered(message: Message, state: FSMContext):
 
 @router.message(WithdrawStates.entering_address, F.text)
 async def withdraw_address_entered(message: Message, state: FSMContext):
+    if not await with_double_click_protection(message, "withdraw"):
+        return
     address = (message.text or "").strip()
     if not address or len(address) > 512:
         await message.answer("Адрес не может быть пустым и не более 512 символов.")
@@ -95,8 +100,10 @@ async def withdraw_address_entered(message: Message, state: FSMContext):
                     err = body["detail"] if isinstance(body["detail"], str) else str(body["detail"])
             except Exception:
                 pass
+        logger.error("withdraw failed for user %s: %s", telegram_id, err)
         await message.answer(f"Ошибка: {err}")
         await state.clear()
+        await release_double_click_lock(telegram_id, "withdraw")
         return
 
     req_id = result.get("id", "—")
@@ -108,3 +115,5 @@ async def withdraw_address_entered(message: Message, state: FSMContext):
     )
     await state.clear()
     await state.set_data({})
+    await release_double_click_lock(telegram_id, "withdraw")
+    logger.info("user %s created withdraw request id=%s amount=%s %s", telegram_id, req_id, amount, currency)

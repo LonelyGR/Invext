@@ -11,8 +11,11 @@ from aiogram.types import Message
 
 from src.api_client.client import api
 from src.keyboards.menus import back_kb
+from src.utils.locks import with_double_click_protection, release_double_click_lock
+import logging
 
 router = Router(name="invest")
+logger = logging.getLogger(__name__)
 
 
 class InvestStates(StatesGroup):
@@ -29,7 +32,7 @@ def _format_invest_screen(available_usdt: str) -> str:
     )
 
 
-@router.message(F.text == "💰 Инвестировать")
+@router.message(F.text == "📈 Сделка")
 async def invest_section(message: Message, state: FSMContext):
     telegram_id = message.from_user.id
     try:
@@ -49,6 +52,8 @@ async def invest_section(message: Message, state: FSMContext):
 @router.message(InvestStates.entering_amount)
 async def invest_amount_entered(message: Message, state: FSMContext):
     telegram_id = message.from_user.id
+    if not await with_double_click_protection(message, "invest"):
+        return
     raw = message.text.replace(",", ".").strip()
 
     try:
@@ -73,8 +78,10 @@ async def invest_amount_entered(message: Message, state: FSMContext):
             except Exception:
                 pass
 
+        logger.error("invest failed for user %s: %s", telegram_id, err)
         await message.answer(f"Ошибка инвестирования: {err}")
         await state.clear()
+        await release_double_click_lock(telegram_id, "invest")
         return
 
     new_balance = result.get("balance_usdt")
@@ -88,3 +95,5 @@ async def invest_amount_entered(message: Message, state: FSMContext):
         "после её завершения согласно условиям."
     )
     await state.clear()
+    logger.info("user %s invested %s USDT into current deal", telegram_id, invested)
+    await release_double_click_lock(telegram_id, "invest")

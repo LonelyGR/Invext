@@ -2,8 +2,8 @@
 Точка входа бота: polling, регистрация роутеров и FSM.
 """
 import asyncio
-import logging
 import sys
+import logging
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
@@ -11,6 +11,8 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.enums import ParseMode
 
 from src.config.settings import BOT_TOKEN
+from src.logging_config import setup_bot_logging
+from src.middlewares.anti_abuse import AntiAbuseMiddleware
 from src.handlers import (
     start,
     profile,
@@ -23,13 +25,11 @@ from src.handlers import (
     invest,
     back,
     admin_handlers,
+    misc,
+    balance,
 )
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-    stream=sys.stdout,
-)
+setup_bot_logging()
 logger = logging.getLogger(__name__)
 
 
@@ -63,11 +63,17 @@ async def main() -> None:
     storage = MemoryStorage()
     dp = Dispatcher(storage=storage)
 
+    # Глобальная защита от спама/частых кликов.
+    anti_abuse = AntiAbuseMiddleware()
+    dp.message.middleware(anti_abuse)
+    dp.callback_query.middleware(anti_abuse)
+
     # Роутеры: порядок может иметь значение (более специфичные выше)
     dp.include_router(start.router)
     dp.include_router(admin_handlers.router)
     dp.include_router(profile.router)
     dp.include_router(wallets.router)
+    dp.include_router(balance.router)
     dp.include_router(deposit.router)
     dp.include_router(withdraw.router)
     dp.include_router(partners.router)
@@ -75,6 +81,8 @@ async def main() -> None:
     dp.include_router(stats.router)
     dp.include_router(invest.router)
     dp.include_router(back.router)
+    # Глобальный роутер для игнорирования нетекстовых сообщений (должен идти последним).
+    dp.include_router(misc.router)
 
     logger.info("Bot starting...")
     await dp.start_polling(bot)

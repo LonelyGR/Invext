@@ -11,8 +11,11 @@ from aiogram.fsm.state import State, StatesGroup
 from src.api_client.client import api
 from src.config.settings import MIN_DEPOSIT, MAX_DEPOSIT
 from src.keyboards.menus import main_menu_kb
+from src.utils.locks import with_double_click_protection, release_double_click_lock
+import logging
 
 router = Router(name="deposit")
+logger = logging.getLogger(__name__)
 
 
 class DepositStates(StatesGroup):
@@ -37,7 +40,7 @@ def _deposit_history_kb() -> InlineKeyboardMarkup:
     )
 
 
-@router.message(F.text == "💳 Пополнить")
+@router.message(F.text == "📥 Пополнить")
 async def deposit_start(message: Message, state: FSMContext):
     """Начать пополнение: спросить сумму для инвойса NOWPayments (USDT BEP20)."""
     await state.clear()
@@ -55,6 +58,8 @@ async def deposit_start(message: Message, state: FSMContext):
 
 @router.message(DepositStates.entering_amount, F.text)
 async def deposit_amount_entered(message: Message, state: FSMContext):
+    if not await with_double_click_protection(message, "deposit"):
+        return
     try:
         amount = Decimal(message.text.replace(",", ".").strip())
     except InvalidOperation:
@@ -80,16 +85,20 @@ async def deposit_amount_entered(message: Message, state: FSMContext):
                     err = body["detail"] if isinstance(body["detail"], str) else str(body["detail"])
             except Exception:
                 pass
+        logger.error("deposit invoice creation failed for user %s: %s", telegram_id, err)
         await message.answer(f"Ошибка при создании инвойса: {err}", reply_markup=main_menu_kb())
         await state.clear()
+        await release_double_click_lock(message.from_user.id, "deposit")
         return
 
     invoice_id = invoice.get("invoice_id")
     pay_url = invoice.get("invoice_url")
 
     if not invoice_id or not pay_url:
+        logger.error("deposit invoice missing url/id for user %s", telegram_id)
         await message.answer("Не удалось получить ссылку на оплату.", reply_markup=main_menu_kb())
         await state.clear()
+        await release_double_click_lock(message.from_user.id, "deposit")
         return
 
     await message.answer(
@@ -101,6 +110,8 @@ async def deposit_amount_entered(message: Message, state: FSMContext):
         reply_markup=_invoice_kb(pay_url, int(invoice_id)),
     )
     await state.clear()
+    await release_double_click_lock(message.from_user.id, "deposit")
+    logger.info("user %s created deposit invoice_id=%s amount=%s", telegram_id, invoice_id, amount)
 
 
 @router.callback_query(F.data == "deposit_history")
@@ -197,7 +208,7 @@ async def check_invoice_status(callback: CallbackQuery):
     if status == "finished" or balance_credited:
         await callback.message.edit_text(
             "✅ Оплата получена, баланс начислен.\n"
-            "Проверьте раздел «Профиль», чтобы увидеть новый баланс.",
+            "Проверьте раздел «Баланс», чтобы увидеть новый баланс.",
             reply_markup=main_menu_kb(),
         )
         await callback.answer()

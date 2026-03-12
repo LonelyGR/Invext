@@ -103,37 +103,43 @@ async def approve_withdraw(
     Подтвердить вывод: статус APPROVED, создать ledger-транзакцию WITHDRAW COMPLETED.
     Баланс при создании заявки уже проверялся; повторно не проверяем (админ подтверждает).
     """
-    result = await db.execute(
-        select(WithdrawRequest).where(WithdrawRequest.id == withdraw_id)
-    )
-    req = result.scalar_one_or_none()
-    if not req:
-        raise ValueError("Withdraw request not found")
-    if req.status != "PENDING":
-        raise ValueError(f"Request already {req.status}")
+    async with db.begin():
+        result = await db.execute(
+            select(WithdrawRequest).where(WithdrawRequest.id == withdraw_id).with_for_update()
+        )
+        req = result.scalar_one_or_none()
+        if not req:
+            raise ValueError("Withdraw request not found")
+        if req.status != "PENDING":
+            raise ValueError(f"Request already {req.status}")
 
-    # Двойная проверка баланса на случай гонки
-    usr = await db.get(User, req.user_id)
-    if not usr:
-        raise ValueError("User not found")
-    balances = await get_balances(db, usr.telegram_id)
-    if balances.get(req.currency, Decimal("0")) < req.amount:
-        raise ValueError("Недостаточно средств у пользователя")
+        # Лочим пользователя и повторно проверяем баланс, чтобы исключить гонки.
+        usr_result = await db.execute(
+            select(User).where(User.id == req.user_id).with_for_update()
+        )
+        usr = usr_result.scalar_one_or_none()
+        if not usr:
+            raise ValueError("User not found")
 
-    req.status = "APPROVED"
-    req.decided_at = datetime.now(timezone.utc)
-    req.decided_by = decided_by_telegram_id
+        balances = await get_balances(db, usr.telegram_id)
+        if balances.get(req.currency, Decimal("0")) < req.amount:
+            raise ValueError("Недостаточно средств у пользователя")
 
-    tx = WalletTransaction(
-        user_id=req.user_id,
-        currency=req.currency,
-        type="WITHDRAW",
-        amount=req.amount,
-        status="COMPLETED",
-        related_withdraw_request_id=req.id,
-    )
-    db.add(tx)
-    await db.flush()
+        req.status = "APPROVED"
+        req.decided_at = datetime.now(timezone.utc)
+        req.decided_by = decided_by_telegram_id
+
+        tx = WalletTransaction(
+            user_id=req.user_id,
+            currency=req.currency,
+            type="WITHDRAW",
+            amount=req.amount,
+            status="COMPLETED",
+            related_withdraw_request_id=req.id,
+        )
+        db.add(tx)
+        await db.flush()
+
     return req
 
 
