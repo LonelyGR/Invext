@@ -90,14 +90,17 @@ async function loadUsers() {
   const section = document.getElementById("users-section");
   section.innerHTML = `
     <h1>Пользователи</h1>
-    <div class="toolbar">
-      <div class="search-field">
-        <span class="search-field-icon">🔍</span>
-        <input id="users-search" type="text" placeholder="Поиск по username / Telegram ID" />
+    <p class="section-desc">Список пользователей, кеш баланса и текущие инвестиции.</p>
+    <div class="panel-card">
+      <div class="toolbar">
+        <div class="search-field">
+          <span class="search-field-icon">🔍</span>
+          <input id="users-search" type="text" placeholder="Поиск по username / Telegram ID" />
+        </div>
+        <button id="users-search-btn">Искать</button>
       </div>
-      <button id="users-search-btn">Искать</button>
+      <p>Загрузка...</p>
     </div>
-    <p>Загрузка...</p>
   `;
   try {
     const searchInput = document.getElementById("users-search");
@@ -122,28 +125,31 @@ async function loadUsers() {
       .join("");
     section.innerHTML = `
       <h1>Пользователи</h1>
-      <div class="toolbar">
-        <div class="search-field">
-          <span class="search-field-icon">🔍</span>
-          <input id="users-search" type="text" placeholder="Поиск по username / Telegram ID" />
+      <p class="section-desc">Список пользователей, кеш баланса и текущие инвестиции.</p>
+      <div class="panel-card">
+        <div class="toolbar">
+          <div class="search-field">
+            <span class="search-field-icon">🔍</span>
+            <input id="users-search" type="text" placeholder="Поиск по username / Telegram ID" />
+          </div>
+          <button id="users-search-btn">Искать</button>
         </div>
-        <button id="users-search-btn">Искать</button>
-      </div>
-      <div class="table-wrapper">
-        <div class="table-wrapper-inner">
-          <table>
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Telegram ID</th>
-                <th>Username</th>
-                <th>balance_usdt</th>
-                <th>ledger_balance</th>
-                <th>invested_now</th>
-              </tr>
-            </thead>
-            <tbody>${rows}</tbody>
-          </table>
+        <div class="table-wrapper">
+          <div class="table-wrapper-inner">
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Telegram ID</th>
+                  <th>Username</th>
+                  <th>balance_usdt</th>
+                  <th>ledger_balance</th>
+                  <th>invested_now</th>
+                </tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
         </div>
       </div>
     `;
@@ -239,26 +245,28 @@ async function loadDeals() {
 
     section.innerHTML = `
       <h1>Сделки</h1>
-      <div class="toolbar">
-        <button id="deal-open-now-btn">Открыть новую сделку</button>
-      </div>
-      <p>Здесь можно скорректировать процент доходности по каждой сделке (open/closed).</p>
-      <div class="table-wrapper">
-        <div class="table-wrapper-inner">
-          <table>
-            <thead>
-              <tr>
-                <th>№</th>
-                <th>Статус</th>
-                <th>% дохода</th>
-                <th>Открыта</th>
-                <th>Закрыта</th>
-                <th>Завершена</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>${rows}</tbody>
-          </table>
+      <p class="section-desc">Текущие и завершённые сделки, управление доходностью.</p>
+      <div class="panel-card">
+        <div class="toolbar">
+          <button id="deal-open-now-btn">Открыть новую сделку</button>
+        </div>
+        <div class="table-wrapper">
+          <div class="table-wrapper-inner">
+            <table>
+              <thead>
+                <tr>
+                  <th>№</th>
+                  <th>Статус</th>
+                  <th>% дохода</th>
+                  <th>Открыта</th>
+                  <th>Закрыта</th>
+                  <th>Завершена</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
         </div>
       </div>
     `;
@@ -386,72 +394,74 @@ async function loadDeposits(page = 1) {
 
     section.innerHTML = `
       <h1>Пополнения</h1>
-      <p class="section-desc">NOWPayments (USDT BEP20). Баланс начислен при статусе «Оплачен» (finished).</p>
-      <div class="toolbar filters-toolbar">
-        <label class="filter-label">
-          Статус
-          <select id="deposits-status-filter">
-            <option value="">Все</option>
-            <option value="waiting">Ожидает</option>
-            <option value="finished">Оплачен</option>
-            <option value="partially_paid">Частично оплачен</option>
-            <option value="expired">Истёк</option>
-            <option value="failed">Ошибка</option>
-          </select>
-        </label>
-        <label class="filter-label">
-          User ID
-          <input type="number" id="deposits-user-id" placeholder="ID пользователя" min="1" />
-        </label>
-        <label class="filter-label">
-          Order ID
-          <input type="text" id="deposits-order-id" placeholder="order_id" />
-        </label>
-        <label class="filter-label">
-          External ID
-          <input type="text" id="deposits-external-id" placeholder="external_invoice_id" />
-        </label>
-        <label class="filter-label">
-          Дата от
-          <input type="date" id="deposits-date-from" />
-        </label>
-        <label class="filter-label">
-          Дата до
-          <input type="date" id="deposits-date-to" />
-        </label>
-        <label class="filter-label">
-          Сортировка
-          <select id="deposits-sort">
-            <option value="created_at_desc">Сначала новые</option>
-            <option value="created_at_asc">Сначала старые</option>
-            <option value="amount_desc">Сумма ↓</option>
-            <option value="amount_asc">Сумма ↑</option>
-            <option value="status">По статусу</option>
-          </select>
-        </label>
-        <button type="button" id="deposits-apply-filters">Применить</button>
-      </div>
-      ${paginationHtml}
-      <div class="table-wrapper">
-        <div class="table-wrapper-inner">
-          <table>
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Order ID</th>
-                <th>Пользователь</th>
-                <th>Сумма</th>
-                <th>Статус</th>
-                <th>Баланс начислен</th>
-                <th>Создан</th>
-                <th>Завершён</th>
-              </tr>
-            </thead>
-            <tbody>${rows}</tbody>
-          </table>
+      <p class="section-desc">NOWPayments (USDT BEP20). История и статус всех депозитов.</p>
+      <div class="panel-card">
+        <div class="toolbar filters-toolbar">
+          <label class="filter-label">
+            Статус
+            <select id="deposits-status-filter">
+              <option value="">Все</option>
+              <option value="waiting">Ожидает</option>
+              <option value="finished">Оплачен</option>
+              <option value="partially_paid">Частично оплачен</option>
+              <option value="expired">Истёк</option>
+              <option value="failed">Ошибка</option>
+            </select>
+          </label>
+          <label class="filter-label">
+            User ID
+            <input type="number" id="deposits-user-id" placeholder="ID пользователя" min="1" />
+          </label>
+          <label class="filter-label">
+            Order ID
+            <input type="text" id="deposits-order-id" placeholder="order_id" />
+          </label>
+          <label class="filter-label">
+            External ID
+            <input type="text" id="deposits-external-id" placeholder="external_invoice_id" />
+          </label>
+          <label class="filter-label">
+            Дата от
+            <input type="date" id="deposits-date-from" />
+          </label>
+          <label class="filter-label">
+            Дата до
+            <input type="date" id="deposits-date-to" />
+          </label>
+          <label class="filter-label">
+            Сортировка
+            <select id="deposits-sort">
+              <option value="created_at_desc">Сначала новые</option>
+              <option value="created_at_asc">Сначала старые</option>
+              <option value="amount_desc">Сумма ↓</option>
+              <option value="amount_asc">Сумма ↑</option>
+              <option value="status">По статусу</option>
+            </select>
+          </label>
+          <button type="button" id="deposits-apply-filters">Применить</button>
         </div>
+        ${paginationHtml}
+        <div class="table-wrapper">
+          <div class="table-wrapper-inner">
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Order ID</th>
+                  <th>Пользователь</th>
+                  <th>Сумма</th>
+                  <th>Статус</th>
+                  <th>Баланс начислен</th>
+                  <th>Создан</th>
+                  <th>Завершён</th>
+                </tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+        </div>
+        ${paginationHtml}
       </div>
-      ${paginationHtml}
     `;
 
     document.getElementById("deposits-apply-filters").addEventListener("click", () => loadDeposits(1));
@@ -592,61 +602,66 @@ async function loadUserDetail(userId) {
 
     section.innerHTML = `
       <h1>Пользователь #${u.id}</h1>
-      <div>Telegram ID: <strong>${u.telegram_id}</strong></div>
-      <div>Username: <strong>${u.username || ""}</strong></div>
-      <div>balance_usdt: <strong>${u.balance_usdt}</strong></div>
-      <div>ledger_balance: <strong>${u.ledger_balance_usdt}</strong> ${mismatch}</div>
-      <h2>Ledger</h2>
-      <div class="toolbar">
-        <button id="ledger-export-btn">Экспорт CSV</button>
-      </div>
-      <div class="table-wrapper">
-        <div class="table-wrapper-inner">
-          <table>
-            <thead>
-              <tr>
-                <th>Дата</th>
-                <th>Тип</th>
-                <th>Сумма</th>
-              </tr>
-            </thead>
-            <tbody>${ledgerRows}</tbody>
-          </table>
+      <p class="section-desc">Карточка пользователя, его операции и заявки на вывод.</p>
+      <div class="panel-card">
+        <div class="toolbar">
+          <div>
+            <div>Telegram ID: <strong>${u.telegram_id}</strong></div>
+            <div>Username: <strong>${u.username || ""}</strong></div>
+            <div>balance_usdt: <strong>${u.balance_usdt}</strong></div>
+            <div>ledger_balance: <strong>${u.ledger_balance_usdt}</strong> ${mismatch}</div>
+          </div>
+          <button id="ledger-export-btn">Экспорт CSV</button>
         </div>
-      </div>
-      <h2>Инвестиции</h2>
-      <div class="table-wrapper">
-        <div class="table-wrapper-inner">
-          <table>
-            <thead>
-              <tr>
-                <th>Сделка</th>
-                <th>Статус</th>
-                <th>Сумма</th>
-                <th>Профит</th>
-                <th>Создано</th>
-              </tr>
-            </thead>
-            <tbody>${invRows}</tbody>
-          </table>
+        <h2>Ledger</h2>
+        <div class="table-wrapper">
+          <div class="table-wrapper-inner">
+            <table>
+              <thead>
+                <tr>
+                  <th>Дата</th>
+                  <th>Тип</th>
+                  <th>Сумма</th>
+                </tr>
+              </thead>
+              <tbody>${ledgerRows}</tbody>
+            </table>
+          </div>
         </div>
-      </div>
-      <h2>Заявки на вывод</h2>
-      <div class="table-wrapper">
-        <div class="table-wrapper-inner">
-          <table>
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Сумма</th>
-                <th>Валюта</th>
-                <th>Кошелек</th>
-                <th>Статус</th>
-                <th>Создано</th>
-              </tr>
-            </thead>
-            <tbody>${wRows}</tbody>
-          </table>
+        <h2>Инвестиции</h2>
+        <div class="table-wrapper">
+          <div class="table-wrapper-inner">
+            <table>
+              <thead>
+                <tr>
+                  <th>Сделка</th>
+                  <th>Статус</th>
+                  <th>Сумма</th>
+                  <th>Профит</th>
+                  <th>Создано</th>
+                </tr>
+              </thead>
+              <tbody>${invRows}</tbody>
+            </table>
+          </div>
+        </div>
+        <h2>Заявки на вывод</h2>
+        <div class="table-wrapper">
+          <div class="table-wrapper-inner">
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Сумма</th>
+                  <th>Валюта</th>
+                  <th>Кошелек</th>
+                  <th>Статус</th>
+                  <th>Создано</th>
+                </tr>
+              </thead>
+              <tbody>${wRows}</tbody>
+            </table>
+          </div>
         </div>
       </div>
     `;
@@ -694,34 +709,36 @@ async function loadWithdrawals() {
       .join("");
     section.innerHTML = `
       <h1>Выводы</h1>
-      <p class="section-desc">Заявки на вывод. Фильтр по статусу.</p>
-      <div class="toolbar filters-toolbar">
-        <label class="filter-label">
-          Статус
-          <select id="withdrawals-status-filter">
-            <option value="PENDING" ${statusParam === "PENDING" ? "selected" : ""}>Ожидают</option>
-            <option value="APPROVED" ${statusParam === "APPROVED" ? "selected" : ""}>Подтверждённые</option>
-            <option value="REJECTED" ${statusParam === "REJECTED" ? "selected" : ""}>Отклонённые</option>
-          </select>
-        </label>
-        <button type="button" id="withdrawals-apply-filters">Применить</button>
-      </div>
-      <div class="table-wrapper">
-        <div class="table-wrapper-inner">
-          <table>
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Telegram ID</th>
-                <th>Username</th>
-                <th>Сумма</th>
-                <th>Кошелек</th>
-                <th>Статус</th>
-                <th>Действия</th>
-              </tr>
-            </thead>
-            <tbody>${rows}</tbody>
-          </table>
+      <p class="section-desc">Управление заявками на вывод средств.</p>
+      <div class="panel-card">
+        <div class="toolbar filters-toolbar">
+          <label class="filter-label">
+            Статус
+            <select id="withdrawals-status-filter">
+              <option value="PENDING" ${statusParam === "PENDING" ? "selected" : ""}>Ожидают</option>
+              <option value="APPROVED" ${statusParam === "APPROVED" ? "selected" : ""}>Подтверждённые</option>
+              <option value="REJECTED" ${statusParam === "REJECTED" ? "selected" : ""}>Отклонённые</option>
+            </select>
+          </label>
+          <button type="button" id="withdrawals-apply-filters">Применить</button>
+        </div>
+        <div class="table-wrapper">
+          <div class="table-wrapper-inner">
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Telegram ID</th>
+                  <th>Username</th>
+                  <th>Сумма</th>
+                  <th>Кошелек</th>
+                  <th>Статус</th>
+                  <th>Действия</th>
+                </tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
         </div>
       </div>
     `;
@@ -934,20 +951,23 @@ async function loadLogs() {
       .join("");
     section.innerHTML = `
       <h1>Логи</h1>
-      <div class="table-wrapper">
-        <div class="table-wrapper-inner">
-          <table>
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Действие</th>
-                <th>Тип сущности</th>
-                <th>Entity ID</th>
-                <th>Дата</th>
-              </tr>
-            </thead>
-            <tbody>${rows}</tbody>
-          </table>
+      <p class="section-desc">Действия админов в системе.</p>
+      <div class="panel-card">
+        <div class="table-wrapper">
+          <div class="table-wrapper-inner">
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Действие</th>
+                  <th>Тип сущности</th>
+                  <th>Entity ID</th>
+                  <th>Дата</th>
+                </tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
         </div>
       </div>
     `;

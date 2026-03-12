@@ -19,37 +19,56 @@
 
     <div id="main-view" class="view hidden">
       <aside class="sidebar">
-        <h2>Invext</h2>
+        <div class="sidebar-header">
+          <div class="sidebar-logo-mark">IV</div>
+          <div class="sidebar-title-block">
+            <h2>Invext</h2>
+            <div class="sidebar-subtitle">Admin Control Center</div>
+          </div>
+        </div>
         <nav>
+          <div class="sidebar-group-label">Управление</div>
           <a href="#dashboard" data-section="dashboard">
-
+            <span class="nav-icon">📊</span>
             <span class="nav-label">Дашборд</span>
           </a>
           <a href="#users" data-section="users">
-
+            <span class="nav-icon">👤</span>
             <span class="nav-label">Пользователи</span>
           </a>
           <a href="#deals" data-section="deals">
-
+            <span class="nav-icon">📈</span>
             <span class="nav-label">Сделки</span>
           </a>
+          <div class="sidebar-group-label">Финансы</div>
           <a href="#deposits" data-section="deposits">
-
+            <span class="nav-icon">💰</span>
             <span class="nav-label">Пополнения</span>
           </a>
           <a href="#withdrawals" data-section="withdrawals">
-
+            <span class="nav-icon">📤</span>
             <span class="nav-label">Выводы</span>
           </a>
+          <div class="sidebar-group-label">Система</div>
           <a href="#logs" data-section="logs">
-
+            <span class="nav-icon">🧾</span>
             <span class="nav-label">Логи</span>
           </a>
           <a href="#settings" data-section="settings">
-
+            <span class="nav-icon">⚙️</span>
             <span class="nav-label">Настройки</span>
           </a>
         </nav>
+        <div class="sidebar-footer">
+          <div class="sidebar-admin-avatar">A</div>
+          <div class="sidebar-admin-meta">
+            <div class="sidebar-admin-name">Admin</div>
+            <div class="sidebar-admin-status">
+              <span class="sidebar-status-dot"></span>
+              Online
+            </div>
+          </div>
+        </div>
       </aside>
       <main class="content">
         <section id="dashboard-section" class="section"></section>

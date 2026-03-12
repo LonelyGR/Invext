@@ -3,6 +3,21 @@ body.dark {
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   background-color: #0f172a;
   color: #e5e7eb;
+  position: relative;
+  overflow-x: hidden;
+}
+
+body.dark::before {
+  content: "";
+  position: fixed;
+  inset: -200px;
+  background:
+    radial-gradient(circle at 0% 0%, rgba(37, 99, 235, 0.22), transparent 55%),
+    radial-gradient(circle at 100% 100%, rgba(8, 47, 73, 0.6), transparent 55%),
+    radial-gradient(circle at 120% -10%, rgba(56, 189, 248, 0.15), transparent 55%);
+  opacity: 0.75;
+  pointer-events: none;
+  z-index: -1;
 }
 
 .view.hidden {
@@ -67,22 +82,53 @@ button:hover {
 }
 
 .sidebar {
-  width: 230px;
-  background: #020617;
-  padding: 18px 16px;
+  width: 260px;
+  background: radial-gradient(circle at top left, rgba(15, 23, 42, 0.9), #020617);
+  padding: 18px 16px 14px;
   box-sizing: border-box;
   border-right: 1px solid #111827;
+  display: flex;
+  flex-direction: column;
 }
 
-.sidebar h2 {
-  margin: 0 0 16px;
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.sidebar-logo-mark {
+  width: 32px;
+  height: 32px;
+  border-radius: 12px;
+  background: radial-gradient(circle at 30% 0%, #60a5fa, #1d4ed8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 700;
+  color: #eff6ff;
+  box-shadow: 0 12px 30px rgba(37, 99, 235, 0.7);
+}
+
+.sidebar-title-block h2 {
+  margin: 0;
   font-size: 18px;
+}
+
+.sidebar-subtitle {
+  margin-top: 2px;
+  font-size: 11px;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
 }
 
 .sidebar nav {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
 }
 
 .sidebar nav a {
@@ -91,14 +137,19 @@ button:hover {
   gap: 8px;
   color: #9ca3af;
   text-decoration: none;
-  padding: 8px 10px;
-  border-radius: 8px;
+  padding: 7px 10px;
+  border-radius: 9px;
   font-size: 14px;
-  transition: background-color 0.15s ease, color 0.15s ease;
+  position: relative;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease,
+    transform 0.08s ease,
+    box-shadow 0.15s ease;
 }
 
 .sidebar nav a .nav-icon {
-  width: 18px;
+  width: 20px;
   text-align: center;
   opacity: 0.8;
 }
@@ -110,12 +161,71 @@ button:hover {
 .sidebar nav a:hover {
   background: rgba(15, 23, 42, 0.95);
   color: #e5e7eb;
+  transform: translateX(1px);
 }
 
 .sidebar nav a.active {
-  background: #111827;
+  background: radial-gradient(circle at 0% 0%, rgba(37, 99, 235, 0.6), rgba(15, 23, 42, 0.98));
   color: #e5e7eb;
   font-weight: 600;
+  box-shadow: inset 2px 0 0 #3b82f6, 0 10px 30px rgba(15, 23, 42, 0.9);
+}
+
+.sidebar-group-label {
+  margin: 10px 4px 4px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: #4b5563;
+}
+
+.sidebar-footer {
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid #111827;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.sidebar-admin-avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #1d4ed8, #4f46e5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 600;
+  color: #e5e7eb;
+}
+
+.sidebar-admin-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+}
+
+.sidebar-admin-name {
+  font-weight: 500;
+}
+
+.sidebar-admin-status {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: #6b7280;
+  font-size: 11px;
+}
+
+.sidebar-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #22c55e;
+  box-shadow: 0 0 6px rgba(34, 197, 94, 0.8);
 }
 
 .content {
@@ -302,6 +412,17 @@ th {
 
 .stat-card.stat-wide {
   grid-column: span 2;
+}
+
+/* --- Generic panel card (for sections) --- */
+
+.panel-card {
+  margin-top: 10px;
+  background: #020617;
+  border-radius: 14px;
+  padding: 16px 18px 18px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+  border: 1px solid #111827;
 }
 
 /* --- Clickable user rows --- */
