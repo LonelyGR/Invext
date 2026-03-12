@@ -1,7 +1,7 @@
 """system settings singleton table
 
-Revision ID: 013_system_settings
-Revises: 012_add_updated_at_to_withdraw_requests
+Revision ID: 013
+Revises: 012
 Create Date: 2026-03-12 00:00:00.000000
 """
 
@@ -11,8 +11,8 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision = "013_system_settings"
-down_revision = "012_add_updated_at_to_withdraw_requests"
+revision = "013"
+down_revision = "012"
 branch_labels = None
 depends_on = None
 
