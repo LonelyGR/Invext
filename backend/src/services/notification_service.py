@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import logging
-from typing import List
+from typing import List, Optional
 
 import httpx
 
@@ -25,9 +25,59 @@ async def send_telegram_message(chat_id: int, text: str) -> bool:
             r = await client.post(url, json={"chat_id": chat_id, "text": text})
             r.raise_for_status()
         return True
+    except httpx.HTTPStatusError as e:
+        body = ""
+        try:
+            body = e.response.text
+        except Exception:
+            body = ""
+        logger.warning(
+            "Failed to send Telegram message to %s: status=%s body=%s",
+            chat_id,
+            getattr(e.response, "status_code", None),
+            body[:1000],
+        )
+        return False
     except Exception as e:
         logger.warning("Failed to send Telegram message to %s: %s", chat_id, e)
         return False
+
+
+async def broadcast_deal_opened(
+    telegram_ids: List[int],
+    deal_number: int,
+    *,
+    opens_at: Optional[str] = None,
+    closes_at: Optional[str] = None,
+) -> None:
+    """
+    Рассылка об открытии новой сделки всем пользователям.
+    Устойчива: ошибки отправки одному пользователю не ломают рассылку.
+    """
+    if not telegram_ids:
+        return
+
+    parts = [
+        f"🔔 Открыт сбор на сделку #{deal_number}.",
+        "Вы можете инвестировать USDT в разделе «💰 Инвестировать».",
+    ]
+    if opens_at:
+        parts.append(f"Открытие: {opens_at}")
+    if closes_at:
+        parts.append(f"Закрытие: {closes_at}")
+    text = "\n".join(parts)
+
+    sent = 0
+    for tid in telegram_ids:
+        if await send_telegram_message(tid, text):
+            sent += 1
+
+    logger.info(
+        "broadcast_deal_opened: deal_number=%s total=%s sent=%s",
+        deal_number,
+        len(telegram_ids),
+        sent,
+    )
 
 
 async def broadcast_deal_closed(

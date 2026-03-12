@@ -75,6 +75,17 @@ docker compose up --build
 
 Миграции Alembic применяются автоматически при старте backend (`alembic upgrade head` в `Dockerfile`).
 
+### 3.1 Частая проблема: PostgreSQL user/пароль не совпадают
+
+Если вы ранее уже запускали PostgreSQL с другими `POSTGRES_USER/POSTGRES_PASSWORD`, то volume `postgres_data`
+содержит старые роли и база **не создаст** новых пользователей автоматически. Симптом в логах:
+
+`Role "postgres" does not exist` / `password authentication failed`.
+
+Решение:
+- либо обновить `DATABASE_URL` в `.env` под существующего пользователя в volume;
+- либо удалить volume и поднять БД заново (на dev): `docker compose down -v` (осторожно: удалит данные).
+
 Остановка и чистый запуск:
 
 ```bash
