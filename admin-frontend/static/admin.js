@@ -754,42 +754,75 @@ async function loadSettings() {
     section.innerHTML = `
       <h1>Финансовые настройки</h1>
       <p class="section-desc">Глобальные лимиты депозитов, выводов и инвестиций.</p>
-      <form id="settings-form" class="settings-form">
-        <div class="settings-grid">
-          <label>
-            Мин. депозит (USDT)
-            <input type="number" step="0.01" min="0" id="min_deposit_usdt" value="${s.min_deposit_usdt}" />
-          </label>
-          <label>
-            Макс. депозит (USDT)
-            <input type="number" step="0.01" min="0" id="max_deposit_usdt" value="${s.max_deposit_usdt}" />
-          </label>
-          <label>
-            Мин. вывод (USDT)
-            <input type="number" step="0.01" min="0" id="min_withdraw_usdt" value="${s.min_withdraw_usdt}" />
-          </label>
-          <label>
-            Макс. вывод (USDT)
-            <input type="number" step="0.01" min="0" id="max_withdraw_usdt" value="${s.max_withdraw_usdt}" />
-          </label>
-          <label>
-            Мин. инвестиция (USDT)
-            <input type="number" step="0.01" min="0" id="min_invest_usdt" value="${s.min_invest_usdt}" />
-          </label>
-          <label>
-            Макс. инвестиция (USDT)
-            <input type="number" step="0.01" min="0" id="max_invest_usdt" value="${s.max_invest_usdt}" />
-          </label>
-          <label>
-            Сумма участия в сделке (USDT)
-            <input type="number" step="0.01" min="0" id="deal_amount_usdt" value="${s.deal_amount_usdt}" />
-          </label>
+      <div class="settings-card">
+        <div class="settings-header">
+          <h2>Лимиты операций</h2>
+          <p>Изменения применяются глобально для всех пользователей и бота.</p>
         </div>
-        <div class="toolbar">
-          <button type="submit">Сохранить</button>
-        </div>
-      </form>
-      <p class="section-desc small">Последнее обновление: ${s.updated_at ? new Date(s.updated_at).toLocaleString() : "—"}</p>
+        <form id="settings-form" class="settings-form">
+          <div class="settings-grid">
+            <div class="settings-field">
+              <div>
+                <div class="settings-label">Мин. депозит (USDT)</div>
+                <div class="settings-hint">Минимальная сумма пополнения</div>
+              </div>
+              <input type="number" step="0.01" min="0" id="min_deposit_usdt" class="settings-input" value="${s.min_deposit_usdt}" />
+            </div>
+            <div class="settings-field">
+              <div>
+                <div class="settings-label">Макс. депозит (USDT)</div>
+                <div class="settings-hint">Максимальная сумма пополнения</div>
+              </div>
+              <input type="number" step="0.01" min="0" id="max_deposit_usdt" class="settings-input" value="${s.max_deposit_usdt}" />
+            </div>
+            <div class="settings-field">
+              <div>
+                <div class="settings-label">Мин. вывод (USDT)</div>
+                <div class="settings-hint">Минимальная сумма вывода</div>
+              </div>
+              <input type="number" step="0.01" min="0" id="min_withdraw_usdt" class="settings-input" value="${s.min_withdraw_usdt}" />
+            </div>
+            <div class="settings-field">
+              <div>
+                <div class="settings-label">Макс. вывод (USDT)</div>
+                <div class="settings-hint">Максимальная сумма вывода</div>
+              </div>
+              <input type="number" step="0.01" min="0" id="max_withdraw_usdt" class="settings-input" value="${s.max_withdraw_usdt}" />
+            </div>
+            <div class="settings-field">
+              <div>
+                <div class="settings-label">Мин. инвестиция (USDT)</div>
+                <div class="settings-hint">Минимальная сумма участия</div>
+              </div>
+              <input type="number" step="0.01" min="0" id="min_invest_usdt" class="settings-input" value="${s.min_invest_usdt}" />
+            </div>
+            <div class="settings-field">
+              <div>
+                <div class="settings-label">Макс. инвестиция (USDT)</div>
+                <div class="settings-hint">Максимальная сумма участия</div>
+              </div>
+              <input type="number" step="0.01" min="0" id="max_invest_usdt" class="settings-input" value="${s.max_invest_usdt}" />
+            </div>
+          </div>
+          <div class="settings-row-deal">
+            <div class="settings-field">
+              <div>
+                <div class="settings-label">Сумма сделки (USDT)</div>
+                <div class="settings-hint">Фиксированная сумма участия в сделке</div>
+              </div>
+              <input type="number" step="0.01" min="0" id="deal_amount_usdt" class="settings-input" value="${s.deal_amount_usdt}" />
+            </div>
+          </div>
+          <div class="settings-footer">
+            <div class="settings-updated-at">
+              Последнее обновление: ${s.updated_at ? new Date(s.updated_at).toLocaleString() : "—"}
+            </div>
+            <button type="submit" id="settings-save-btn" class="btn-primary-wide">
+              <span class="btn-label">Сохранить</span>
+            </button>
+          </div>
+        </form>
+      </div>
     `;
 
     const form = document.getElementById("settings-form");
@@ -805,36 +838,81 @@ async function loadSettings() {
           "max_invest_usdt",
           "deal_amount_usdt",
         ];
+        const saveBtn = document.getElementById("settings-save-btn");
+        const originalText = saveBtn ? saveBtn.innerHTML : "";
         try {
+          // Frontend-валидация: числа, > 0, min < max.
+          const values = {};
           for (const field of fields) {
             const input = document.getElementById(field);
             if (!input) continue;
             const raw = input.value.trim().replace(",", ".");
             const num = parseFloat(raw);
             if (Number.isNaN(num) || num <= 0) {
-              alert(`Поле ${field} должно быть числом > 0`);
+              alert(`Поле "${field}" должно быть числом больше 0`);
               return;
             }
+            values[field] = num;
           }
+
+          if (values.min_deposit_usdt >= values.max_deposit_usdt) {
+            alert("Мин. депозит должен быть меньше макс. депозита");
+            return;
+          }
+          if (values.min_withdraw_usdt >= values.max_withdraw_usdt) {
+            alert("Мин. вывод должен быть меньше макс. вывода");
+            return;
+          }
+          if (values.min_invest_usdt >= values.max_invest_usdt) {
+            alert("Мин. инвестиция должна быть меньше макс. инвестиции");
+            return;
+          }
+
+          if (saveBtn) {
+            saveBtn.disabled = true;
+            saveBtn.innerHTML = '<span class="btn-spinner"></span><span>Сохранение…</span>';
+          }
+
           for (const field of fields) {
-            const input = document.getElementById(field);
-            if (!input) continue;
-            const raw = input.value.trim().replace(",", ".");
             await apiRequest("/system-settings", {
               method: "PATCH",
-              body: JSON.stringify({ field, value: raw }),
+              body: JSON.stringify({ field, value: String(values[field]) }),
             });
           }
-          alert("Настройки сохранены");
+          showToast("Настройки успешно обновлены");
           loadSettings();
         } catch (e) {
           alert(e.message);
+        } finally {
+          if (saveBtn) {
+            saveBtn.disabled = false;
+            saveBtn.innerHTML = originalText;
+          }
         }
       };
     }
   } catch (e) {
     section.innerHTML = `<h1>Настройки</h1><div class="error">${e.message}</div>`;
   }
+}
+
+function showToast(message) {
+  const existing = document.querySelector(".toast");
+  if (existing) {
+    existing.remove();
+  }
+  const el = document.createElement("div");
+  el.className = "toast";
+  el.innerHTML = `
+    <span class="toast-icon">✅</span>
+    <span class="toast-message">${message}</span>
+  `;
+  document.body.appendChild(el);
+  setTimeout(() => {
+    el.classList.add("toast-hide");
+    el.style.opacity = "0";
+    setTimeout(() => el.remove(), 300);
+  }, 2500);
 }
 
 async function loadLogs() {

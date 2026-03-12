@@ -460,6 +460,168 @@ tbody tr:hover .row-actions {
   margin: -8px 0 12px;
 }
 
+/* --- Settings (system settings) --- */
+
+.settings-card {
+  margin-top: 12px;
+  background: #020617;
+  border-radius: 14px;
+  padding: 20px 22px;
+  box-shadow: 0 18px 45px rgba(0, 0, 0, 0.55);
+  border: 1px solid #111827;
+}
+
+.settings-header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 18px;
+}
+
+.settings-header h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.settings-header p {
+  margin: 0;
+  font-size: 13px;
+  color: #9ca3af;
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px 20px;
+  margin-bottom: 20px;
+}
+
+.settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.settings-label {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.settings-hint {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.settings-input {
+  padding: 10px 12px;
+  border-radius: 9px;
+  border: 1px solid #374151;
+  background: #020617;
+  color: #e5e7eb;
+  font-size: 14px;
+  box-sizing: border-box;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease, background-color 0.12s ease;
+}
+
+.settings-input:hover {
+  border-color: #4b5563;
+  background: #020617;
+}
+
+.settings-input:focus {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.5);
+}
+
+.settings-row-deal {
+  margin-top: 4px;
+}
+
+.settings-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.settings-updated-at {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.btn-primary-wide {
+  width: auto;
+  min-width: 180px;
+  padding: 11px 20px;
+  border-radius: 999px;
+  border: none;
+  background: #2563eb;
+  color: #f9fafb;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: background-color 0.15s ease, transform 0.08s ease;
+}
+
+.btn-primary-wide:hover {
+  background: #1d4ed8;
+}
+
+.btn-primary-wide:active {
+  transform: translateY(1px);
+}
+
+.btn-primary-wide[disabled] {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.btn-spinner {
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  border: 2px solid rgba(239, 246, 255, 0.35);
+  border-top-color: #eff6ff;
+  animation: btn-spin 0.8s linear infinite;
+}
+
+@keyframes btn-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.toast {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.98);
+  border: 1px solid rgba(37, 99, 235, 0.7);
+  color: #e5e7eb;
+  font-size: 13px;
+  box-shadow: 0 20px 45px rgba(0, 0, 0, 0.6);
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.toast-icon {
+  color: #4ade80;
+}
+
+.toast-message {
+  flex: 1;
+}
+
 /* --- Modal --- */
 
 .modal-overlay {
