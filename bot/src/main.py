@@ -27,6 +27,7 @@ from src.handlers import (
     admin_handlers,
     misc,
     balance,
+    fallback,
 )
 
 setup_bot_logging()
@@ -81,8 +82,10 @@ async def main() -> None:
     dp.include_router(stats.router)
     dp.include_router(invest.router)
     dp.include_router(back.router)
-    # Глобальный роутер для игнорирования нетекстовых сообщений (должен идти последним).
+    # Глобальный роутер для игнорирования нетекстовых сообщений.
     dp.include_router(misc.router)
+    # Fallback-хендлеры для неизвестных апдейтов (должен идти самым последним).
+    dp.include_router(fallback.router)
 
     logger.info("Bot starting...")
     await dp.start_polling(bot)

@@ -6,18 +6,23 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeybo
 from src.config.settings import ALLOWED_CURRENCIES
 
 
-def main_menu_kb() -> ReplyKeyboardMarkup:
-    """Главное меню: финансы, сделка, партнёрка, настройки, статистика, админка."""
+def main_menu_kb(is_admin: bool = False) -> ReplyKeyboardMarkup:
+    """Главное меню: финансы, сделка, партнёрка, настройки, статистика, админка (только для админов)."""
+    keyboard: list[list[KeyboardButton]] = [
+        # ФИНАНСЫ
+        [KeyboardButton(text="💰 Баланс"), KeyboardButton(text="📈 Сделка")],
+        [KeyboardButton(text="📥 Пополнить"), KeyboardButton(text="📤 Вывести")],
+        # ПАРТНЁРКА / НАСТРОЙКИ
+        [KeyboardButton(text="👥 Рефералы"), KeyboardButton(text="⚙️ Кошелек")],
+        # СТАТИСТИКА
+        [KeyboardButton(text="📊 Статистика")],
+    ]
+    if is_admin:
+        # АДМИН (только для админов)
+        keyboard.append([KeyboardButton(text="🔧 Админка")])
+
     return ReplyKeyboardMarkup(
-        keyboard=[
-            # ФИНАНСЫ
-            [KeyboardButton(text="💰 Баланс"), KeyboardButton(text="📈 Сделка")],
-            [KeyboardButton(text="📥 Пополнить"), KeyboardButton(text="📤 Вывести")],
-            # ПАРТНЁРКА / НАСТРОЙКИ
-            [KeyboardButton(text="👥 Рефералы"), KeyboardButton(text="⚙️ Кошелек")],
-            # СТАТИСТИКА / АДМИНКА
-            [KeyboardButton(text="📊 Статистика"), KeyboardButton(text="🔧 Админка")],
-        ],
+        keyboard=keyboard,
         resize_keyboard=True,
     )
 

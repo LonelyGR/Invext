@@ -19,7 +19,8 @@ from src.services.deal_service import (
 
 logger = logging.getLogger(__name__)
 
-SCHEDULE_TZ = ZoneInfo("Etc/GMT-1")  # UTC+1 (важно: в зоне Etc/GMT-1 знак инвертирован)
+# Весь календарь сделок завязан на времени МСК.
+SCHEDULE_TZ = ZoneInfo("Europe/Moscow")
 
 
 def init_deal_scheduler(scheduler: AsyncIOScheduler, db_factory) -> None:

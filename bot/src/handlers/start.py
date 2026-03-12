@@ -8,6 +8,7 @@ from aiogram.utils.deep_linking import create_start_link
 
 from src.api_client.client import api
 from src.keyboards.menus import main_menu_kb
+from src.config.settings import ADMIN_TELEGRAM_IDS
 from src.texts import WELCOME_ABOUT, format_personal_data
 
 router = Router(name="start")
@@ -21,7 +22,7 @@ async def _send_welcome_flow(message: Message, telegram_id: int):
         me = await api.get_me(telegram_id)
         balances = await api.get_balances(telegram_id)
     except Exception as e:
-        await message.answer(f"Ошибка загрузки данных: {e}", reply_markup=main_menu_kb())
+        await message.answer(f"Ошибка загрузки данных: {e}", reply_markup=main_menu_kb(telegram_id in ADMIN_TELEGRAM_IDS))
         return
 
     if not me:
@@ -36,7 +37,7 @@ async def _send_welcome_flow(message: Message, telegram_id: int):
         ref_link = f"https://t.me/{(await message.bot.get_me()).username}?start={ref_code}"
 
     personal_text = format_personal_data(me, balances, ref_link=ref_link)
-    await message.answer(personal_text, reply_markup=main_menu_kb())
+    await message.answer(personal_text, reply_markup=main_menu_kb(telegram_id in ADMIN_TELEGRAM_IDS))
 
 
 @router.message(CommandStart(deep_link=True))
