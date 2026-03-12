@@ -101,7 +101,9 @@ async def withdraw_address_entered(message: Message, state: FSMContext):
 
     req_id = result.get("id", "—")
     await message.answer(
-        f"✅ Заявка на вывод создана. Статус: PENDING. ID заявки: {req_id}",
+        "✅ Ваша заявка на вывод успешно создана и отправлена на рассмотрение.\n"
+        "Средства будут выведены в течение 48 часов после проверки заявки.\n"
+        f"ID заявки: {req_id}",
         reply_markup=main_menu_kb(),
     )
     await state.clear()

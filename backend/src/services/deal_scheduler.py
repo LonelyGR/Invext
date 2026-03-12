@@ -18,12 +18,12 @@ def init_deal_scheduler(scheduler: AsyncIOScheduler, db_factory) -> None:
     """
 
     async def _job_process_due_deals():
+        logger.info("process_due_deals job started")
         async with db_factory() as db:
             try:
                 count = await process_due_deals(db)
                 await db.commit()
-                if count:
-                    logger.info("Processed %s due deal(s)", count)
+                logger.info("process_due_deals job finished, processed=%s", count)
             except Exception as e:
                 await db.rollback()
                 logger.exception("Error processing due deals: %s", e)

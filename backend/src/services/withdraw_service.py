@@ -27,7 +27,11 @@ async def create_withdraw_request(
     amount: Decimal,
     address: str,
 ) -> WithdrawRequest:
-    """Создать заявку на вывод (PENDING). Проверка баланса и лимитов."""
+    """Создать заявку на вывод (PENDING). Проверка баланса и лимитов.
+
+    Защита от дублей: при повторной отправке тех же данных (user, currency, amount, address)
+    и статусе PENDING возвращает уже существующую заявку.
+    """
     settings = get_settings()
     _validate_amount(amount, settings.min_withdraw, settings.max_withdraw)
 
@@ -40,6 +44,20 @@ async def create_withdraw_request(
     available = balances.get(currency, Decimal("0"))
     if available < amount:
         raise ValueError(f"Недостаточно средств. Доступно {currency}: {available}")
+
+    # Идемпотентность: если уже есть PENDING-заявка с теми же параметрами, возвращаем её.
+    existing_q = await db.execute(
+        select(WithdrawRequest).where(
+            WithdrawRequest.user_id == user.id,
+            WithdrawRequest.currency == currency,
+            WithdrawRequest.amount == amount,
+            WithdrawRequest.address == address.strip(),
+            WithdrawRequest.status == "PENDING",
+        )
+    )
+    existing_req = existing_q.scalar_one_or_none()
+    if existing_req:
+        return existing_req
 
     req = WithdrawRequest(
         user_id=user.id,

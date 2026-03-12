@@ -27,6 +27,7 @@ class WithdrawRequestResponse(BaseModel):
     created_at: datetime
     decided_at: Optional[datetime] = None
     decided_by: Optional[int] = None
+    updated_at: datetime
 
     model_config = {"from_attributes": True}
 

@@ -134,69 +134,6 @@ async def _get_referrer_chain(db: AsyncSession, user_id: int) -> List[User]:
     return chain
 
 
-async def _process_referral_rewards_for_deal(db: AsyncSession, deal: Deal) -> None:
-    """
-    По всем участникам сделки: обход цепочки рефереров до 10 уровней.
-    Если реферер участвовал в этой же сделке — начислить бонус (referral_rewards + ledger).
-    """
-    participants_result = await db.execute(
-        select(DealParticipation).where(DealParticipation.deal_id == deal.id)
-    )
-    participants = list(participants_result.scalars().all())
-    participant_user_ids = {p.user_id for p in participants}
-    participation_by_user = {p.user_id: p for p in participants}
-
-    for participation in participants:
-        from_user_id = participation.user_id
-        referrers = await _get_referrer_chain(db, from_user_id)
-        amount = participation.amount
-
-        for level_index, referrer in enumerate(referrers):
-            level = level_index + 1
-            if referrer.id not in participant_user_ids:
-                continue
-            if level > len(REFERRAL_LEVEL_PERCENTS):
-                break
-            pct = REFERRAL_LEVEL_PERCENTS[level_index]
-            reward_amount = (amount * Decimal(str(pct)) / Decimal("100")).quantize(Decimal("0.01"))
-            if reward_amount <= 0:
-                continue
-
-            reward = ReferralReward(
-                deal_id=deal.id,
-                from_user_id=from_user_id,
-                to_user_id=referrer.id,
-                level=level,
-                amount=reward_amount,
-                status=STATUS_PAID,
-            )
-            db.add(reward)
-            await db.flush()
-
-            ledger_tx = LedgerTransaction(
-                user_id=referrer.id,
-                type=LEDGER_TYPE_REFERRAL_BONUS,
-                amount_usdt=reward_amount,
-                metadata_json={
-                    "deal_id": deal.id,
-                    "from_user_id": from_user_id,
-                    "level": level,
-                    "referral_reward_id": reward.id,
-                },
-            )
-            db.add(ledger_tx)
-
-            referrer_user = await db.get(User, referrer.id, with_for_update=True)
-            if referrer_user:
-                new_balance = await get_balance_usdt(db, referrer_user.id)
-                referrer_user.balance_usdt = new_balance
-
-            logger.info(
-                "Referral reward: deal_id=%s from_user=%s to_user=%s level=%s amount=%s",
-                deal.id, from_user_id, referrer.id, level, reward_amount,
-            )
-
-
 async def close_deal_flow(db: AsyncSession, deal: Deal) -> None:
     """
     Закрытие сделки: статус closed, реферальные начисления (один раз),
@@ -211,7 +148,7 @@ async def close_deal_flow(db: AsyncSession, deal: Deal) -> None:
     await db.flush()
 
     if not deal.referral_processed:
-        await _process_referral_rewards_for_deal(db, deal)
+        # Реферальные бонусы теперь начисляются только с депозитов, а не с участия в сделках.
         deal.referral_processed = True
         await db.flush()
 
