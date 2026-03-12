@@ -1,7 +1,7 @@
 """Add updated_at column to withdraw_requests
 
-Revision ID: 012_add_updated_at_to_withdraw_requests
-Revises: 011_deals_refactor_participations_referral_rewards
+Revision ID: 012
+Revises: 011
 Create Date: 2026-03-08
 """
 
@@ -12,8 +12,8 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = "012_add_updated_at_to_withdraw_requests"
-down_revision: Union[str, None] = "011_deals_refactor_participations_referral_rewards"
+revision: str = "012"
+down_revision: Union[str, None] = "011"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
