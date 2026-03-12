@@ -10,24 +10,29 @@ from src.keyboards.menus import partners_main_kb, partners_team_kb, partners_bon
 
 router = Router(name="partners")
 
-# Уровни реферальной программы: (процент, описание)
+# Уровни реферальной программы: 3 уровня по 3% с депозита
 REFERRAL_LEVELS = [
-    (7.00, "1 уровень"),
-    (2.00, "2 уровень"),
-    (1.00, "3 уровень"),
-    (0.50, "4 уровень"),
-    (0.50, "5 уровень"),
+    (3.00, "1 уровень"),
+    (3.00, "2 уровень"),
+    (3.00, "3 уровень"),
 ]
 
 
 def _get_partners_main_text(me: dict, link: str) -> str:
-    """Текст главного экрана «Партнёрская программа»."""
+    """Текст главного экрана «Партнёрская программа» с уровнями рефералов."""
     ref_code = me.get("ref_code", "—")
-    level1_count = me.get("referrals_count", 0)
-    lines = ["<b>Партнёрская программа</b>\n", f"Ваша реферальная ссылка:\n{link}\n", "Ваша команда:"]
-    for i, (pct, _) in enumerate(REFERRAL_LEVELS):
-        count = level1_count if i == 0 else 0
-        lines.append(f"👥👥 : {count} 💰 {pct:.2f}%")
+    level1 = me.get("referrals_level_1", 0) or me.get("referrals_count", 0)
+    level2 = me.get("referrals_level_2", 0)
+    level3 = me.get("referrals_level_3", 0)
+    counts = [level1, level2, level3]
+    lines = [
+        "<b>👥 Партнёрская программа</b>\n",
+        f"Ваша реферальная ссылка:\n{link}\n",
+        "<b>Уровни рефералов:</b>",
+    ]
+    for i, (pct, label) in enumerate(REFERRAL_LEVELS):
+        count = counts[i] if i < len(counts) else 0
+        lines.append(f"  • {label}: {count} чел. — {pct:.0f}% с депозита")
     return "\n".join(lines)
 
 
@@ -120,19 +125,22 @@ async def partners_team(callback: CallbackQuery):
         await callback.answer("Пользователь не найден.")
         return
 
-    level1 = me.get("referrals_count", 0)
+    level1 = me.get("referrals_level_1", 0) or me.get("referrals_count", 0)
+    level2 = me.get("referrals_level_2", 0)
+    level3 = me.get("referrals_level_3", 0)
     team_usdt = me.get("team_deposits_usdt", "0") or "0"
     try:
         team_float = float(team_usdt)
     except (TypeError, ValueError):
         team_float = 0
 
-    lines = ["<b>Моя Команда</b>\n"]
-    for i in range(5):
-        count = level1 if i == 0 else 0
-        lines.append(f"◆ {i + 1} уровень: {count} участников")
-    lines.append(f"\n💎 Общий оборот команды: {team_float:.2f} USDT")
-    lines.append("📅 Последняя активность: нет данных")
+    lines = [
+        "<b>📊 Моя команда</b>\n",
+        f"◆ 1 уровень: {level1} участников",
+        f"◆ 2 уровень: {level2} участников",
+        f"◆ 3 уровень: {level3} участников",
+        f"\n💎 Оборот команды (депозиты): {team_float:.2f} USDT",
+    ]
     text = "\n".join(lines)
 
     try:
@@ -155,7 +163,9 @@ async def partners_bonuses(callback: CallbackQuery):
         await callback.answer("Пользователь не найден.")
         return
 
-    referrals = me.get("referrals_count", 0)
+    level1 = me.get("referrals_level_1", 0) or me.get("referrals_count", 0)
+    level2 = me.get("referrals_level_2", 0)
+    level3 = me.get("referrals_level_3", 0)
     team_usdt = me.get("team_deposits_usdt", "0") or "0"
     try:
         team_float = float(team_usdt)
@@ -164,10 +174,12 @@ async def partners_bonuses(callback: CallbackQuery):
 
     text = (
         "🎁 <b>Реферальные бонусы</b>\n\n"
-        f"👥 Ваши прямые рефералы: {referrals}\n"
+        f"1 уровень: {level1} чел. — 3% с депозита\n"
+        f"2 уровень: {level2} чел. — 3% с депозита\n"
+        f"3 уровень: {level3} чел. — 3% с депозита\n\n"
         f"💎 Оборот команды (депозиты): {team_float:.2f} USDT\n\n"
-        "Реферальные вознаграждения начисляются за участие вашей команды в сделках.\n"
-        "Детальная статистика и история начислений появятся здесь после активации сделок."
+        "Бонус начисляется только с подтверждённого пополнения баланса реферала, "
+        "не с инвестиций и не с прибыли по сделкам."
     )
     try:
         await callback.message.edit_text(text, reply_markup=partners_bonuses_kb())
