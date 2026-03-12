@@ -18,6 +18,7 @@ from src.api.routers import (
     invest,
     admin_dashboard,
     payments,
+    settings,
 )
 from src.core.admin_middleware import admin_jwt_middleware
 from src.db.session import async_session_maker
@@ -64,6 +65,7 @@ app.include_router(admin.router)
 app.include_router(invest.router)
 app.include_router(payments.router)
 app.include_router(admin_dashboard.router)
+app.include_router(settings.router)
 
 
 @app.get("/health")

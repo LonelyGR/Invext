@@ -77,11 +77,28 @@ def currency_kb(callback_prefix: str) -> InlineKeyboardMarkup:
 
 
 def admin_menu_kb() -> InlineKeyboardMarkup:
-    """Админка: заявки на вывод; токен для админ-сайта; пополнения — по депозитному адресу."""
+    """Админка: заявки на вывод; токен для админ-сайта; финансовые настройки."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="📤 Заявки на вывод", callback_data="admin_withdrawals")],
             [InlineKeyboardButton(text="🔐 Токен для админ-сайта", callback_data="admin_dashboard_token")],
+            [InlineKeyboardButton(text="⚙️ Финансовые настройки", callback_data="admin_fin_settings")],
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_menu")],
+        ]
+    )
+
+
+def fin_settings_kb() -> InlineKeyboardMarkup:
+    """Клавиатура управления финансовыми настройками."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Изменить мин. депозит", callback_data="fin_set_min_deposit")],
+            [InlineKeyboardButton(text="Изменить макс. депозит", callback_data="fin_set_max_deposit")],
+            [InlineKeyboardButton(text="Изменить мин. вывод", callback_data="fin_set_min_withdraw")],
+            [InlineKeyboardButton(text="Изменить макс. вывод", callback_data="fin_set_max_withdraw")],
+            [InlineKeyboardButton(text="Изменить мин. инвестицию", callback_data="fin_set_min_invest")],
+            [InlineKeyboardButton(text="Изменить макс. инвестицию", callback_data="fin_set_max_invest")],
+            [InlineKeyboardButton(text="Изменить сумму сделки", callback_data="fin_set_deal_amount")],
             [InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_menu")],
         ]
     )

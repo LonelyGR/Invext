@@ -11,7 +11,6 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.config import get_settings
 from src.db.session import get_db
 from src.integrations.nowpayments import (
     NowPaymentsAPIError,
@@ -34,6 +33,7 @@ from src.schemas.payments import (
     DepositInvoiceResponse,
 )
 from src.services.payment_service import apply_payment_to_balance
+from src.services.settings_service import get_system_settings
 
 logger = logging.getLogger(__name__)
 
@@ -75,11 +75,17 @@ async def create_deposit_invoice(
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-    # Schema already enforces min 10 USDT, step 1; enforce max from config
-    if payload.amount > Decimal(str(settings.max_deposit)):
+    # Schema already enforces min 10 USDT, step 1; enforce dynamic min/max from SystemSettings.
+    sys_settings = await get_system_settings(db)
+    if payload.amount < sys_settings.min_deposit_usdt:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Amount must not exceed {settings.max_deposit} USDT",
+            detail=f"Минимальная сумма пополнения: {sys_settings.min_deposit_usdt} USDT",
+        )
+    if payload.amount > sys_settings.max_deposit_usdt:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Amount must not exceed {sys_settings.max_deposit_usdt} USDT",
         )
 
     callback_url = settings.nowpayments_callback_url.rstrip("/")

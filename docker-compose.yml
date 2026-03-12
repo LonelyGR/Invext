@@ -8,8 +8,9 @@ services:
       POSTGRES_DB: invext
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
+    # Порт PostgreSQL не публикуем наружу — доступен только внутри Docker-сети.
+    expose:
+      - "5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U user -d invext"]
       interval: 5s

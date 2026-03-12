@@ -8,11 +8,11 @@ from decimal import Decimal
 from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.config import get_settings
 from src.models.user import User
 from src.models.withdraw_request import WithdrawRequest
 from src.models.wallet_transaction import WalletTransaction
 from src.services.wallet_service import get_balances
+from src.services.settings_service import get_system_settings
 
 
 def _validate_amount(amount: Decimal, min_val: float, max_val: float) -> None:
@@ -32,8 +32,8 @@ async def create_withdraw_request(
     Защита от дублей: при повторной отправке тех же данных (user, currency, amount, address)
     и статусе PENDING возвращает уже существующую заявку.
     """
-    settings = get_settings()
-    _validate_amount(amount, settings.min_withdraw, settings.max_withdraw)
+    settings = await get_system_settings(db)
+    _validate_amount(amount, float(settings.min_withdraw_usdt), float(settings.max_withdraw_usdt))
 
     result = await db.execute(select(User).where(User.telegram_id == telegram_id))
     user = result.scalar_one_or_none()

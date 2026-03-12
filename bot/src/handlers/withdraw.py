@@ -8,7 +8,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
 from src.api_client.client import api
-from src.config.settings import MIN_WITHDRAW, MAX_WITHDRAW, ALLOWED_CURRENCIES
+from src.config.settings import ALLOWED_CURRENCIES
 from src.keyboards.menus import currency_kb, main_menu_kb
 from src.utils.locks import with_double_click_protection, release_double_click_lock
 import logging
@@ -41,9 +41,18 @@ async def withdraw_currency_chosen(callback: CallbackQuery, state: FSMContext):
         return
     await state.update_data(currency=currency)
     await state.set_state(WithdrawStates.entering_amount)
+    # Получаем актуальные лимиты для текста (валидация на бэкенде).
+    min_wd = "10"
+    max_wd = "100000"
+    try:
+        settings = await api.get_system_settings()
+        min_wd = settings.get("min_withdraw_usdt", min_wd)
+        max_wd = settings.get("max_withdraw_usdt", max_wd)
+    except Exception:
+        pass
     await callback.message.edit_text(
         f"Введите сумму вывода ({currency}).\n"
-        f"Минимум: {MIN_WITHDRAW}, максимум: {MAX_WITHDRAW}"
+        f"Минимум: {min_wd}, максимум: {max_wd}"
     )
     await callback.answer()
 
@@ -57,9 +66,6 @@ async def withdraw_amount_entered(message: Message, state: FSMContext):
         return
     if amount <= 0:
         await message.answer("Сумма должна быть больше 0.")
-        return
-    if amount < Decimal(str(MIN_WITHDRAW)) or amount > Decimal(str(MAX_WITHDRAW)):
-        await message.answer(f"Сумма должна быть от {MIN_WITHDRAW} до {MAX_WITHDRAW}.")
         return
 
     await state.update_data(amount=message.text.strip())

@@ -9,7 +9,6 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
 from src.api_client.client import api
-from src.config.settings import MIN_DEPOSIT, MAX_DEPOSIT
 from src.keyboards.menus import main_menu_kb
 from src.utils.locks import with_double_click_protection, release_double_click_lock
 import logging
@@ -45,9 +44,19 @@ async def deposit_start(message: Message, state: FSMContext):
     """Начать пополнение: спросить сумму для инвойса NOWPayments (USDT BEP20)."""
     await state.clear()
     await state.set_state(DepositStates.entering_amount)
+    # Для текстовых подсказок пытаемся получить лимиты с бэкенда,
+    # но логика проверки всё равно на стороне бэкенда.
+    min_dep = "10"
+    max_dep = "100000"
+    try:
+        settings = await api.get_system_settings()
+        min_dep = settings.get("min_deposit_usdt", min_dep)
+        max_dep = settings.get("max_deposit_usdt", max_dep)
+    except Exception:
+        pass
     await message.answer(
         "Введите сумму пополнения в USD (оплата в USDT в сети BEP20/BSC).\n"
-        f"Минимум: {MIN_DEPOSIT}, максимум: {MAX_DEPOSIT}",
+        f"Минимум: {min_dep}, максимум: {max_dep}",
         reply_markup=main_menu_kb(),
     )
     await message.answer(
@@ -67,9 +76,6 @@ async def deposit_amount_entered(message: Message, state: FSMContext):
         return
     if amount <= 0:
         await message.answer("Сумма должна быть больше 0.")
-        return
-    if amount < Decimal(str(MIN_DEPOSIT)) or amount > Decimal(str(MAX_DEPOSIT)):
-        await message.answer(f"Сумма должна быть от {MIN_DEPOSIT} до {MAX_DEPOSIT}.")
         return
 
     telegram_id = message.from_user.id

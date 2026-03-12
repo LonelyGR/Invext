@@ -20,6 +20,7 @@ from src.services.ledger_service import (
     LEDGER_TYPE_REFERRAL_BONUS,
     get_balance_usdt,
 )
+from src.services.settings_service import get_system_settings
 from src.services.notification_service import broadcast_deal_closed
 from src.services.notification_service import broadcast_deal_opened
 
@@ -58,7 +59,11 @@ async def participate_in_deal(
     """
     Участие пользователя в текущей активной сделке.
     Один пользователь — одно участие в одной сделке (unique deal_id, user_id).
+    Сумма участия берётся из SystemSettings.deal_amount_usdt.
     """
+    sys_settings = await get_system_settings(db)
+    amount = sys_settings.deal_amount_usdt
+
     async with db.begin():
         deal = await db.execute(
             select(Deal)

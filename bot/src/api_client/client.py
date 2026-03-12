@@ -251,6 +251,26 @@ class BackendClient:
             r.raise_for_status()
             return r.json()
 
+    # --- System settings (admin only) ---
+    async def get_system_settings(self) -> Dict[str, Any]:
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            r = await client.get(
+                self._url("/v1/admin/system-settings"),
+                headers=self._admin_headers,
+            )
+            r.raise_for_status()
+            return r.json()
+
+    async def update_system_settings_field(self, field: str, value: str) -> Dict[str, Any]:
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            r = await client.patch(
+                self._url("/v1/admin/system-settings"),
+                headers=self._admin_headers,
+                json={"field": field, "value": value},
+            )
+            r.raise_for_status()
+            return r.json()
+
 
 # Синглтон для использования в хендлерах
 api = BackendClient()

@@ -3,16 +3,23 @@
 """
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 
 from src.config.settings import ADMIN_TELEGRAM_IDS
 from src.api_client.client import api
-from src.keyboards.menus import admin_menu_kb, withdraw_actions_kb
+from src.keyboards.menus import admin_menu_kb, withdraw_actions_kb, fin_settings_kb
 
 router = Router(name="admin")
 
 
 def is_admin(telegram_id: int) -> bool:
     return telegram_id in ADMIN_TELEGRAM_IDS
+
+
+class FinSettingsStates(StatesGroup):
+    waiting_value = State()
+    field = State()
 
 
 @router.message(F.text == "🔧 Админка")
@@ -95,6 +102,86 @@ async def admin_list_withdrawals(callback: CallbackQuery):
             reply_markup=withdraw_actions_kb(r["id"]),
         )
     await callback.answer()
+
+
+@router.callback_query(F.data == "admin_fin_settings")
+async def admin_fin_settings(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("Доступ запрещён")
+        return
+    try:
+        data = await api.get_system_settings()
+    except Exception as e:
+        await callback.message.edit_text(f"Ошибка: {e}")
+        await callback.answer()
+        return
+
+    text = (
+        "⚙️ <b>Финансовые настройки</b>\n\n"
+        f"Минимальный депозит: {data['min_deposit_usdt']} USDT\n"
+        f"Максимальный депозит: {data['max_deposit_usdt']} USDT\n\n"
+        f"Минимальный вывод: {data['min_withdraw_usdt']} USDT\n"
+        f"Максимальный вывод: {data['max_withdraw_usdt']} USDT\n\n"
+        f"Минимальная инвестиция: {data['min_invest_usdt']} USDT\n"
+        f"Максимальная инвестиция: {data['max_invest_usdt']} USDT\n\n"
+        f"Сумма участия в сделке: {data['deal_amount_usdt']} USDT"
+    )
+    await callback.message.edit_text(text, reply_markup=fin_settings_kb(), parse_mode="HTML")
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("fin_set_"))
+async def fin_setting_choose(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("Доступ запрещён")
+        return
+    field_map = {
+        "fin_set_min_deposit": "min_deposit_usdt",
+        "fin_set_max_deposit": "max_deposit_usdt",
+        "fin_set_min_withdraw": "min_withdraw_usdt",
+        "fin_set_max_withdraw": "max_withdraw_usdt",
+        "fin_set_min_invest": "min_invest_usdt",
+        "fin_set_max_invest": "max_invest_usdt",
+        "fin_set_deal_amount": "deal_amount_usdt",
+    }
+    key = callback.data
+    field = field_map.get(key)
+    if not field:
+        await callback.answer("Неизвестная настройка")
+        return
+    await state.set_state(FinSettingsStates.waiting_value)
+    await state.update_data(field=field)
+    await callback.message.edit_text("Введите новое значение (только число, > 0):")
+    await callback.answer()
+
+
+@router.message(FinSettingsStates.waiting_value, F.text)
+async def fin_setting_value(message: Message, state: FSMContext):
+    telegram_id = message.from_user.id
+    if not is_admin(telegram_id):
+        await message.answer("Доступ запрещён.")
+        await state.clear()
+        return
+    data = await state.get_data()
+    field = data.get("field")
+    raw = (message.text or "").replace(",", ".").strip()
+    try:
+        value = Decimal(raw)  # type: ignore[name-defined]
+    except Exception:
+        await message.answer("Введите корректное число, например: 10 или 50.5")
+        return
+    if value <= 0:
+        await message.answer("Значение должно быть больше 0.")
+        return
+
+    try:
+        await api.update_system_settings_field(field, str(value))
+    except Exception as e:
+        await message.answer(f"Ошибка обновления настройки: {e}")
+        return
+
+    await message.answer("Настройка обновлена.")
+    await state.clear()
 
 
 @router.callback_query(F.data.startswith("admin_w_approve_"))

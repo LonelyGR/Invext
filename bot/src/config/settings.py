@@ -21,10 +21,4 @@ BACKEND_BASE_URL = _get_env("BACKEND_BASE_URL", "http://localhost:8000")
 ADMIN_API_KEY = _get_env("ADMIN_API_KEY")
 ADMIN_TELEGRAM_IDS = get_admin_telegram_ids()
 
-# Лимиты для валидации в боте (дублируем с backend для сообщений)
-MIN_DEPOSIT = float(_get_env("MIN_DEPOSIT", "1"))
-MAX_DEPOSIT = float(_get_env("MAX_DEPOSIT", "100000"))
-MIN_WITHDRAW = float(_get_env("MIN_WITHDRAW", "1"))
-MAX_WITHDRAW = float(_get_env("MAX_WITHDRAW", "100000"))
-
 ALLOWED_CURRENCIES = ("USDT", "USDC")

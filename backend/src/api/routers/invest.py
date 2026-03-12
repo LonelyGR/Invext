@@ -14,13 +14,11 @@ from src.models.user import User
 from src.schemas.invest import InvestRequest, InvestResponse
 from src.services.ledger_service import get_balance_usdt
 from src.services.deal_service import participate_in_deal
+from src.services.settings_service import get_system_settings
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["invest"])
-
-MIN_INVEST_USDT = Decimal("50")
-
 
 @router.post("/api/invest", response_model=InvestResponse)
 async def invest(
@@ -29,13 +27,14 @@ async def invest(
 ):
     """
     Списать виртуальный баланс USDT в инвестиции.
-    Минимальная сумма — 50 USDT. Баланс считается по ledger.
+    Минимальная сумма — берется из SystemSettings. Баланс считается по ledger.
     """
+    sys_settings = await get_system_settings(db)
     amount = body.amount_usdt.quantize(Decimal("0.01"))
-    if amount < MIN_INVEST_USDT:
+    if amount < sys_settings.min_invest_usdt:
         raise HTTPException(
             status_code=400,
-            detail="Минимальная сумма инвестиций — 50 USDT",
+            detail=f"Минимальная сумма инвестиций — {sys_settings.min_invest_usdt} USDT",
         )
 
     result = await db.execute(select(User).where(User.telegram_id == body.user_id))
@@ -48,7 +47,7 @@ async def invest(
     if current_balance < amount:
         raise HTTPException(
             status_code=400,
-            detail="Недостаточно средств. Минимальная сумма инвестиций — 50 USDT.",
+            detail=f"Недостаточно средств. Минимальная сумма инвестиций — {sys_settings.min_invest_usdt} USDT.",
         )
 
     try:
