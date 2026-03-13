@@ -32,24 +32,26 @@ def init_deal_scheduler(scheduler: AsyncIOScheduler, db_factory) -> None:
     async def _job_process_due_deals():
         logger.info("process_due_deals job started")
         async with db_factory() as db:
+            logger.debug("process_due_deals: session created")
             try:
                 count = await process_due_deals(db)
                 await db.commit()
                 logger.info("process_due_deals job finished, processed=%s", count)
             except Exception as e:
                 await db.rollback()
-                logger.exception("Error processing due deals: %s", e)
+                logger.exception("process_due_deals job failed: %s", e)
 
     async def _job_close_deal_1200():
         logger.info("close_deal_1200 job started")
         async with db_factory() as db:
+            logger.debug("close_deal_1200: session created")
             try:
                 closed = await close_active_deal_by_schedule(db)
                 await db.commit()
                 logger.info("close_deal_1200 job finished, closed=%s", closed)
             except Exception as e:
                 await db.rollback()
-                logger.exception("Error in close_deal_1200: %s", e)
+                logger.exception("close_deal_1200 job failed: %s", e)
 
     async def _job_open_deal_1300():
         logger.info("open_deal_1300 job started")
@@ -57,18 +59,31 @@ def init_deal_scheduler(scheduler: AsyncIOScheduler, db_factory) -> None:
         now_utc = dt.datetime.now(dt.timezone.utc)
         now_local = now_utc.astimezone(SCHEDULE_TZ)
         start_local = now_local.replace(hour=13, minute=0, second=0, microsecond=0)
-        close_local = (start_local + dt.timedelta(days=1)).replace(hour=12, minute=0, second=0, microsecond=0)
+        close_local = (start_local + dt.timedelta(days=1)).replace(
+            hour=12, minute=0, second=0, microsecond=0
+        )
         start_at = start_local.astimezone(dt.timezone.utc)
         end_at = close_local.astimezone(dt.timezone.utc)
 
         async with db_factory() as db:
+            logger.debug("open_deal_1300: session created")
             try:
+                logger.debug("open_deal_1300: before open_new_deal_by_schedule")
                 deal = await open_new_deal_by_schedule(db, start_at=start_at, end_at=end_at)
+                if deal:
+                    logger.info(
+                        "open_deal_1300: deal opened id=%s number=%s, notifications sent",
+                        deal.id,
+                        deal.number,
+                    )
                 await db.commit()
-                logger.info("open_deal_1300 job finished, created=%s", bool(deal))
+                logger.info(
+                    "open_deal_1300 job finished, created=%s",
+                    bool(deal),
+                )
             except Exception as e:
                 await db.rollback()
-                logger.exception("Error in open_deal_1300: %s", e)
+                logger.exception("open_deal_1300 job failed: %s", e)
 
     scheduler.add_job(
         _job_process_due_deals,

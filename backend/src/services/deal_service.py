@@ -199,6 +199,8 @@ async def process_due_deals(db: AsyncSession) -> int:
     """
     Найти сделки с status=active и end_at <= now, для каждой выполнить close_deal_flow.
     Возвращает количество обработанных сделок.
+    Транзакция управляется вызывающим кодом (scheduler); не вызывать db.begin() здесь,
+    т.к. первый db.execute() уже запускает autobegin.
     """
     now = dt.datetime.now(dt.timezone.utc)
     result = await db.execute(
@@ -210,14 +212,13 @@ async def process_due_deals(db: AsyncSession) -> int:
     )
     deals = list(result.scalars().all())
     for deal in deals:
-        async with db.begin():
-            locked = await db.execute(
-                select(Deal).where(Deal.id == deal.id).with_for_update()
-            )
-            d = locked.scalar_one_or_none()
-            if not d or d.status != DEAL_STATUS_ACTIVE:
-                continue
-            await close_deal_flow(db, d)
+        locked = await db.execute(
+            select(Deal).where(Deal.id == deal.id).with_for_update()
+        )
+        d = locked.scalar_one_or_none()
+        if not d or d.status != DEAL_STATUS_ACTIVE:
+            continue
+        await close_deal_flow(db, d)
     return len(deals)
 
 
@@ -226,19 +227,19 @@ async def close_active_deal_by_schedule(db: AsyncSession) -> bool:
     Закрыть текущую активную сделку (если есть) и разослать уведомления.
     Используется планировщиком (12:00 UTC+1).
     Идемпотентно: если активной сделки нет — False.
+    Транзакция управляется вызывающим кодом (scheduler); не вызывать db.begin() здесь.
     """
-    async with db.begin():
-        deal_result = await db.execute(
-            select(Deal)
-            .where(Deal.status == DEAL_STATUS_ACTIVE)
-            .order_by(Deal.start_at.desc())
-            .limit(1)
-            .with_for_update()
-        )
-        deal = deal_result.scalar_one_or_none()
-        if not deal:
-            return False
-        await close_deal_flow(db, deal)
+    deal_result = await db.execute(
+        select(Deal)
+        .where(Deal.status == DEAL_STATUS_ACTIVE)
+        .order_by(Deal.start_at.desc())
+        .limit(1)
+        .with_for_update()
+    )
+    deal = deal_result.scalar_one_or_none()
+    if not deal:
+        return False
+    await close_deal_flow(db, deal)
     return True
 
 
@@ -251,6 +252,8 @@ async def open_new_deal_by_schedule(
     """
     Открыть новую сделку по расписанию (13:00 UTC+1) и разослать уведомление.
     Защита от дублей: если уже есть active сделка, перекрывающая now — не создаём новую.
+    Транзакция управляется вызывающим кодом (scheduler). Не вызывать db.begin() здесь:
+    get_active_deal(db) уже выполняет запрос и запускает autobegin на сессии.
     """
     now = dt.datetime.now(dt.timezone.utc)
 
@@ -259,37 +262,36 @@ async def open_new_deal_by_schedule(
     if active:
         return None
 
-    async with db.begin():
-        # Повторная проверка под локом (на случай гонки между воркерами).
-        active_locked = await db.execute(
-            select(Deal)
-            .where(
-                Deal.status == DEAL_STATUS_ACTIVE,
-                Deal.start_at.isnot(None),
-                Deal.end_at.isnot(None),
-                Deal.start_at <= now,
-                Deal.end_at > now,
-            )
-            .order_by(Deal.start_at.desc())
-            .limit(1)
-            .with_for_update()
+    # Повторная проверка под локом (на случай гонки между воркерами).
+    active_locked = await db.execute(
+        select(Deal)
+        .where(
+            Deal.status == DEAL_STATUS_ACTIVE,
+            Deal.start_at.isnot(None),
+            Deal.end_at.isnot(None),
+            Deal.start_at <= now,
+            Deal.end_at > now,
         )
-        if active_locked.scalar_one_or_none():
-            return None
+        .order_by(Deal.start_at.desc())
+        .limit(1)
+        .with_for_update()
+    )
+    if active_locked.scalar_one_or_none():
+        return None
 
-        deal = await open_new_deal(db, start_at=start_at, end_at=end_at)
+    deal = await open_new_deal(db, start_at=start_at, end_at=end_at)
 
-        # Рассылка всем пользователям
-        users_result = await db.execute(
-            select(User.telegram_id).where(User.telegram_id.isnot(None))
-        )
-        telegram_ids = [r[0] for r in users_result.all() if r[0]]
-        await broadcast_deal_opened(
-            telegram_ids,
-            deal.number,
-            opens_at=deal.start_at.isoformat() if deal.start_at else None,
-            closes_at=deal.end_at.isoformat() if deal.end_at else None,
-        )
+    # Рассылка всем пользователям (после успешного создания сделки)
+    users_result = await db.execute(
+        select(User.telegram_id).where(User.telegram_id.isnot(None))
+    )
+    telegram_ids = [r[0] for r in users_result.all() if r[0]]
+    await broadcast_deal_opened(
+        telegram_ids,
+        deal.number,
+        opens_at=deal.start_at.isoformat() if deal.start_at else None,
+        closes_at=deal.end_at.isoformat() if deal.end_at else None,
+    )
 
     logger.info("Deal opened by schedule: deal_id=%s number=%s", deal.id, deal.number)
     return deal
