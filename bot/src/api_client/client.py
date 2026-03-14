@@ -190,6 +190,13 @@ class BackendClient:
             data = r.json()
             return data.get("items", [])
 
+    async def get_active_deal(self) -> Dict[str, Any]:
+        """Есть ли открытая сделка (окно регистрации). { "active": bool, "deal_number": optional, "end_at": optional }."""
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            r = await client.get(self._url("/api/deals/active"))
+            r.raise_for_status()
+            return r.json()
+
     async def invest(
         self,
         telegram_id: int,

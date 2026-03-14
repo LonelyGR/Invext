@@ -1,13 +1,13 @@
 """
+Раздел «Сделка»: отображение открытой сделки, кнопка «Участвовать», ввод суммы.
 Инвестиции — списание виртуального баланса (USDT) через /api/invest.
-Минимальная сумма: 50 USDT. Без выбора дат/сделок — сумма вводится вручную.
 """
 from decimal import Decimal, InvalidOperation
 
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
-from aiogram.types import Message
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
 from src.api_client.client import api
 from src.keyboards.menus import back_kb
@@ -21,6 +21,15 @@ logger = logging.getLogger(__name__)
 
 class InvestStates(StatesGroup):
     entering_amount = State()
+
+
+def _invest_deal_kb(with_participate: bool) -> InlineKeyboardMarkup:
+    """Клавиатура раздела Сделка: при открытой сделке — Участвовать + Назад, иначе только Назад."""
+    rows = []
+    if with_participate:
+        rows.append([InlineKeyboardButton(text="✅ Участвовать", callback_data="invest_participate")])
+    rows.append([InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def _format_invest_screen(available_usdt: str) -> str:
@@ -38,6 +47,7 @@ async def invest_section(message: Message, state: FSMContext):
     telegram_id = message.from_user.id
     try:
         balances = await api.get_balances(telegram_id)
+        active = await api.get_active_deal()
     except Exception as e:
         await message.answer(f"Ошибка: {e}")
         return
@@ -45,9 +55,37 @@ async def invest_section(message: Message, state: FSMContext):
     usdt = float(balances.get("USDT", 0) or 0)
     available_usdt = f"{usdt:.2f}"
 
-    text = _format_invest_screen(available_usdt)
+    if active.get("active") and active.get("deal_number"):
+        deal_number = active["deal_number"]
+        text = (
+            f"<b>Сделка #{deal_number}</b> открыта.\n\n"
+            "💰 <b>Доступно для инвестиций (виртуальный баланс USDT):</b>\n"
+            f"USDT: {available_usdt}\n\n"
+            "Нажмите <b>«Участвовать»</b>, чтобы вложить средства в текущую сделку.\n"
+            "Минимальная сумма настраивается администратором."
+        )
+        await message.answer(text, reply_markup=_invest_deal_kb(with_participate=True))
+    else:
+        text = (
+            "Сейчас нет открытой сделки.\n\n"
+            "Ожидайте уведомление в боте о новой сделке, затем зайдите в раздел <b>📈 Сделка</b> и нажмите <b>«Участвовать»</b>."
+        )
+        await state.clear()
+        await message.answer(text, reply_markup=_invest_deal_kb(with_participate=False))
+
+
+@router.callback_query(F.data == "invest_participate")
+async def invest_participate(callback: CallbackQuery, state: FSMContext):
+    """Пользователь нажал «Участвовать» — просим ввести сумму."""
     await state.set_state(InvestStates.entering_amount)
-    await message.answer(text, reply_markup=back_kb())
+    await callback.message.edit_text(
+        "Введите сумму инвестиций цифрами ответом на это сообщение.\n\n"
+        "Например: 50 или 100.5",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_menu")]]
+        ),
+    )
+    await callback.answer()
 
 
 @router.message(InvestStates.entering_amount)

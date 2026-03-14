@@ -1,6 +1,7 @@
 """
 Эндпоинт инвестиций: списание USDT с баланса (ledger) в инвестиции.
 Баланс считается по ledger_transactions, не по полю users.
+GET /api/deals/active — для бота: есть ли открытая сделка (раздел «Сделка»).
 """
 import logging
 from decimal import Decimal
@@ -13,12 +14,29 @@ from src.db.session import get_db
 from src.models.user import User
 from src.schemas.invest import InvestRequest, InvestResponse
 from src.services.ledger_service import get_balance_usdt
-from src.services.deal_service import participate_in_deal
+from src.services.deal_service import get_active_deal, get_active_deal_legacy, participate_in_deal
 from src.services.settings_service import get_system_settings
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["invest"])
+
+
+@router.get("/api/deals/active")
+async def get_active_deal_info(db: AsyncSession = Depends(get_db)):
+    """
+    Для бота: есть ли сейчас открытая сделка (окно регистрации).
+    Возвращает { "active": true, "deal_number": N, "end_at": "ISO" } или { "active": false }.
+    """
+    deal = await get_active_deal(db) or await get_active_deal_legacy(db)
+    if not deal:
+        return {"active": False}
+    return {
+        "active": True,
+        "deal_number": deal.number,
+        "end_at": deal.end_at.isoformat() if deal.end_at else (deal.closed_at.isoformat() if getattr(deal, "closed_at", None) else None),
+    }
+
 
 @router.post("/api/invest", response_model=InvestResponse)
 async def invest(
