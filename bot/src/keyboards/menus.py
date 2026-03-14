@@ -13,7 +13,7 @@ def main_menu_kb(is_admin: bool = False) -> ReplyKeyboardMarkup:
         [KeyboardButton(text="💰 Баланс"), KeyboardButton(text="📈 Сделка")],
         [KeyboardButton(text="📥 Пополнить"), KeyboardButton(text="📤 Вывести")],
         # ПАРТНЁРКА / НАСТРОЙКИ
-        [KeyboardButton(text="👥 Рефералы"), KeyboardButton(text="⚙️ Кошелек")],
+        [KeyboardButton(text="👥 Партнёры"), KeyboardButton(text="⚙️ Кошелёк")],
         # СТАТИСТИКА
         [KeyboardButton(text="📊 Статистика")],
     ]
