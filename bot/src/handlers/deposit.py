@@ -10,6 +10,7 @@ from aiogram.fsm.state import State, StatesGroup
 
 from src.api_client.client import api
 from src.keyboards.menus import main_menu_kb
+from src.utils.effects import send_effect_message, EFFECT_CELEBRATION
 from src.utils.locks import with_double_click_protection, release_double_click_lock
 import logging
 
@@ -212,9 +213,13 @@ async def check_invoice_status(callback: CallbackQuery):
     status = (invoice.get("status") or "").lower()
     balance_credited = invoice.get("balance_credited", False)
     if status == "finished" or balance_credited:
-        await callback.message.edit_text(
+        await callback.message.edit_text("✅ Оплата подтверждена.", reply_markup=main_menu_kb())
+        await send_effect_message(
+            callback.bot,
+            callback.message.chat.id,
             "✅ Оплата получена, баланс начислен.\n"
             "Проверьте раздел «Баланс», чтобы увидеть новый баланс.",
+            effect_id=EFFECT_CELEBRATION,
             reply_markup=main_menu_kb(),
         )
         await callback.answer()

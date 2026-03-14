@@ -221,7 +221,28 @@ async function loadDeals() {
   const section = document.getElementById("deals-section");
   section.innerHTML = "<h1>Сделки</h1><p>Загрузка...</p>";
   try {
-    const deals = await apiRequest("/deals");
+    const [deals, statusRes] = await Promise.all([
+      apiRequest("/deals"),
+      apiRequest("/deals/status").catch(() => ({ active_deal: null })),
+    ]);
+    const activeDeal = statusRes.active_deal;
+
+    const statusBlock =
+      activeDeal == null
+        ? `<div class="deal-status-card"><h3>Статус сделки</h3><p class="deal-status-none">Нет активной сделки</p><p class="deal-status-hint">Уведомление можно отправить только при активной сделке.</p></div>`
+        : `
+        <div class="deal-status-card">
+          <h3>Статус сделки</h3>
+          <div class="deal-status-fields">
+            <div class="deal-status-row"><span class="deal-status-label">Сделка:</span> #${activeDeal.number} · ${activeDeal.status}</div>
+            <div class="deal-status-row"><span class="deal-status-label">Окно:</span> ${activeDeal.start_at ? new Date(activeDeal.start_at).toLocaleString() : "—"} — ${activeDeal.end_at ? new Date(activeDeal.end_at).toLocaleString() : "—"}</div>
+            <div class="deal-status-row"><span class="deal-status-label">Уведомление о закрытии отправлено:</span> ${activeDeal.close_notification_sent ? "Да" : "Нет"}</div>
+          </div>
+          <div class="toolbar deal-status-toolbar">
+            <button type="button" id="deal-send-notifications-btn">Отправить уведомления о сделке</button>
+          </div>
+        </div>`;
+
     const rows = deals
       .map(
         (d) => `
@@ -246,6 +267,7 @@ async function loadDeals() {
     section.innerHTML = `
       <h1>Сделки</h1>
       <p class="section-desc">Текущие и завершённые сделки, управление доходностью.</p>
+      ${statusBlock}
       <div class="panel-card">
         <div class="toolbar">
           <button id="deal-open-now-btn">Открыть новую сделку</button>
@@ -279,6 +301,19 @@ async function loadDeals() {
           loadDeals();
         } catch (e) {
           alert(e.message);
+        }
+      };
+    }
+
+    const sendNotifBtn = document.getElementById("deal-send-notifications-btn");
+    if (sendNotifBtn) {
+      sendNotifBtn.onclick = async () => {
+        try {
+          const res = await apiRequest("/deals/send-notifications", { method: "POST" });
+          alert(`Уведомления отправлены: ${res.sent_count} получателей.`);
+          loadDeals();
+        } catch (e) {
+          alert(e.message || "Ошибка отправки уведомлений");
         }
       };
     }

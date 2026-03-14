@@ -45,7 +45,9 @@ from src.schemas.admin_dashboard import (
     PaginatedAdminLogs,
     AdminLogItem,
     DealRow,
+    DealStatusResponse,
     DealUpdateRequest,
+    SendDealNotificationsResponse,
     DepositRow,
     DepositDetail,
     PaginatedDeposits,
@@ -58,6 +60,7 @@ from src.services.ledger_service import (
     get_balance_usdt,
 )
 from src.services.deal_service import get_active_deal, get_active_deal_legacy, open_new_deal
+from src.services.notification_service import broadcast_deal_opened
 from src.services.settings_service import invalidate_system_settings_cache
 
 
@@ -671,6 +674,76 @@ async def open_deal_now(
         closed_at=deal.closed_at,
         finished_at=deal.finished_at,
     )
+
+
+@router.get("/deals/status", response_model=DealStatusResponse)
+async def get_deal_status(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Статус текущей активной сделки для блока «Статус сделки» в админке."""
+    await get_admin_context(request)
+
+    active = await get_active_deal(db)
+    if not active:
+        return DealStatusResponse(active_deal=None)
+
+    return DealStatusResponse(
+        active_deal=DealRow(
+            id=active.id,
+            number=active.number,
+            title=active.title,
+            start_at=active.start_at,
+            end_at=active.end_at,
+            status=active.status,
+            profit_percent=active.profit_percent,
+            referral_processed=active.referral_processed,
+            close_notification_sent=active.close_notification_sent,
+            created_at=getattr(active, "created_at", None),
+            updated_at=getattr(active, "updated_at", None),
+            percent=active.percent,
+            opened_at=active.opened_at,
+            closed_at=active.closed_at,
+            finished_at=active.finished_at,
+        )
+    )
+
+
+@router.post("/deals/send-notifications", response_model=SendDealNotificationsResponse)
+async def send_deal_notifications(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Принудительно отправить уведомление об открытии текущей активной сделки всем пользователям."""
+    admin_token_id, _ = await get_admin_context(request)
+
+    active = await get_active_deal(db)
+    if not active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Нет активной сделки. Уведомление об открытии можно отправить только при активной сделке.",
+        )
+
+    users_result = await db.execute(
+        select(User.telegram_id).where(User.telegram_id.isnot(None))
+    )
+    telegram_ids = [r[0] for r in users_result.all() if r[0]]
+
+    await broadcast_deal_opened(
+        telegram_ids,
+        active.number,
+        close_at=active.end_at,
+    )
+
+    await log_admin_action(
+        db=db,
+        admin_token_id=admin_token_id,
+        action_type="SEND_DEAL_NOTIFICATIONS",
+        entity_type="DEAL",
+        entity_id=active.id,
+    )
+
+    return SendDealNotificationsResponse(sent_count=len(telegram_ids))
 
 
 @router.get("/users/{user_id}", response_model=UserDetail)

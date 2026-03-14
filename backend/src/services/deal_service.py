@@ -183,11 +183,14 @@ async def close_deal_flow(db: AsyncSession, deal: Deal) -> None:
         }
 
         profit_pct = float(deal.profit_percent) if deal.profit_percent is not None else None
+        # Следующая сделка открывается в 13:00 (UTC+1), текущая закрывается в 12:00
+        next_open_at = (deal.end_at + dt.timedelta(hours=1)) if deal.end_at else None
         await broadcast_deal_closed(
             telegram_ids,
             deal.number,
             profit_pct,
             participant_telegram_ids,
+            next_open_at=next_open_at,
         )
         deal.close_notification_sent = True
         await db.flush()
@@ -289,8 +292,7 @@ async def open_new_deal_by_schedule(
     await broadcast_deal_opened(
         telegram_ids,
         deal.number,
-        opens_at=deal.start_at.isoformat() if deal.start_at else None,
-        closes_at=deal.end_at.isoformat() if deal.end_at else None,
+        close_at=deal.end_at,
     )
 
     logger.info("Deal opened by schedule: deal_id=%s number=%s", deal.id, deal.number)

@@ -50,6 +50,15 @@ class DealUpdateRequest(BaseModel):
     end_at: Optional[datetime] = None
 
 
+class DealStatusResponse(BaseModel):
+    """Текущая активная сделка для блока «Статус сделки» в админке."""
+    active_deal: Optional[DealRow] = None
+
+
+class SendDealNotificationsResponse(BaseModel):
+    sent_count: int
+
+
 class UserRow(BaseModel):
     id: int
     telegram_id: int

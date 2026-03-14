@@ -464,6 +464,71 @@ th {
   text-align: right;
 }
 
+/* --- Статус сделки (блок с кнопкой отправки уведомлений) --- */
+
+.deal-status-card {
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  border-radius: 10px;
+  padding: 1rem 1.25rem;
+  margin-bottom: 1.25rem;
+}
+
+.deal-status-card h3 {
+  margin: 0 0 0.75rem 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+
+.deal-status-none {
+  margin: 0;
+  color: #94a3b8;
+  font-size: 0.9375rem;
+}
+
+.deal-status-hint {
+  margin: 0.35rem 0 0 0;
+  color: #64748b;
+  font-size: 0.8125rem;
+}
+
+.deal-status-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 0.75rem;
+}
+
+.deal-status-row {
+  font-size: 0.875rem;
+  color: #cbd5e1;
+}
+
+.deal-status-label {
+  color: #94a3b8;
+  margin-right: 0.5rem;
+}
+
+.deal-status-toolbar {
+  margin-top: 0.5rem;
+  margin-bottom: 0;
+}
+
+.deal-status-toolbar button {
+  padding: 0.5rem 1rem;
+  font-size: 0.875rem;
+  background: #2563eb;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.deal-status-toolbar button:hover {
+  background: #1d4ed8;
+}
+
 /* --- Clickable user rows --- */
 
 tr.table-row-link {

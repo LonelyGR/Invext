@@ -11,6 +11,7 @@ from aiogram.types import Message
 
 from src.api_client.client import api
 from src.keyboards.menus import back_kb
+from src.utils.effects import send_effect_message, EFFECT_CELEBRATION
 from src.utils.locks import with_double_click_protection, release_double_click_lock
 import logging
 
@@ -87,12 +88,18 @@ async def invest_amount_entered(message: Message, state: FSMContext):
     new_balance = result.get("balance_usdt")
     invested = result.get("invested_amount_usdt")
 
-    await message.answer(
+    success_text = (
         "✅ Инвестиция создана.\n"
         f"Сумма: {invested} USDT\n\n"
         f"Текущий виртуальный баланс: {new_balance} USDT\n\n"
         "Средства переведены в текущую сделку. Начисление прибыли произойдет\n"
         "после её завершения согласно условиям."
+    )
+    await send_effect_message(
+        message.bot,
+        message.chat.id,
+        success_text,
+        effect_id=EFFECT_CELEBRATION,
     )
     await state.clear()
     logger.info("user %s invested %s USDT into current deal", telegram_id, invested)

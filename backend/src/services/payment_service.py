@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.models import LedgerTransaction, PaymentInvoice, User
 from src.models.payment_invoice import PROVIDER_NOWPAYMENTS
 from src.services.ledger_service import LEDGER_TYPE_DEPOSIT, get_balance_usdt
+from src.services.notification_service import notify_deposit_success
 from src.services.referral_service import apply_referral_rewards_for_deposit
 
 logger = logging.getLogger(__name__)
@@ -96,4 +97,15 @@ async def apply_payment_to_balance(
         amount,
         new_balance,
     )
+
+    if user.telegram_id:
+        try:
+            await notify_deposit_success(user.telegram_id, str(amount))
+        except Exception as e:
+            logger.warning(
+                "Failed to send deposit success notification to telegram_id=%s: %s",
+                user.telegram_id,
+                e,
+            )
+
     return True
