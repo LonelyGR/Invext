@@ -57,7 +57,7 @@ async def deposit_start(message: Message, state: FSMContext):
         pass
     await message.answer(
         "Введите сумму пополнения в USD (оплата в USDT в сети BEP20/BSC).\n"
-        f"Минимум: {min_dep}, максимум: {max_dep}",
+        f"Минимум: {min_dep}",
         reply_markup=main_menu_kb(),
     )
     await message.answer(
