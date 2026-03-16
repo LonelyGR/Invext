@@ -65,7 +65,6 @@ from src.services.deal_service import (
     get_active_deal,
     get_active_deal_legacy,
     open_new_deal,
-    close_active_deal_by_schedule,
 )
 from src.services.notification_service import broadcast_deal_opened, send_telegram_message
 from src.core.config import get_settings
@@ -651,11 +650,47 @@ async def open_deal_now(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
-    """Создать новую сделку вручную (draft без окна)."""
+    """
+    Создать и сразу открыть новую активную сделку вручную.
+    Окно: с текущего момента до следующего дня в 12:00 (UTC+1), как в планировщике.
+    При открытии рассылается уведомление пользователям.
+    """
     admin_token_id, _ = await get_admin_context(request)
 
+    # Не даём открыть новую, если уже есть активная.
+    active = await get_active_deal(db)
+    if active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Уже есть активная сделка #{active.number}",
+        )
+
+    now_utc = dt.datetime.now(dt.timezone.utc)
+    # Логика окна как в планировщике: до следующего дня 12:00 по МСК (UTC+1 условно).
+    from zoneinfo import ZoneInfo  # локальный импорт, чтобы не тянуть наверх
+
+    schedule_tz = ZoneInfo("Europe/Moscow")
+    now_local = now_utc.astimezone(schedule_tz)
+    start_local = now_local
+    close_local = (start_local + dt.timedelta(days=1)).replace(
+        hour=12, minute=0, second=0, microsecond=0
+    )
+    start_at = start_local.astimezone(dt.timezone.utc)
+    end_at = close_local.astimezone(dt.timezone.utc)
+
     async with db.begin():
-        deal = await open_new_deal(db)
+        deal = await open_new_deal(db, start_at=start_at, end_at=end_at)
+
+        # Рассылка всем пользователям об открытии сделки.
+        users_result = await db.execute(
+            select(User.telegram_id).where(User.telegram_id.isnot(None))
+        )
+        telegram_ids = [r[0] for r in users_result.all() if r[0]]
+        await broadcast_deal_opened(
+            telegram_ids,
+            deal.number,
+            close_at=deal.end_at,
+        )
 
     await log_admin_action(
         db=db,
@@ -690,9 +725,8 @@ async def force_close_deal(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Принудительно закрыть текущую активную сделку.
-    Отправляет уведомления о закрытии один раз (через close_deal_flow) и помечает сделку как закрытую,
-    чтобы планировщик в 12:00 не отправлял повторное уведомление.
+    Создать запрос на досрочное закрытие активной сделки.
+    Фактическое закрытие выполняется после подтверждения админом в Telegram-боте.
     """
     admin_token_id, _ = await get_admin_context(request)
 
@@ -703,22 +737,49 @@ async def force_close_deal(
             detail="Нет активной сделки для досрочного закрытия.",
         )
 
-    closed = await close_active_deal_by_schedule(db)
-    if not closed:
+    settings = get_settings()
+    admin_ids = settings.admin_telegram_ids
+    if not admin_ids:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Не удалось закрыть сделку (возможно, она уже закрыта).",
+            detail="ADMIN_TELEGRAM_IDS is not configured",
         )
+
+    text = (
+        "⚠️ Запрос досрочного закрытия сделки\n\n"
+        f"Сделка: #{active.number}\n"
+        f"Статус: {active.status}\n"
+        f"Окно: {(active.start_at or '—')} — {(active.end_at or '—')}\n\n"
+        "Подтвердите или отклоните досрочное закрытие."
+    )
+
+    reply_markup = {
+        "inline_keyboard": [
+            [
+                {
+                    "text": "✅ Закрыть досрочно",
+                    "callback_data": "deal_fc:approve",
+                },
+                {
+                    "text": "❌ Отклонить",
+                    "callback_data": "deal_fc:reject",
+                },
+            ]
+        ]
+    }
+
+    for admin_tid in admin_ids:
+        await send_telegram_message(admin_tid, text, reply_markup=reply_markup)
 
     await log_admin_action(
         db=db,
         admin_token_id=admin_token_id,
-        action_type="DEAL_FORCE_CLOSE",
+        action_type="DEAL_FORCE_CLOSE_REQUEST",
         entity_type="DEAL",
         entity_id=active.id,
     )
 
-    return {"closed": True}
+    return {"requested": True}
 
 
 @router.get("/deals/status", response_model=DealStatusResponse)

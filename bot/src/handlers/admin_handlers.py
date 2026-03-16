@@ -247,3 +247,30 @@ async def admin_ledger_adjust_callback(callback: CallbackQuery):
     else:
         await callback.message.edit_text(callback.message.text + "\n\n❌ Коррекция отклонена.")
         await callback.answer("Коррекция отклонена.")
+
+
+@router.callback_query(F.data.startswith("deal_fc:"))
+async def admin_deal_force_close_callback(callback: CallbackQuery):
+    """Подтверждение/отклонение досрочного закрытия сделки из бота."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("Доступ запрещён")
+        return
+
+    parts = (callback.data or "").split(":")
+    if len(parts) < 2:
+        await callback.answer("Некорректные данные запроса")
+        return
+
+    _, action = parts[:2]
+
+    if action == "approve":
+        try:
+            await api.admin_deal_force_close(decided_by_telegram_id=callback.from_user.id)
+            await callback.message.edit_text(callback.message.text + "\n\n✅ Сделка досрочно закрыта.")
+            await callback.answer("Сделка закрыта.")
+        except Exception as e:
+            await callback.message.edit_text(f"{callback.message.text}\n\n❌ Ошибка закрытия: {e}")
+            await callback.answer("Ошибка закрытия")
+    else:
+        await callback.message.edit_text(callback.message.text + "\n\n❌ Досрочное закрытие отклонено.")
+        await callback.answer("Отклонено")

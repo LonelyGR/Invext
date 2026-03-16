@@ -290,6 +290,19 @@ class BackendClient:
             r.raise_for_status()
             return r.json()
 
+    async def admin_deal_force_close(
+        self,
+        decided_by_telegram_id: int,
+    ) -> Dict[str, Any]:
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            r = await client.post(
+                self._url("/v1/admin/deal-force-close"),
+                params={"decided_by_telegram_id": decided_by_telegram_id},
+                headers=self._admin_headers,
+            )
+            r.raise_for_status()
+            return r.json()
+
     async def update_system_settings_field(self, field: str, value: str) -> Dict[str, Any]:
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             r = await client.patch(

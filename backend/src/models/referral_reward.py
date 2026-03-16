@@ -19,6 +19,7 @@ if TYPE_CHECKING:
 
 STATUS_PENDING = "pending"
 STATUS_PAID = "paid"
+STATUS_MISSED = "missed"
 
 
 class ReferralReward(Base):

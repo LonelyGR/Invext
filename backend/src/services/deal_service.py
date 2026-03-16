@@ -20,6 +20,7 @@ from src.services.ledger_service import (
     LEDGER_TYPE_REFERRAL_BONUS,
     get_balance_usdt,
 )
+from src.services.referral_service import apply_referral_rewards_for_investment
 from src.services.settings_service import get_system_settings
 from src.services.notification_service import broadcast_deal_closed
 from src.services.notification_service import broadcast_deal_opened
@@ -121,6 +122,10 @@ async def participate_in_deal(
 
     user_locked.balance_usdt = current_balance - amount
     await db.flush()
+
+    # Инвестиционная реферальная линия (3 уровня по 0.5% с инвестиции),
+    # учитывающая участие реферера в этой же сделке.
+    await apply_referral_rewards_for_investment(db, investor=user_locked, deal=deal, investment_amount=amount)
 
     logger.info(
         "Deal participation created: deal_id=%s user_id=%s amount=%s",

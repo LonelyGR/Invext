@@ -159,3 +159,35 @@ async def admin_ledger_adjust(
         "user_id": user_id,
         "new_balance_usdt": str(new_balance),
     }
+
+
+@router.post("/deal-force-close")
+async def admin_deal_force_close(
+    decided_by_telegram_id: int = Query(..., description="Telegram ID админа, принявшего решение"),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Досрочно закрыть текущую активную сделку.
+    Вызывается ботом от имени админа после нажатия кнопки в Telegram.
+    Использует общую логику close_active_deal_by_schedule (уведомления + флаги).
+    """
+    from src.services.deal_service import close_active_deal_by_schedule  # локальный импорт
+    from src.services.deal_service import get_active_deal
+
+    active = await get_active_deal(db)
+    if not active:
+        raise HTTPException(status_code=400, detail="Нет активной сделки для досрочного закрытия.")
+
+    closed = await close_active_deal_by_schedule(db)
+    if not closed:
+        raise HTTPException(
+            status_code=400,
+            detail="Не удалось закрыть сделку (возможно, она уже закрыта).",
+        )
+
+    return {
+        "status": "ok",
+        "deal_id": active.id,
+        "deal_number": active.number,
+        "decided_by_telegram_id": decided_by_telegram_id,
+    }
