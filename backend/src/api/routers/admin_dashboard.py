@@ -678,19 +678,18 @@ async def open_deal_now(
     start_at = start_local.astimezone(dt.timezone.utc)
     end_at = close_local.astimezone(dt.timezone.utc)
 
-    async with db.begin():
-        deal = await open_new_deal(db, start_at=start_at, end_at=end_at)
+    deal = await open_new_deal(db, start_at=start_at, end_at=end_at)
 
-        # Рассылка всем пользователям об открытии сделки.
-        users_result = await db.execute(
-            select(User.telegram_id).where(User.telegram_id.isnot(None))
-        )
-        telegram_ids = [r[0] for r in users_result.all() if r[0]]
-        await broadcast_deal_opened(
-            telegram_ids,
-            deal.number,
-            close_at=deal.end_at,
-        )
+    # Рассылка всем пользователям об открытии сделки.
+    users_result = await db.execute(
+        select(User.telegram_id).where(User.telegram_id.isnot(None))
+    )
+    telegram_ids = [r[0] for r in users_result.all() if r[0]]
+    await broadcast_deal_opened(
+        telegram_ids,
+        deal.number,
+        close_at=deal.end_at,
+    )
 
     await log_admin_action(
         db=db,
