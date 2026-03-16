@@ -22,6 +22,7 @@ from sqlalchemy.orm import selectinload
 from src.models import Deal, DealParticipation, LedgerTransaction, ReferralReward, User
 from src.models.referral_reward import STATUS_MISSED
 from src.services.ledger_service import LEDGER_TYPE_REFERRAL_BONUS, get_balance_usdt
+from src.services.notification_service import send_telegram_message
 
 # Депозитная линия: только 1 уровень, 3%
 DEPOSIT_REFERRAL_PCT = Decimal("3")
@@ -121,6 +122,16 @@ async def apply_referral_rewards_for_deposit(
         new_balance = await get_balance_usdt(db, referrer_user.id)
         referrer_user.balance_usdt = new_balance
 
+        # Уведомляем о начисленном депозитном бонусе (3% с депозита 1 уровня).
+        if referrer_user.telegram_id:
+            text = (
+                "🎁 Вам начислен реферальный бонус с депозита.\n\n"
+                f"Реферал: {from_user.telegram_id}\n"
+                f"Сумма депозита: {deposit_amount} USDT\n"
+                f"Бонус: {reward_amount} USDT (3% от депозита)."
+            )
+            await send_telegram_message(referrer_user.telegram_id, text)
+
 
 async def apply_referral_rewards_for_investment(
     db: AsyncSession,
@@ -183,6 +194,16 @@ async def apply_referral_rewards_for_investment(
             if referrer_user:
                 new_balance = await get_balance_usdt(db, referrer_user.id)
                 referrer_user.balance_usdt = new_balance
+                # Уведомление о начисленном бонусе с инвестиции.
+                if referrer_user.telegram_id:
+                    text = (
+                        "🎁 Вам начислен реферальный бонус с инвестиции.\n\n"
+                        f"Реферал: {investor.telegram_id}\n"
+                        f"Сделка #{deal.number}\n"
+                        f"Сумма инвестиции: {investment_amount} USDT\n"
+                        f"Бонус: {reward_amount} USDT (0.5% от инвестиции)."
+                    )
+                    await send_telegram_message(referrer_user.telegram_id, text)
         else:
             # Фиксируем упущенную прибыль.
             missed = ReferralReward(
@@ -194,3 +215,15 @@ async def apply_referral_rewards_for_investment(
                 status=STATUS_MISSED,
             )
             db.add(missed)
+
+            # Уведомление об упущенной прибыли: пользователь не участвовал в сделке.
+            referrer_user = await db.get(User, referrer.id)
+            if referrer_user and referrer_user.telegram_id:
+                text = (
+                    "⚠️ Вы не участвовали в сделке, поэтому не получили реферальное вознаграждение.\n\n"
+                    f"Сделка #{deal.number}\n"
+                    f"Реферал: {investor.telegram_id}\n"
+                    f"Упущенная прибыль: {reward_amount} USDT.\n\n"
+                    "В следующий раз участвуйте в сделке, чтобы получать реферальные бонусы."
+                )
+                await send_telegram_message(referrer_user.telegram_id, text)

@@ -266,7 +266,7 @@ async function loadDeals() {
         <td>${d.number}</td>
         <td>${d.status}</td>
         <td>
-          <input type="number" step="0.01" min="0" value="${d.percent}" class="deal-percent-input" />
+          <input type="number" step="0.01" min="0" value="${d.profit_percent ?? d.percent ?? 0}" class="deal-percent-input" />
         </td>
         <td>${d.opened_at ? new Date(d.opened_at).toLocaleString() : ""}</td>
         <td>${d.closed_at ? new Date(d.closed_at).toLocaleString() : ""}</td>
@@ -365,9 +365,9 @@ async function loadDeals() {
         try {
           await apiRequest(`/deals/${dealId}`, {
             method: "PATCH",
-            body: JSON.stringify({ percent: value }),
+            body: JSON.stringify({ profit_percent: value }),
           });
-          alert("Процент обновлён");
+          alert("Доходность сделки обновлена");
           loadDeals();
         } catch (e) {
           alert(e.message);
