@@ -17,6 +17,7 @@ from src.models.deal import DEAL_STATUS_ACTIVE, DEAL_STATUS_CLOSED
 from src.models.referral_reward import STATUS_PAID
 from src.services.ledger_service import (
     LEDGER_TYPE_INVEST,
+    LEDGER_TYPE_PROFIT,
     LEDGER_TYPE_REFERRAL_BONUS,
     get_balance_usdt,
 )
@@ -165,6 +166,44 @@ async def close_deal_flow(db: AsyncSession, deal: Deal) -> None:
     if deal.closed_at is None:
         deal.closed_at = now
     await db.flush()
+
+    # Начисляем участникам сделки тело вклада + прибыль.
+    # Пользователь инвестировал сумму `amount` (INVEST уменьшил баланс),
+    # при закрытии сделки он должен получить обратно 100% вклада + profit% прибыли.
+    profit_percent = deal.profit_percent or deal.percent
+    if profit_percent is not None:
+        # Загружаем все участия в этой сделке.
+        parts_result = await db.execute(
+            select(DealParticipation).where(DealParticipation.deal_id == deal.id)
+        )
+        participations = list(parts_result.scalars().all())
+        for p in participations:
+            total_return = (
+                p.amount * (Decimal("1") + (Decimal(profit_percent) / Decimal("100")))
+            ).quantize(Decimal("0.000001"))
+
+            tx = LedgerTransaction(
+                user_id=p.user_id,
+                type=LEDGER_TYPE_PROFIT,
+                amount_usdt=total_return,
+                metadata_json={
+                    "deal_id": deal.id,
+                    "deal_number": deal.number,
+                    "participation_id": p.id,
+                    "base_amount": str(p.amount),
+                    "profit_percent": str(profit_percent),
+                },
+            )
+            db.add(tx)
+        if participations:
+            # Обновляем кэш баланса для всех участников.
+            participant_ids = {p.user_id for p in participations}
+            for uid in participant_ids:
+                user_obj = await db.get(User, uid)
+                if user_obj:
+                    new_balance = await get_balance_usdt(db, uid)
+                    user_obj.balance_usdt = new_balance
+            await db.flush()
 
     if not deal.referral_processed:
         # Реферальные бонусы теперь начисляются только с депозитов, а не с участия в сделках.
