@@ -17,7 +17,7 @@ class ProfileEditStates(StatesGroup):
     waiting_value = State()
 
 
-def _format_profile_text(me: dict, usdt, usdc, ref_link: str | None = None) -> str:
+def _format_profile_text(me: dict, usdt, ref_link: str | None = None) -> str:
     name = me.get("name") or me.get("username") or "не указано"
     email = me.get("email") or "не указано"
     country = me.get("country") or "не указано"
@@ -31,7 +31,7 @@ def _format_profile_text(me: dict, usdt, usdc, ref_link: str | None = None) -> s
 
     return (
         "👤 <b>Личные данные</b>\n\n"
-        f"<b>Баланс:</b> USDT: {usdt}, USDC: {usdc}\n"
+        f"<b>Баланс:</b> USDT: {usdt}\n"
         "🔒 Инвестировано: 0 (в разработке)\n\n"
         f"<b>Имя:</b> {name}\n"
         f"<b>Email:</b> {email}\n"
@@ -61,8 +61,7 @@ async def profile(message: Message):
         ref_link = f"https://t.me/{(await message.bot.get_me()).username}?start={ref_code}"
 
     usdt = balances.get("USDT", 0)
-    usdc = balances.get("USDC", 0)
-    text = _format_profile_text(me, usdt, usdc, ref_link=ref_link)
+    text = _format_profile_text(me, usdt, ref_link=ref_link)
     await message.answer(text, reply_markup=profile_reply_kb())
 
 
@@ -120,7 +119,6 @@ async def profile_edit_value(message: Message, state: FSMContext):
         text = _format_profile_text(
             me,
             balances.get("USDT", 0),
-            balances.get("USDC", 0),
             ref_link=ref_link,
         )
         await message.answer("Данные обновлены.\n\n" + text, reply_markup=profile_reply_kb())

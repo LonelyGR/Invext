@@ -64,12 +64,11 @@ def back_kb() -> InlineKeyboardMarkup:
 
 
 def currency_kb(callback_prefix: str) -> InlineKeyboardMarkup:
-    """Выбор валюты USDT / USDC. callback_prefix: 'deposit_' или 'withdraw_'."""
+    """Выбор валюты USDT. callback_prefix: 'deposit_' или 'withdraw_'."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(text="USDT", callback_data=f"{callback_prefix}USDT"),
-                InlineKeyboardButton(text="USDC", callback_data=f"{callback_prefix}USDC"),
             ],
             [InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_menu")],
         ]
@@ -119,7 +118,6 @@ def wallet_coin_kb() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 InlineKeyboardButton(text="USDT", callback_data="wallet_coin_USDT"),
-                InlineKeyboardButton(text="USDC", callback_data="wallet_coin_USDC"),
             ],
             [InlineKeyboardButton(text="❌ Отмена", callback_data="wallets_cancel")],
         ]

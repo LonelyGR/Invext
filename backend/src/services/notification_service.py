@@ -142,13 +142,17 @@ async def broadcast_deal_closed(
     telegram_ids: List[int],
     deal_number: int,
     profit_percent: float | None,
-    participant_telegram_ids: set[int],
     *,
+    participant_telegram_ids: set[int],
+    referral_profit_by_telegram: dict[int, float],
+    referral_missed_by_telegram: dict[int, float],
     next_open_at: Optional[dt.datetime] = None,
 ) -> None:
     """
-    Рассылка о закрытии регистрации на сделку.
-    Участникам с прибылью — с процентом и эффектом; остальным — время следующего открытия.
+    Рассылка о закрытии сделки:
+    - личная прибыль по сделке;
+    - реферальная прибыль и/или упущенная реферальная прибыль по итогам сделки.
+    Все в одном итоговом сообщении, без промежуточных уведомлений.
     """
     if not telegram_ids:
         return
@@ -157,23 +161,36 @@ async def broadcast_deal_closed(
 
     sent = 0
     for tid in telegram_ids:
+        lines: list[str] = [f"🔔 Регистрация на сделку #{deal_number} закрыта.\n"]
+
+        # Личная прибыль, если пользователь участвовал и есть процент.
         if tid in participant_telegram_ids and profit_percent is not None:
-            text = (
-                f"🔔 Регистрация на сделку #{deal_number} закрыта.\n\n"
-                f"Ваша прибыль {profit_percent}%.\n\n"
-                "Следующая сделка откроется:\n"
-                f"⏰ {next_open_human}\n\n"
-                "Для участия используйте нашего Telegram бота."
-            )
-            effect_id = EFFECT_FIRE
-        else:
-            text = (
-                f"🔔 Регистрация на сделку #{deal_number} закрыта.\n\n"
-                "Следующая сделка откроется:\n"
-                f"⏰ {next_open_human}\n\n"
-                "Для участия используйте нашего Telegram бота."
-            )
-            effect_id = None
+            lines.append(f"Ваша прибыль: {profit_percent}%.\n")
+
+        # Реферальная прибыль по итогу сделки.
+        ref_profit = referral_profit_by_telegram.get(tid)
+        if ref_profit and ref_profit > 0:
+            lines.append(f"Реферальная прибыль: {ref_profit:.2f} USDT.\n")
+
+        # Упущенная реферальная прибыль (если не участвовал, но его рефералы участвовали).
+        ref_missed = referral_missed_by_telegram.get(tid)
+        if ref_missed and ref_missed > 0:
+            lines.append(f"Упущенная прибыль с рефералов: {ref_missed:.2f} USDT.\n")
+            lines.append("⚠️ Вы не участвовали в сделке, поэтому не получили реферальное вознаграждение.\n")
+
+        lines.append("\nСледующая сделка откроется:\n")
+        lines.append(f"⏰ {next_open_human}\n\n")
+        lines.append("Для участия используйте нашего Telegram бота.")
+
+        text = "".join(lines)
+
+        # Эффект даём только тем, у кого есть личная или реферальная прибыль.
+        has_positive = (
+            (tid in participant_telegram_ids and profit_percent is not None)
+            or (ref_profit and ref_profit > 0)
+        )
+        effect_id = EFFECT_FIRE if has_positive else None
+
         if await send_telegram_message(tid, text, message_effect_id=effect_id):
             sent += 1
 

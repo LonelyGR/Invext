@@ -209,20 +209,56 @@ async def close_deal_flow(db: AsyncSession, deal: Deal) -> None:
         await db.flush()
 
     if not deal.close_notification_sent:
+        # Участники сделки (по user_id).
         participant_user_ids_result = await db.execute(
             select(DealParticipation.user_id).where(DealParticipation.deal_id == deal.id)
         )
         participant_user_ids = {r[0] for r in participant_user_ids_result.all()}
 
+        # Все пользователи с telegram_id.
         users_result = await db.execute(
-            select(User.telegram_id, User.id).where(User.telegram_id.isnot(None))
+            select(User.id, User.telegram_id).where(User.telegram_id.isnot(None))
         )
         rows = users_result.all()
-        telegram_ids = [r[0] for r in rows if r[0]]
+        user_id_by_tid = {r[1]: r[0] for r in rows if r[1]}
+        telegram_ids = list(user_id_by_tid.keys())
+
         participant_telegram_ids = {
-            r[0] for r in rows
-            if r[1] in participant_user_ids and r[0]
+            tid for tid, uid in user_id_by_tid.items() if uid in participant_user_ids
         }
+
+        # Считаем реферальную прибыль и упущенную прибыль по этой сделке.
+        # Фактические начисленные бонусы: ledger_transactions type=REFERRAL_BONUS, source='investment'.
+        referral_profit_by_telegram: dict[int, float] = {}
+        referral_missed_by_telegram: dict[int, float] = {}
+
+        # Начисленная реферальная прибыль по сделке.
+        lt_result = await db.execute(
+            select(LedgerTransaction.user_id, LedgerTransaction.amount_usdt, LedgerTransaction.metadata_json).where(
+                LedgerTransaction.type == LEDGER_TYPE_REFERRAL_BONUS
+            )
+        )
+        for uid, amount, meta in lt_result.all():
+            if not meta or meta.get("source") != "investment":
+                continue
+            if int(meta.get("deal_id", 0)) != deal.id:
+                continue
+            # Переводим в telegram_id.
+            for tid, user_id in user_id_by_tid.items():
+                if user_id == uid:
+                    referral_profit_by_telegram[tid] = referral_profit_by_telegram.get(tid, 0.0) + float(amount)
+
+        # Упущенные бонусы по этой сделке.
+        rr_result = await db.execute(
+            select(ReferralReward.to_user_id, ReferralReward.amount).where(
+                ReferralReward.deal_id == deal.id,
+                ReferralReward.status == STATUS_MISSED,
+            )
+        )
+        for to_uid, amount in rr_result.all():
+            for tid, user_id in user_id_by_tid.items():
+                if user_id == to_uid:
+                    referral_missed_by_telegram[tid] = referral_missed_by_telegram.get(tid, 0.0) + float(amount)
 
         profit_pct = float(deal.profit_percent) if deal.profit_percent is not None else None
         # Следующая сделка открывается в 13:00 (UTC+1), текущая закрывается в 12:00
@@ -231,7 +267,9 @@ async def close_deal_flow(db: AsyncSession, deal: Deal) -> None:
             telegram_ids,
             deal.number,
             profit_pct,
-            participant_telegram_ids,
+            participant_telegram_ids=participant_telegram_ids,
+            referral_profit_by_telegram=referral_profit_by_telegram,
+            referral_missed_by_telegram=referral_missed_by_telegram,
             next_open_at=next_open_at,
         )
         deal.close_notification_sent = True

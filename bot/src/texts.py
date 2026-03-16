@@ -38,14 +38,11 @@ def format_personal_data(
     me: dict,
     balances: dict,
     invested_usdt: str = "0.00",
-    invested_usdc: str = "0.00",
     ref_link: str | None = None,
 ) -> str:
     """Формирует блок «Личные данные» для второго сообщения при /start."""
     usdt = float(balances.get("USDT", 0) or 0)
-    usdc = float(balances.get("USDC", 0) or 0)
     usdt_s = f"{usdt:.2f}"
-    usdc_s = f"{usdc:.2f}"
 
     name = me.get("name") or me.get("username") or "не указано"
     email = me.get("email") or "не указано"
@@ -61,11 +58,9 @@ def format_personal_data(
     return (
         "<b>Личные данные:</b>\n\n"
         "💰 <b>Баланс:</b>\n"
-        f"USDT: {usdt_s}\n"
-        f"USDC: {usdc_s}\n\n"
+        f"USDT: {usdt_s}\n\n"
         "🔒 <b>Инвестировано:</b>\n"
-        f"USDT: {invested_usdt}\n"
-        f"USDC: {invested_usdc}\n\n"
+        f"USDT: {invested_usdt}\n\n"
         f"👤 Имя: {name}\n"
         f"📧 Email: {email}\n"
         f"🌍 Страна: {country}\n\n"

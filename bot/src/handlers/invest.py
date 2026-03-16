@@ -1,6 +1,6 @@
 """
 Раздел «Сделка»: отображение открытой сделки, кнопка «Участвовать», ввод суммы.
-Инвестиции — списание виртуального баланса (USDT) через /api/invest.
+Инвестиции — списание баланса USDT через /api/invest.
 """
 from decimal import Decimal, InvalidOperation
 
@@ -35,9 +35,8 @@ def _invest_deal_kb(with_participate: bool) -> InlineKeyboardMarkup:
 def _format_invest_screen(available_usdt: str) -> str:
     return (
         "<b>Инвестиции</b>\n\n"
-        "💰 <b>Доступно для инвестиций (виртуальный баланс USDT):</b>\n"
+        "💰 <b>Доступный баланс для инвестиций:</b>\n"
         f"USDT: {available_usdt}\n\n"
-        "Минимальная сумма одной инвестиции настраивается администратором.\n"
         "Отправьте сумму инвестиций цифрами ответом на это сообщение."
     )
 
@@ -59,10 +58,10 @@ async def invest_section(message: Message, state: FSMContext):
         deal_number = active["deal_number"]
         text = (
             f"<b>Сделка #{deal_number}</b> открыта.\n\n"
-            "💰 <b>Доступно для инвестиций (виртуальный баланс USDT):</b>\n"
+            "💰 <b>Доступный баланс для инвестиций:</b>\n"
             f"USDT: {available_usdt}\n\n"
             "Нажмите <b>«Участвовать»</b>, чтобы вложить средства в текущую сделку.\n"
-            "Минимальная сумма настраивается администратором."
+            "Минимальная сумма участия отображается при вводе суммы."
         )
         await message.answer(text, reply_markup=_invest_deal_kb(with_participate=True))
     else:
@@ -138,7 +137,7 @@ async def invest_amount_entered(message: Message, state: FSMContext):
         success_text = (
             "✅ Инвестиция создана.\n"
             f"Сумма: {invested} USDT\n\n"
-            f"Текущий виртуальный баланс: {new_balance} USDT\n\n"
+            f"Текущий баланс: {new_balance} USDT\n\n"
             "Средства переведены в текущую сделку. Начисление прибыли произойдет\n"
             "после её завершения согласно условиям."
         )

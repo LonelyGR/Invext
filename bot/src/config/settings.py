@@ -21,4 +21,4 @@ BACKEND_BASE_URL = _get_env("BACKEND_BASE_URL", "http://localhost:8000")
 ADMIN_API_KEY = _get_env("ADMIN_API_KEY")
 ADMIN_TELEGRAM_IDS = get_admin_telegram_ids()
 
-ALLOWED_CURRENCIES = ("USDT", "USDC")
+ALLOWED_CURRENCIES = ("USDT",)

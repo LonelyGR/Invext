@@ -27,9 +27,7 @@ async def stats(message: Message):
         return
 
     d_usdt = me.get("my_deposits_total_usdt", "0")
-    d_usdc = me.get("my_deposits_total_usdc", "0")
     w_usdt = me.get("my_withdrawals_total_usdt", "0")
-    w_usdc = me.get("my_withdrawals_total_usdc", "0")
     deposits_count = me.get("deposits_count", 0)
     withdrawals_count = me.get("withdrawals_count", 0)
 
@@ -43,9 +41,9 @@ async def stats(message: Message):
     text = (
         "📊 <b>Статистика пользователя</b>\n\n"
         "<b>Ваши депозиты:</b>\n"
-        f"USDT: {d_usdt}, USDC: {d_usdc}\n\n"
+        f"USDT: {d_usdt}\n\n"
         "<b>Ваши выводы:</b>\n"
-        f"USDT: {w_usdt}, USDC: {w_usdc}\n\n"
+        f"USDT: {w_usdt}\n\n"
         f"Общая прибыль: {profit_total} USDT\n"
         f"Доход с рефералов: {referral_income} USDT\n\n"
         f"Всего сделок: {deals_total}\n"

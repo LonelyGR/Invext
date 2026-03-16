@@ -118,7 +118,6 @@ class BackendClient:
             data = r.json()
             return {
                 "USDT": Decimal(str(data.get("USDT", 0))),
-                "USDC": Decimal(str(data.get("USDC", 0))),
             }
 
     # --- Withdrawals ---

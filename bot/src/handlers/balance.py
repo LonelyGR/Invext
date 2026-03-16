@@ -21,12 +21,10 @@ async def balance_main(message: Message):
         return
 
     usdt = balances.get("USDT", 0)
-    usdc = balances.get("USDC", 0)
     text = (
         "💰 <b>Ваш баланс</b>\n\n"
-        f"USDT: {usdt}\n"
-        f"USDC: {usdc}\n\n"
-        "Реферальные бонусы начисляются на тот же баланс и доступны для участия в сделках или вывода."
+        f"USDT: {usdt}\n\n"
+        "Реферальные бонусы начисляются на этот баланс и доступны для участия в сделках или вывода."
     )
     await message.answer(text, reply_markup=main_menu_kb())
 

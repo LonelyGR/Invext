@@ -13,9 +13,8 @@ router = Router(name="team_turnover")
 def _format_turnover_main(me: dict) -> str:
     """Текст главного экрана «Оборот команды»."""
     usdt = me.get("team_deposits_usdt", "0") or "0"
-    usdc = me.get("team_deposits_usdc", "0") or "0"
     try:
-        total = float(usdt) + float(usdc)
+        total = float(usdt)
     except (TypeError, ValueError):
         total = 0
     return (
@@ -28,21 +27,19 @@ def _format_turnover_main(me: dict) -> str:
 def _format_turnover_detail(me: dict) -> str:
     """Текст экрана «Подробная статистика команды» (оборот по уровням)."""
     usdt = me.get("team_deposits_usdt", "0") or "0"
-    usdc = me.get("team_deposits_usdc", "0") or "0"
     ref_count = me.get("referrals_count", 0)
     try:
         usdt_f = float(usdt)
-        usdc_f = float(usdc)
     except (TypeError, ValueError):
-        usdt_f = usdc_f = 0
+        usdt_f = 0
     return (
         "📈 <b>Подробная статистика команды</b>\n\n"
         "Оборот по линиям (депозиты рефералов):\n"
-        f"◆ 1 уровень: {ref_count} уч. — USDT {usdt_f:.2f}, USDC {usdc_f:.2f}\n"
-        "◆ 2 уровень: 0 уч. — USDT 0.00, USDC 0.00\n"
-        "◆ 3 уровень: 0 уч. — USDT 0.00, USDC 0.00\n"
-        "◆ 4 уровень: 0 уч. — USDT 0.00, USDC 0.00\n"
-        "◆ 5 уровень: 0 уч. — USDT 0.00, USDC 0.00"
+        f"◆ 1 уровень: {ref_count} уч. — USDT {usdt_f:.2f}\n"
+        "◆ 2 уровень: 0 уч. — USDT 0.00\n"
+        "◆ 3 уровень: 0 уч. — USDT 0.00\n"
+        "◆ 4 уровень: 0 уч. — USDT 0.00\n"
+        "◆ 5 уровень: 0 уч. — USDT 0.00"
     )
 
 
