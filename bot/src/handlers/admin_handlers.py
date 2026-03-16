@@ -123,8 +123,7 @@ async def admin_fin_settings(callback: CallbackQuery):
         f"Минимальный вывод: {data['min_withdraw_usdt']} USDT\n"
         f"Максимальный вывод: {data['max_withdraw_usdt']} USDT\n\n"
         f"Минимальная инвестиция: {data['min_invest_usdt']} USDT\n"
-        f"Максимальная инвестиция: {data['max_invest_usdt']} USDT\n\n"
-        f"Сумма участия в сделке: {data['deal_amount_usdt']} USDT"
+        f"Максимальная инвестиция: {data['max_invest_usdt']} USDT"
     )
     await callback.message.edit_text(text, reply_markup=fin_settings_kb(), parse_mode="HTML")
     await callback.answer()
@@ -142,7 +141,6 @@ async def fin_setting_choose(callback: CallbackQuery, state: FSMContext):
         "fin_set_max_withdraw": "max_withdraw_usdt",
         "fin_set_min_invest": "min_invest_usdt",
         "fin_set_max_invest": "max_invest_usdt",
-        "fin_set_deal_amount": "deal_amount_usdt",
     }
     key = callback.data
     field = field_map.get(key)

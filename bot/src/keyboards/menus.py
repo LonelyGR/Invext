@@ -98,7 +98,6 @@ def fin_settings_kb() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="Изменить макс. вывод", callback_data="fin_set_max_withdraw")],
             [InlineKeyboardButton(text="Изменить мин. инвестицию", callback_data="fin_set_min_invest")],
             [InlineKeyboardButton(text="Изменить макс. инвестицию", callback_data="fin_set_max_invest")],
-            [InlineKeyboardButton(text="Изменить сумму сделки", callback_data="fin_set_deal_amount")],
             [InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_menu")],
         ]
     )

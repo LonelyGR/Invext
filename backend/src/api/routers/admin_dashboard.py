@@ -618,6 +618,25 @@ async def update_deal_percent(
         if body.end_at is not None:
             deal.end_at = body.end_at
 
+        # Формируем DTO внутри транзакции, чтобы не дергать БД после её завершения
+        deal_row = DealRow(
+            id=deal.id,
+            number=deal.number,
+            title=deal.title,
+            start_at=deal.start_at,
+            end_at=deal.end_at,
+            status=deal.status,
+            profit_percent=deal.profit_percent,
+            referral_processed=deal.referral_processed,
+            close_notification_sent=deal.close_notification_sent,
+            created_at=getattr(deal, "created_at", None),
+            updated_at=getattr(deal, "updated_at", None),
+            percent=deal.percent,
+            opened_at=deal.opened_at,
+            closed_at=deal.closed_at,
+            finished_at=deal.finished_at,
+        )
+
     await log_admin_action(
         db=db,
         admin_token_id=admin_token_id,
@@ -626,23 +645,7 @@ async def update_deal_percent(
         entity_id=deal_id,
     )
 
-    return DealRow(
-        id=deal.id,
-        number=deal.number,
-        title=deal.title,
-        start_at=deal.start_at,
-        end_at=deal.end_at,
-        status=deal.status,
-        profit_percent=deal.profit_percent,
-        referral_processed=deal.referral_processed,
-        close_notification_sent=deal.close_notification_sent,
-        created_at=getattr(deal, "created_at", None),
-        updated_at=getattr(deal, "updated_at", None),
-        percent=deal.percent,
-        opened_at=deal.opened_at,
-        closed_at=deal.closed_at,
-        finished_at=deal.finished_at,
-    )
+    return deal_row
 
 
 @router.post("/deals/open-now", response_model=DealRow)
