@@ -88,6 +88,18 @@ class LedgerList(BaseModel):
     items: List[LedgerItem]
 
 
+class LedgerAdjustRequest(BaseModel):
+    """Ручная корректировка баланса через леджер (только из админки)."""
+
+    amount_usdt: Decimal
+    comment: Optional[str] = None
+
+
+class LedgerAdjustResponse(BaseModel):
+    user_id: int
+    new_balance_usdt: Decimal
+
+
 class UserInvestment(BaseModel):
     deal_id: int
     deal_number: int

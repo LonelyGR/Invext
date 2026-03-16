@@ -643,10 +643,23 @@ async function loadUserDetail(userId) {
           <div>
             <div>Telegram ID: <strong>${u.telegram_id}</strong></div>
             <div>Username: <strong>${u.username || ""}</strong></div>
-            <div>balance_usdt: <strong>${u.balance_usdt}</strong></div>
-            <div>ledger_balance: <strong>${u.ledger_balance_usdt}</strong> ${mismatch}</div>
+            <div>balance_usdt: <strong id="user-balance-usdt">${u.balance_usdt}</strong></div>
+            <div>ledger_balance: <strong id="user-ledger-balance">${u.ledger_balance_usdt}</strong> ${mismatch}</div>
           </div>
-          <button id="ledger-export-btn">Экспорт CSV</button>
+          <div class="toolbar-actions">
+            <div class="balance-adjust-form">
+              <label>
+                Коррекция баланса (USDT)
+                <input type="number" id="balance-adjust-amount" step="0.01" />
+              </label>
+              <label>
+                Комментарий
+                <input type="text" id="balance-adjust-comment" placeholder="Причина корректировки" />
+              </label>
+              <button type="button" id="balance-adjust-apply-btn">Начислить / списать</button>
+            </div>
+            <button id="ledger-export-btn">Экспорт CSV</button>
+          </div>
         </div>
         <h2>Ledger</h2>
         <div class="table-wrapper">
@@ -705,6 +718,34 @@ async function loadUserDetail(userId) {
     if (exportBtn) {
       exportBtn.onclick = () => {
         window.location.href = `${API_BASE}/ledger/${userId}/export`;
+      };
+    }
+
+    const adjustBtn = document.getElementById("balance-adjust-apply-btn");
+    if (adjustBtn) {
+      adjustBtn.onclick = async () => {
+        const amountInput = document.getElementById("balance-adjust-amount");
+        const commentInput = document.getElementById("balance-adjust-comment");
+        if (!amountInput) return;
+        const raw = amountInput.value;
+        const amount = parseFloat(raw.replace(",", "."));
+        if (!raw || Number.isNaN(amount) || amount === 0) {
+          alert("Введите ненулевую сумму корректировки (можно со знаком - для списания).");
+          return;
+        }
+        try {
+          await apiRequest(`/users/${userId}/ledger-adjust`, {
+            method: "POST",
+            body: JSON.stringify({
+              amount_usdt: raw,
+              comment: commentInput ? commentInput.value : null,
+            }),
+          });
+          alert("Коррекция баланса выполнена.");
+          loadUserDetail(userId);
+        } catch (e) {
+          alert(e.message || "Ошибка корректировки баланса");
+        }
       };
     }
   } catch (e) {

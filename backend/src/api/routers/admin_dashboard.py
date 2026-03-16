@@ -33,24 +33,26 @@ from src.models import (
     SystemSettings,
 )
 from src.schemas.admin_dashboard import (
-    DashboardStats,
-    LedgerItem,
-    LedgerList,
-    LoginRequest,
-    PaginatedUsers,
-    UserRow,
-    UserDetail,
-    UserInvestment,
-    UserWithdrawRequest,
-    PaginatedAdminLogs,
     AdminLogItem,
+    DashboardStats,
     DealRow,
     DealStatusResponse,
     DealUpdateRequest,
-    SendDealNotificationsResponse,
-    DepositRow,
     DepositDetail,
+    DepositRow,
+    LedgerAdjustRequest,
+    LedgerAdjustResponse,
+    LedgerItem,
+    LedgerList,
+    LoginRequest,
+    PaginatedAdminLogs,
     PaginatedDeposits,
+    PaginatedUsers,
+    SendDealNotificationsResponse,
+    UserDetail,
+    UserInvestment,
+    UserRow,
+    UserWithdrawRequest,
 )
 from src.services.ledger_service import (
     LEDGER_TYPE_DEPOSIT,
@@ -880,6 +882,63 @@ async def list_withdrawals(
     )
 
     return {"items": items}
+
+
+@router.post("/users/{user_id}/ledger-adjust", response_model=LedgerAdjustResponse)
+async def user_ledger_adjust(
+    request: Request,
+    user_id: int,
+    body: LedgerAdjustRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Ручная корректировка баланса пользователя через леджер.
+    Используется только в админке для исправления сбоев платежей:
+    - положительная сумма = пополнение (DEPOSIT),
+    - отрицательная сумма = списание (WITHDRAW).
+    """
+    if body.amount_usdt == 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Amount must be non-zero")
+
+    admin_token_id, admin_telegram_id = await get_admin_context(request)
+
+    async with db.begin():
+        user = await db.get(User, user_id)
+        if not user:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+        amount = body.amount_usdt
+        if amount > 0:
+            tx_type = LEDGER_TYPE_DEPOSIT
+            stored_amount = amount
+        else:
+            tx_type = LEDGER_TYPE_WITHDRAW
+            stored_amount = -amount
+
+        tx = LedgerTransaction(
+            user_id=user.id,
+            type=tx_type,
+            amount_usdt=stored_amount,
+            provider="ADMIN_MANUAL",
+            metadata_json={
+                "comment": body.comment,
+                "admin_telegram_id": admin_telegram_id,
+            },
+        )
+        db.add(tx)
+
+        new_balance = await get_balance_usdt(db, user.id)
+        user.balance_usdt = new_balance
+
+        await log_admin_action(
+            db=db,
+            admin_token_id=admin_token_id,
+            action_type="LEDGER_MANUAL_ADJUST",
+            entity_type="USER",
+            entity_id=user.id,
+        )
+
+    return LedgerAdjustResponse(user_id=user_id, new_balance_usdt=new_balance)
 
 
 @router.post("/withdrawals/{withdraw_id}/approve")
