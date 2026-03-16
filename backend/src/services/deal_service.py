@@ -61,11 +61,9 @@ async def participate_in_deal(
     """
     Участие пользователя в текущей активной сделке.
     Один пользователь — одно участие в одной сделке (unique deal_id, user_id).
-    Сумма участия берётся из SystemSettings.deal_amount_usdt.
+    Фактическая сумма участия передаётся из API /api/invest (ботом) и
+    уже проверена на минималку/баланс.
     """
-    sys_settings = await get_system_settings(db)
-    # Сумма участия определяется настройками системы, а не произвольным вводом.
-    amount = sys_settings.deal_amount_usdt
 
     deal_result = await db.execute(
         select(Deal)
