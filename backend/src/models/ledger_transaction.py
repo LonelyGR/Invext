@@ -43,14 +43,6 @@ class LedgerTransaction(Base):
     external_payment_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, index=True)
     metadata_json: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
 
-    # Источник операции (ранее использовался для блокчейн-депозитов, теперь не используется)
-    chain_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True, index=True)
-    tx_hash: Mapped[Optional[str]] = mapped_column(String(66), nullable=True, index=True)
-    log_index: Mapped[Optional[int]] = mapped_column(nullable=True)
-    blockchain_event_id: Mapped[Optional[int]] = mapped_column(
-        nullable=True, index=True
-    )
-
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
