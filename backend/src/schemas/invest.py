@@ -10,8 +10,8 @@ class InvestRequest(BaseModel):
     user_id: int = Field(..., description="telegram_id пользователя")
     amount_usdt: Decimal = Field(
         ...,
-        ge=Decimal("50"),
-        description="Сумма инвестиций, минимум 50 USDT",
+        ge=Decimal("1"),
+        description="Сумма инвестиций; фактический минимум берётся из SystemSettings.min_invest_usdt",
     )
 
 
