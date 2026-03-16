@@ -13,7 +13,22 @@ async function apiRequest(path, options = {}) {
     showLoginView();
     throw new Error("Unauthorized");
   }
-  return resp.json();
+  const text = await resp.text();
+  if (!resp.ok) {
+    // Пытаемся вытащить detail из JSON; если это HTML/текст об ошибке — показываем его как есть.
+    try {
+      const data = JSON.parse(text);
+      const detail = data.detail || data.message || JSON.stringify(data);
+      throw new Error(detail);
+    } catch (_) {
+      throw new Error(text || `HTTP error ${resp.status}`);
+    }
+  }
+  try {
+    return text ? JSON.parse(text) : {};
+  } catch (e) {
+    throw new Error("Ответ сервера не является корректным JSON");
+  }
 }
 
 function showLoginView() {
