@@ -62,7 +62,8 @@ from src.services.ledger_service import (
     get_balance_usdt,
 )
 from src.services.deal_service import get_active_deal, get_active_deal_legacy, open_new_deal
-from src.services.notification_service import broadcast_deal_opened
+from src.services.notification_service import broadcast_deal_opened, send_telegram_message
+from src.core.config import get_settings
 from src.services.settings_service import invalidate_system_settings_cache
 
 
@@ -892,53 +893,71 @@ async def user_ledger_adjust(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Ручная корректировка баланса пользователя через леджер.
-    Используется только в админке для исправления сбоев платежей:
-    - положительная сумма = пополнение (DEPOSIT),
-    - отрицательная сумма = списание (WITHDRAW).
+    Создать запрос на ручную корректировку баланса пользователя.
+    Фактическое изменение баланса выполняется после подтверждения админом в боте.
     """
     if body.amount_usdt == 0:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Amount must be non-zero")
 
     admin_token_id, admin_telegram_id = await get_admin_context(request)
 
-    async with db.begin():
-        user = await db.get(User, user_id)
-        if not user:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    user = await db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-        amount = body.amount_usdt
-        if amount > 0:
-            tx_type = LEDGER_TYPE_DEPOSIT
-            stored_amount = amount
-        else:
-            tx_type = LEDGER_TYPE_WITHDRAW
-            stored_amount = -amount
-
-        tx = LedgerTransaction(
-            user_id=user.id,
-            type=tx_type,
-            amount_usdt=stored_amount,
-            provider="ADMIN_MANUAL",
-            metadata_json={
-                "comment": body.comment,
-                "admin_telegram_id": admin_telegram_id,
-            },
-        )
-        db.add(tx)
-
-        new_balance = await get_balance_usdt(db, user.id)
-        user.balance_usdt = new_balance
-
-        await log_admin_action(
-            db=db,
-            admin_token_id=admin_token_id,
-            action_type="LEDGER_MANUAL_ADJUST",
-            entity_type="USER",
-            entity_id=user.id,
+    settings = get_settings()
+    admin_ids = settings.admin_telegram_ids
+    if not admin_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="ADMIN_TELEGRAM_IDS is not configured",
         )
 
-    return LedgerAdjustResponse(user_id=user_id, new_balance_usdt=new_balance)
+    amount = body.amount_usdt
+    amount_str = str(amount)
+    comment = body.comment or ""
+
+    text = (
+        "⚠️ Запрос ручной корректировки баланса\n\n"
+        f"user_id: {user.id}\n"
+        f"telegram_id: {user.telegram_id}\n"
+        f"Сумма: {amount_str} USDT\n"
+        f"Комментарий: {comment or '—'}\n\n"
+        "Подтвердите или отклоните корректировку."
+    )
+
+    # callback_data ограничено ~64 байт, поэтому кодируем только нужный минимум.
+    callback_base = f"{user.id}:{amount_str}"
+    reply_markup = {
+        "inline_keyboard": [
+            [
+                {
+                    "text": "✅ Принять",
+                    "callback_data": f"ledger_adj:approve:{callback_base}",
+                },
+                {
+                    "text": "❌ Отклонить",
+                    "callback_data": f"ledger_adj:reject:{callback_base}",
+                },
+            ]
+        ]
+    }
+
+    sent_to = 0
+    for admin_tid in admin_ids:
+        if await send_telegram_message(admin_tid, text, reply_markup=reply_markup):
+            sent_to += 1
+
+    await log_admin_action(
+        db=db,
+        admin_token_id=admin_token_id,
+        action_type="LEDGER_MANUAL_ADJUST_REQUEST",
+        entity_type="USER",
+        entity_id=user.id,
+    )
+
+    # Для совместимости с фронтом возвращаем новое поле, но баланс пока не меняем.
+    return LedgerAdjustResponse(user_id=user_id, new_balance_usdt=user.balance_usdt)
 
 
 @router.post("/withdrawals/{withdraw_id}/approve")

@@ -11,7 +11,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.config import get_settings
 from src.core.security import require_admin_key
 from src.db.session import get_db
-from src.models import AdminToken
+from src.models import AdminToken, User
+from src.models.ledger_transaction import LedgerTransaction
+from src.services.ledger_service import (
+    LEDGER_TYPE_DEPOSIT,
+    LEDGER_TYPE_WITHDRAW,
+    get_balance_usdt,
+)
 from src.services.withdraw_service import (
     get_pending_withdrawals_with_users,
     approve_withdraw,
@@ -96,4 +102,60 @@ async def admin_create_dashboard_token(
         "token": token_str,
         "expires_at": expires_at.isoformat(),
         "dashboard_url": dashboard_url,
+    }
+
+
+@router.post("/ledger-adjust")
+async def admin_ledger_adjust(
+    user_id: int = Query(..., description="ID пользователя"),
+    amount_usdt: str = Query(..., description="Сумма корректировки, может быть отрицательной"),
+    comment: str | None = Query(None, description="Комментарий к корректировке"),
+    decided_by_telegram_id: int = Query(..., description="Telegram ID админа, принявшего решение"),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Фактическая корректировка баланса через леджер.
+    Вызывается ботом от имени админа после нажатия кнопки в Telegram.
+    """
+    from decimal import Decimal, InvalidOperation  # локальный импорт, чтобы не тянуть наверх
+
+    try:
+        amount = Decimal(amount_usdt)
+    except (InvalidOperation, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid amount_usdt")
+
+    if amount == 0:
+        raise HTTPException(status_code=400, detail="Amount must be non-zero")
+
+    async with db.begin():
+        user = await db.get(User, user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        if amount > 0:
+            tx_type = LEDGER_TYPE_DEPOSIT
+            stored_amount = amount
+        else:
+            tx_type = LEDGER_TYPE_WITHDRAW
+            stored_amount = -amount
+
+        tx = LedgerTransaction(
+            user_id=user.id,
+            type=tx_type,
+            amount_usdt=stored_amount,
+            provider="ADMIN_MANUAL",
+            metadata_json={
+                "comment": comment,
+                "decided_by_telegram_id": decided_by_telegram_id,
+            },
+        )
+        db.add(tx)
+
+        new_balance = await get_balance_usdt(db, user.id)
+        user.balance_usdt = new_balance
+
+    return {
+        "status": "ok",
+        "user_id": user_id,
+        "new_balance_usdt": str(new_balance),
     }

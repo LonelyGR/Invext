@@ -259,6 +259,28 @@ class BackendClient:
             return r.json()
 
     # --- System settings (admin only) ---
+
+    async def admin_ledger_adjust(
+        self,
+        user_id: int,
+        amount_usdt: str,
+        comment: Optional[str],
+        decided_by_telegram_id: int,
+    ) -> Dict[str, Any]:
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            r = await client.post(
+                self._url("/v1/admin/ledger-adjust"),
+                params={
+                    "user_id": user_id,
+                    "amount_usdt": amount_usdt,
+                    "comment": comment,
+                    "decided_by_telegram_id": decided_by_telegram_id,
+                },
+                headers=self._admin_headers,
+            )
+            r.raise_for_status()
+            return r.json()
+
     async def get_system_settings(self) -> Dict[str, Any]:
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             r = await client.get(

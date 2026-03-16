@@ -62,6 +62,7 @@ async def send_telegram_message(
     text: str,
     *,
     message_effect_id: Optional[str] = None,
+    reply_markup: Optional[dict] = None,
 ) -> bool:
     """
     Отправить одно сообщение в Telegram.
@@ -76,6 +77,8 @@ async def send_telegram_message(
     payload: dict = {"chat_id": chat_id, "text": text}
     if message_effect_id:
         payload["message_effect_id"] = message_effect_id
+    if reply_markup is not None:
+        payload["reply_markup"] = reply_markup
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             r = await client.post(url, json=payload)

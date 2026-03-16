@@ -741,7 +741,7 @@ async function loadUserDetail(userId) {
               comment: commentInput ? commentInput.value : null,
             }),
           });
-          alert("Коррекция баланса выполнена.");
+          alert("Запрос на корректировку отправлен администраторам в бота. Итоговый баланс изменится после подтверждения.");
           loadUserDetail(userId);
         } catch (e) {
           alert(e.message || "Ошибка корректировки баланса");

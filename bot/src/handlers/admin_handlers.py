@@ -210,3 +210,40 @@ async def admin_withdraw_reject(callback: CallbackQuery):
     except Exception as e:
         await callback.message.edit_text(f"Ошибка: {e}")
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith("ledger_adj:"))
+async def admin_ledger_adjust_callback(callback: CallbackQuery):
+    """Подтверждение/отклонение ручной корректировки баланса из бота."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("Доступ запрещён")
+        return
+
+    parts = (callback.data or "").split(":")
+    if len(parts) < 4:
+        await callback.answer("Некорректные данные запроса")
+        return
+
+    _, action, user_id_str, amount_str = parts[:4]
+    try:
+        user_id = int(user_id_str)
+    except ValueError:
+        await callback.answer("Некорректный user_id")
+        return
+
+    if action == "approve":
+        try:
+            await api.admin_ledger_adjust(
+                user_id=user_id,
+                amount_usdt=amount_str,
+                comment=None,
+                decided_by_telegram_id=callback.from_user.id,
+            )
+            await callback.message.edit_text(callback.message.text + "\n\n✅ Коррекция применена.")
+            await callback.answer("Коррекция применена.")
+        except Exception as e:
+            await callback.message.edit_text(f"{callback.message.text}\n\n❌ Ошибка применения: {e}")
+            await callback.answer("Ошибка применения")
+    else:
+        await callback.message.edit_text(callback.message.text + "\n\n❌ Коррекция отклонена.")
+        await callback.answer("Коррекция отклонена.")
