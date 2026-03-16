@@ -929,15 +929,6 @@ async function loadSettings() {
               <input type="number" step="0.01" min="0" id="max_invest_usdt" class="settings-input" value="${s.max_invest_usdt}" />
             </div>
           </div>
-          <div class="settings-row-deal">
-            <div class="settings-field">
-              <div>
-                <div class="settings-label">Сумма сделки (USDT)</div>
-                <div class="settings-hint">Фиксированная сумма участия в сделке</div>
-              </div>
-              <input type="number" step="0.01" min="0" id="deal_amount_usdt" class="settings-input" value="${s.deal_amount_usdt}" />
-            </div>
-          </div>
           <div class="settings-footer">
             <div class="settings-updated-at">
               Последнее обновление: ${s.updated_at ? new Date(s.updated_at).toLocaleString() : "—"}
@@ -961,7 +952,6 @@ async function loadSettings() {
           "max_withdraw_usdt",
           "min_invest_usdt",
           "max_invest_usdt",
-          "deal_amount_usdt",
         ];
         const saveBtn = document.getElementById("settings-save-btn");
         const originalText = saveBtn ? saveBtn.innerHTML : "";

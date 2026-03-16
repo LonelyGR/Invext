@@ -1243,7 +1243,6 @@ async def get_system_settings_admin(
         "max_withdraw_usdt": str(row.max_withdraw_usdt),
         "min_invest_usdt": str(row.min_invest_usdt),
         "max_invest_usdt": str(row.max_invest_usdt),
-        "deal_amount_usdt": str(row.deal_amount_usdt),
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
     }
 
@@ -1275,7 +1274,6 @@ async def update_system_settings_admin(
         "max_withdraw_usdt",
         "min_invest_usdt",
         "max_invest_usdt",
-        "deal_amount_usdt",
     }
     if field not in allowed_fields:
         raise HTTPException(status_code=400, detail="unknown field")
