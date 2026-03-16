@@ -116,10 +116,10 @@ async def apply_referral_rewards_for_deposit(
     await db.flush()
 
     # Обновляем баланс реферера на основе ledger
-        referrer_user = await db.get(User, referrer.id)
-        if referrer_user:
-            new_balance = await get_balance_usdt(db, referrer_user.id)
-            referrer_user.balance_usdt = new_balance
+    referrer_user = await db.get(User, referrer.id)
+    if referrer_user:
+        new_balance = await get_balance_usdt(db, referrer_user.id)
+        referrer_user.balance_usdt = new_balance
 
 
 async def apply_referral_rewards_for_investment(
