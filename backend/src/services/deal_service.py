@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models import Deal, DealParticipation, LedgerTransaction, ReferralReward, User
 from src.models.deal import DEAL_STATUS_ACTIVE, DEAL_STATUS_CLOSED
-from src.models.referral_reward import STATUS_PAID
+from src.models.referral_reward import STATUS_PAID, STATUS_MISSED
 from src.services.ledger_service import (
     LEDGER_TYPE_INVEST,
     LEDGER_TYPE_PROFIT,
