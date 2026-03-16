@@ -61,7 +61,12 @@ from src.services.ledger_service import (
     LEDGER_TYPE_WITHDRAW,
     get_balance_usdt,
 )
-from src.services.deal_service import get_active_deal, get_active_deal_legacy, open_new_deal
+from src.services.deal_service import (
+    get_active_deal,
+    get_active_deal_legacy,
+    open_new_deal,
+    close_active_deal_by_schedule,
+)
 from src.services.notification_service import broadcast_deal_opened, send_telegram_message
 from src.core.config import get_settings
 from src.services.settings_service import invalidate_system_settings_cache
@@ -677,6 +682,43 @@ async def open_deal_now(
         closed_at=deal.closed_at,
         finished_at=deal.finished_at,
     )
+
+
+@router.post("/deals/force-close")
+async def force_close_deal(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Принудительно закрыть текущую активную сделку.
+    Отправляет уведомления о закрытии один раз (через close_deal_flow) и помечает сделку как закрытую,
+    чтобы планировщик в 12:00 не отправлял повторное уведомление.
+    """
+    admin_token_id, _ = await get_admin_context(request)
+
+    active = await get_active_deal(db)
+    if not active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Нет активной сделки для досрочного закрытия.",
+        )
+
+    closed = await close_active_deal_by_schedule(db)
+    if not closed:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Не удалось закрыть сделку (возможно, она уже закрыта).",
+        )
+
+    await log_admin_action(
+        db=db,
+        admin_token_id=admin_token_id,
+        action_type="DEAL_FORCE_CLOSE",
+        entity_type="DEAL",
+        entity_id=active.id,
+    )
+
+    return {"closed": True}
 
 
 @router.get("/deals/status", response_model=DealStatusResponse)

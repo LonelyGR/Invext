@@ -255,6 +255,7 @@ async function loadDeals() {
           </div>
           <div class="toolbar deal-status-toolbar">
             <button type="button" id="deal-send-notifications-btn">Отправить уведомления о сделке</button>
+            <button type="button" id="deal-force-close-btn">Закрыть сделку досрочно</button>
           </div>
         </div>`;
 
@@ -329,6 +330,22 @@ async function loadDeals() {
           loadDeals();
         } catch (e) {
           alert(e.message || "Ошибка отправки уведомлений");
+        }
+      };
+    }
+
+    const forceCloseBtn = document.getElementById("deal-force-close-btn");
+    if (forceCloseBtn) {
+      forceCloseBtn.onclick = async () => {
+        if (!confirm("Вы уверены, что хотите досрочно закрыть текущую активную сделку?")) {
+          return;
+        }
+        try {
+          await apiRequest("/deals/force-close", { method: "POST" });
+          alert("Сделка досрочно закрыта. Участникам отправлены уведомления.");
+          loadDeals();
+        } catch (e) {
+          alert(e.message || "Ошибка досрочного закрытия сделки");
         }
       };
     }
