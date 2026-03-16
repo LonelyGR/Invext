@@ -102,52 +102,53 @@ async def invest_amount_entered(message: Message, state: FSMContext):
     telegram_id = message.from_user.id
     if not await with_double_click_protection(message, "invest"):
         return
-    raw = message.text.replace(",", ".").strip()
-
     try:
-        amount = Decimal(raw)
-    except (InvalidOperation, AttributeError):
-        await message.answer("Введите сумму в формате числа, например: 50 или 75.5")
-        return
+        raw = (message.text or "").replace(",", ".").strip()
 
-    if amount <= 0:
-        await message.answer("Сумма должна быть больше нуля.")
-        return
+        try:
+            amount = Decimal(raw)
+        except (InvalidOperation, AttributeError):
+            await message.answer("Введите сумму в формате числа, например: 50 или 75.5")
+            return
 
-    try:
-        result = await api.invest(telegram_id, amount)
-    except Exception as e:
-        err = str(e)
-        if hasattr(e, "response") and getattr(e, "response", None) is not None:
-            try:
-                body = e.response.json()
-                if isinstance(body, dict) and "detail" in body:
-                    err = body["detail"] if isinstance(body["detail"], str) else str(body["detail"])
-            except Exception:
-                pass
+        if amount <= 0:
+            await message.answer("Сумма должна быть больше нуля.")
+            return
 
-        logger.error("invest failed for user %s: %s", telegram_id, err)
-        await message.answer(f"Ошибка инвестирования: {err}")
+        try:
+            result = await api.invest(telegram_id, amount)
+        except Exception as e:
+            err = str(e)
+            if hasattr(e, "response") and getattr(e, "response", None) is not None:
+                try:
+                    body = e.response.json()
+                    if isinstance(body, dict) and "detail" in body:
+                        err = body["detail"] if isinstance(body["detail"], str) else str(body["detail"])
+                except Exception:
+                    pass
+
+            logger.error("invest failed for user %s: %s", telegram_id, err)
+            await message.answer(f"Ошибка инвестирования: {err}")
+            await state.clear()
+            return
+
+        new_balance = result.get("balance_usdt")
+        invested = result.get("invested_amount_usdt")
+
+        success_text = (
+            "✅ Инвестиция создана.\n"
+            f"Сумма: {invested} USDT\n\n"
+            f"Текущий виртуальный баланс: {new_balance} USDT\n\n"
+            "Средства переведены в текущую сделку. Начисление прибыли произойдет\n"
+            "после её завершения согласно условиям."
+        )
+        await send_effect_message(
+            message.bot,
+            message.chat.id,
+            success_text,
+            effect_id=EFFECT_CELEBRATION,
+        )
         await state.clear()
+        logger.info("user %s invested %s USDT into current deal", telegram_id, invested)
+    finally:
         await release_double_click_lock(telegram_id, "invest")
-        return
-
-    new_balance = result.get("balance_usdt")
-    invested = result.get("invested_amount_usdt")
-
-    success_text = (
-        "✅ Инвестиция создана.\n"
-        f"Сумма: {invested} USDT\n\n"
-        f"Текущий виртуальный баланс: {new_balance} USDT\n\n"
-        "Средства переведены в текущую сделку. Начисление прибыли произойдет\n"
-        "после её завершения согласно условиям."
-    )
-    await send_effect_message(
-        message.bot,
-        message.chat.id,
-        success_text,
-        effect_id=EFFECT_CELEBRATION,
-    )
-    await state.clear()
-    logger.info("user %s invested %s USDT into current deal", telegram_id, invested)
-    await release_double_click_lock(telegram_id, "invest")

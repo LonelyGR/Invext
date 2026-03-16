@@ -71,54 +71,54 @@ async def deposit_amount_entered(message: Message, state: FSMContext):
     if not await with_double_click_protection(message, "deposit"):
         return
     try:
-        amount = Decimal(message.text.replace(",", ".").strip())
-    except InvalidOperation:
-        await message.answer("Введите число, например: 100 или 50.5")
-        return
-    if amount <= 0:
-        await message.answer("Сумма должна быть больше 0.")
-        return
+        try:
+            amount = Decimal((message.text or "").replace(",", ".").strip())
+        except InvalidOperation:
+            await message.answer("Введите число, например: 100 или 50.5")
+            return
+        if amount <= 0:
+            await message.answer("Сумма должна быть больше 0.")
+            return
 
-    telegram_id = message.from_user.id
+        telegram_id = message.from_user.id
 
-    try:
-        invoice = await api.create_deposit_invoice(telegram_id, amount)
-    except Exception as e:
-        err = str(e)
-        if hasattr(e, "response") and getattr(e, "response", None) is not None:
-            try:
-                body = e.response.json()
-                if isinstance(body, dict) and "detail" in body:
-                    err = body["detail"] if isinstance(body["detail"], str) else str(body["detail"])
-            except Exception:
-                pass
-        logger.error("deposit invoice creation failed for user %s: %s", telegram_id, err)
-        await message.answer(f"Ошибка при создании инвойса: {err}", reply_markup=main_menu_kb())
+        try:
+            invoice = await api.create_deposit_invoice(telegram_id, amount)
+        except Exception as e:
+            err = str(e)
+            if hasattr(e, "response") and getattr(e, "response", None) is not None:
+                try:
+                    body = e.response.json()
+                    if isinstance(body, dict) and "detail" in body:
+                        err = body["detail"] if isinstance(body["detail"], str) else str(body["detail"])
+                except Exception:
+                    pass
+            logger.error("deposit invoice creation failed for user %s: %s", telegram_id, err)
+            await message.answer(f"Ошибка при создании инвойса: {err}", reply_markup=main_menu_kb())
+            await state.clear()
+            return
+
+        invoice_id = invoice.get("invoice_id")
+        pay_url = invoice.get("invoice_url")
+
+        if not invoice_id or not pay_url:
+            logger.error("deposit invoice missing url/id for user %s", telegram_id)
+            await message.answer("Не удалось получить ссылку на оплату.", reply_markup=main_menu_kb())
+            await state.clear()
+            return
+
+        await message.answer(
+            "💳 <b>Пополнение через NOWPayments (USDT BEP20)</b>\n\n"
+            f"Сумма: <b>{amount}</b> USD → оплата в USDT (сеть BSC)\n\n"
+            "1) Нажмите «Оплатить» и завершите перевод USDT.\n"
+            "2) После оплаты нажмите «Проверить оплату».\n",
+            parse_mode="HTML",
+            reply_markup=_invoice_kb(pay_url, int(invoice_id)),
+        )
         await state.clear()
+        logger.info("user %s created deposit invoice_id=%s amount=%s", telegram_id, invoice_id, amount)
+    finally:
         await release_double_click_lock(message.from_user.id, "deposit")
-        return
-
-    invoice_id = invoice.get("invoice_id")
-    pay_url = invoice.get("invoice_url")
-
-    if not invoice_id or not pay_url:
-        logger.error("deposit invoice missing url/id for user %s", telegram_id)
-        await message.answer("Не удалось получить ссылку на оплату.", reply_markup=main_menu_kb())
-        await state.clear()
-        await release_double_click_lock(message.from_user.id, "deposit")
-        return
-
-    await message.answer(
-        "💳 <b>Пополнение через NOWPayments (USDT BEP20)</b>\n\n"
-        f"Сумма: <b>{amount}</b> USD → оплата в USDT (сеть BSC)\n\n"
-        "1) Нажмите «Оплатить» и завершите перевод USDT.\n"
-        "2) После оплаты нажмите «Проверить оплату».\n",
-        parse_mode="HTML",
-        reply_markup=_invoice_kb(pay_url, int(invoice_id)),
-    )
-    await state.clear()
-    await release_double_click_lock(message.from_user.id, "deposit")
-    logger.info("user %s created deposit invoice_id=%s amount=%s", telegram_id, invoice_id, amount)
 
 
 @router.callback_query(F.data == "deposit_history")

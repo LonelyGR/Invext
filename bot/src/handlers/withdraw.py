@@ -77,49 +77,49 @@ async def withdraw_amount_entered(message: Message, state: FSMContext):
 async def withdraw_address_entered(message: Message, state: FSMContext):
     if not await with_double_click_protection(message, "withdraw"):
         return
-    address = (message.text or "").strip()
-    if not address or len(address) > 512:
-        await message.answer("Адрес не может быть пустым и не более 512 символов.")
-        return
-
-    data = await state.get_data()
-    currency = data.get("currency", "USDT")
-    try:
-        amount = Decimal(str(data.get("amount", 0)))
-    except (InvalidOperation, TypeError):
-        await message.answer("Ошибка: неверная сумма. Начните заново (Вывести).")
-        await state.clear()
-        return
-
     telegram_id = message.from_user.id
-
     try:
-        result = await api.create_withdraw_request(
-            telegram_id, currency, amount, address
-        )
-    except Exception as e:
-        err = str(e)
-        if hasattr(e, "response") and getattr(e, "response", None) is not None:
-            try:
-                body = e.response.json()
-                if isinstance(body, dict) and "detail" in body:
-                    err = body["detail"] if isinstance(body["detail"], str) else str(body["detail"])
-            except Exception:
-                pass
-        logger.error("withdraw failed for user %s: %s", telegram_id, err)
-        await message.answer(f"Ошибка: {err}")
-        await state.clear()
-        await release_double_click_lock(telegram_id, "withdraw")
-        return
+        address = (message.text or "").strip()
+        if not address or len(address) > 512:
+            await message.answer("Адрес не может быть пустым и не более 512 символов.")
+            return
 
-    req_id = result.get("id", "—")
-    await message.answer(
-        "✅ Ваша заявка на вывод успешно создана и отправлена на рассмотрение.\n"
-        "Средства будут выведены в течение 48 часов после проверки заявки.\n"
-        f"ID заявки: {req_id}",
-        reply_markup=main_menu_kb(),
-    )
-    await state.clear()
-    await state.set_data({})
-    await release_double_click_lock(telegram_id, "withdraw")
-    logger.info("user %s created withdraw request id=%s amount=%s %s", telegram_id, req_id, amount, currency)
+        data = await state.get_data()
+        currency = data.get("currency", "USDT")
+        try:
+            amount = Decimal(str(data.get("amount", 0)))
+        except (InvalidOperation, TypeError):
+            await message.answer("Ошибка: неверная сумма. Начните заново (Вывести).")
+            await state.clear()
+            return
+
+        try:
+            result = await api.create_withdraw_request(
+                telegram_id, currency, amount, address
+            )
+        except Exception as e:
+            err = str(e)
+            if hasattr(e, "response") and getattr(e, "response", None) is not None:
+                try:
+                    body = e.response.json()
+                    if isinstance(body, dict) and "detail" in body:
+                        err = body["detail"] if isinstance(body["detail"], str) else str(body["detail"])
+                except Exception:
+                    pass
+            logger.error("withdraw failed for user %s: %s", telegram_id, err)
+            await message.answer(f"Ошибка: {err}")
+            await state.clear()
+            return
+
+        req_id = result.get("id", "—")
+        await message.answer(
+            "✅ Ваша заявка на вывод успешно создана и отправлена на рассмотрение.\n"
+            "Средства будут выведены в течение 48 часов после проверки заявки.\n"
+            f"ID заявки: {req_id}",
+            reply_markup=main_menu_kb(),
+        )
+        await state.clear()
+        await state.set_data({})
+        logger.info("user %s created withdraw request id=%s amount=%s %s", telegram_id, req_id, amount, currency)
+    finally:
+        await release_double_click_lock(telegram_id, "withdraw")
