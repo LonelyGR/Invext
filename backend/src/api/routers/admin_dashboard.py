@@ -997,7 +997,8 @@ async def approve_withdrawal(
         db.add(tx)
 
         req.status = "APPROVED"
-        req.decided_by = admin_telegram_id
+        # В decided_by храним admin_token_id (int32), а telegram_id админа пишется в AdminLog.
+        req.decided_by = admin_token_id
         req.decided_at = dt.datetime.now(dt.timezone.utc)
 
         # Обновляем кэш баланса.
@@ -1034,7 +1035,8 @@ async def reject_withdrawal(
             return {"status": req.status}
 
         req.status = "REJECTED"
-        req.decided_by = admin_telegram_id
+        # В decided_by храним admin_token_id (int32), а telegram_id админа пишется в AdminLog.
+        req.decided_by = admin_token_id
         req.decided_at = dt.datetime.now(dt.timezone.utc)
 
         await log_admin_action(
