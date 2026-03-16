@@ -38,6 +38,10 @@ def _serialize_user_me(u, data: dict) -> dict:
         "my_withdrawals_total_usdc": str(data["my_withdrawals_total_usdc"]),
         "deposits_count": data["deposits_count"],
         "withdrawals_count": data["withdrawals_count"],
+        "balance_usdt": str(data["balance_usdt"]),
+        "invested_total_usdt": str(data["invested_total_usdt"]),
+        "profit_total_usdt": str(data["profit_total_usdt"]),
+        "referral_income_usdt": str(data["referral_income_usdt"]),
     }
 
 

@@ -38,8 +38,6 @@ def _format_turnover_detail(me: dict) -> str:
         f"◆ 1 уровень: {ref_count} уч. — USDT {usdt_f:.2f}\n"
         "◆ 2 уровень: 0 уч. — USDT 0.00\n"
         "◆ 3 уровень: 0 уч. — USDT 0.00\n"
-        "◆ 4 уровень: 0 уч. — USDT 0.00\n"
-        "◆ 5 уровень: 0 уч. — USDT 0.00"
     )
 
 

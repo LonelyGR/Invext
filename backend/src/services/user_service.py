@@ -16,6 +16,10 @@ from src.models.payment_invoice import PaymentInvoice
 from src.services.ledger_service import (
     LEDGER_TYPE_DEPOSIT,
     LEDGER_TYPE_WITHDRAW,
+    LEDGER_TYPE_INVEST,
+    LEDGER_TYPE_PROFIT,
+    LEDGER_TYPE_REFERRAL_BONUS,
+    get_balance_usdt,
 )
 
 
@@ -199,6 +203,43 @@ async def get_user_with_stats(db: AsyncSession, telegram_id: int) -> Optional[di
         )
     )
 
+    # Дополнительная статистика для раздела «Статистика»:
+    # - текущий баланс USDT (по ledger),
+    # - суммарный объём инвестиций (INVEST),
+    # - суммарная прибыль по сделкам (PROFIT),
+    # - суммарный доход по реферальным бонусам (REFERRAL_BONUS).
+    balance_usdt = await get_balance_usdt(db, user.id)
+
+    invested_total_res = await db.execute(
+        select(func.coalesce(func.sum(LedgerTransaction.amount_usdt), 0)).where(
+            and_(
+                LedgerTransaction.user_id == user.id,
+                LedgerTransaction.type == LEDGER_TYPE_INVEST,
+            )
+        )
+    )
+    invested_total = invested_total_res.scalar() or Decimal("0")
+
+    profit_total_res = await db.execute(
+        select(func.coalesce(func.sum(LedgerTransaction.amount_usdt), 0)).where(
+            and_(
+                LedgerTransaction.user_id == user.id,
+                LedgerTransaction.type == LEDGER_TYPE_PROFIT,
+            )
+        )
+    )
+    profit_total = profit_total_res.scalar() or Decimal("0")
+
+    referral_income_res = await db.execute(
+        select(func.coalesce(func.sum(LedgerTransaction.amount_usdt), 0)).where(
+            and_(
+                LedgerTransaction.user_id == user.id,
+                LedgerTransaction.type == LEDGER_TYPE_REFERRAL_BONUS,
+            )
+        )
+    )
+    referral_income = referral_income_res.scalar() or Decimal("0")
+
     deposits_count_res = await db.execute(
         select(func.count(PaymentInvoice.id)).where(PaymentInvoice.user_id == user.id)
     )
@@ -221,6 +262,10 @@ async def get_user_with_stats(db: AsyncSession, telegram_id: int) -> Optional[di
         "my_deposits_total_usdc": my_d_usdc_res.scalar() or Decimal("0"),
         "my_withdrawals_total_usdt": my_w_usdt_res.scalar() or Decimal("0"),
         "my_withdrawals_total_usdc": my_w_usdc_res.scalar() or Decimal("0"),
+        "balance_usdt": balance_usdt,
+        "invested_total_usdt": invested_total,
+        "profit_total_usdt": profit_total,
+        "referral_income_usdt": referral_income,
         "deposits_count": deposits_count,
         "withdrawals_count": withdrawals_count,
     }

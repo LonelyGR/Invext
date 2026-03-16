@@ -31,23 +31,24 @@ async def stats(message: Message):
     deposits_count = me.get("deposits_count", 0)
     withdrawals_count = me.get("withdrawals_count", 0)
 
-    # Пока прибыль и доход с рефералов явно не агрегируются в API,
-    # показываем их как 0 для понятного интерфейса.
-    profit_total = "0"
-    referral_income = "0"
-    deals_total = 0
-    active_deals = 0
+    balance_usdt = me.get("balance_usdt", "0")
+    invested_total = me.get("invested_total_usdt", "0")
+    profit_total = me.get("profit_total_usdt", "0")
+    referral_income = me.get("referral_income_usdt", "0")
 
     text = (
         "📊 <b>Статистика пользователя</b>\n\n"
+        "<b>Баланс:</b>\n"
+        f"USDT: {balance_usdt}\n\n"
         "<b>Ваши депозиты:</b>\n"
         f"USDT: {d_usdt}\n\n"
         "<b>Ваши выводы:</b>\n"
         f"USDT: {w_usdt}\n\n"
-        f"Общая прибыль: {profit_total} USDT\n"
+        "<b>Инвестиции и прибыль:</b>\n"
+        f"Всего инвестировано в сделки: {invested_total} USDT\n"
+        f"Начисленная прибыль по сделкам: {profit_total} USDT\n"
         f"Доход с рефералов: {referral_income} USDT\n\n"
-        f"Всего сделок: {deals_total}\n"
-        f"Активных сделок: {active_deals}\n\n"
+        "<b>Заявки:</b>\n"
         f"Заявок на пополнение: {deposits_count}\n"
         f"Заявок на вывод: {withdrawals_count}"
     )
