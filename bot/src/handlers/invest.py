@@ -76,11 +76,20 @@ async def invest_section(message: Message, state: FSMContext):
 
 @router.callback_query(F.data == "invest_participate")
 async def invest_participate(callback: CallbackQuery, state: FSMContext):
-    """Пользователь нажал «Участвовать» — просим ввести сумму."""
+    """Пользователь нажал «Участвовать» — просим ввести сумму с подсказкой минимума."""
+    telegram_id = callback.from_user.id
+    try:
+        settings = await api.get_system_settings()
+        min_invest = settings.get("min_invest_usdt")
+    except Exception:
+        min_invest = None
+
     await state.set_state(InvestStates.entering_amount)
+
+    hint = f"Минимальная сумма: {min_invest} USDT" if min_invest is not None else "Введите сумму инвестиций."
     await callback.message.edit_text(
-        "Введите сумму инвестиций цифрами ответом на это сообщение.\n\n"
-        "Например: 50 или 100.5",
+        "Введите сумму, которую хотите инвестировать (только цифрами).\n\n"
+        f"{hint}",
         reply_markup=InlineKeyboardMarkup(
             inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_menu")]]
         ),
