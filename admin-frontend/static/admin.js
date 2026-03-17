@@ -653,11 +653,15 @@ async function loadUserDetail(userId) {
         const negative = tx.type === "WITHDRAW" || tx.type === "INVEST";
         const cls = negative ? "amount-negative" : "amount-positive";
         const sign = negative ? "-" : "+";
+        const comment = tx.comment || "";
+        const deal = tx.deal_id ? `#${tx.deal_id}` : "";
         return `
         <tr>
           <td>${new Date(tx.created_at).toLocaleString()}</td>
           <td>${tx.type}</td>
           <td class="${cls}">${sign}${tx.amount_usdt}</td>
+          <td>${deal}</td>
+          <td>${comment}</td>
         </tr>`;
       })
       .join("");
@@ -702,6 +706,8 @@ async function loadUserDetail(userId) {
                   <th>Дата</th>
                   <th>Тип</th>
                   <th>Сумма</th>
+                  <th>Сделка</th>
+                  <th>Комментарий</th>
                 </tr>
               </thead>
               <tbody>${ledgerRows}</tbody>
