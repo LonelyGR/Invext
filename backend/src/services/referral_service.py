@@ -22,6 +22,7 @@ from sqlalchemy.orm import selectinload
 from src.models import Deal, DealParticipation, LedgerTransaction, ReferralReward, User
 from src.models.referral_reward import STATUS_MISSED
 from src.services.ledger_service import LEDGER_TYPE_REFERRAL_BONUS, get_balance_usdt
+from src.services.notification_service import send_telegram_message, EFFECT_MONEY
 
 # Депозитная линия: только 1 уровень, 3%
 DEPOSIT_REFERRAL_PCT = Decimal("3")
@@ -120,6 +121,21 @@ async def apply_referral_rewards_for_deposit(
     if referrer_user:
         new_balance = await get_balance_usdt(db, referrer_user.id)
         referrer_user.balance_usdt = new_balance
+
+        # Уведомляем о начисленном депозитном бонусе (3% с депозита 1 уровня).
+        if referrer_user.telegram_id:
+            ref_name = from_user.name or from_user.username or str(from_user.telegram_id)
+            text = (
+                "🎁 Вам начислен реферальный бонус с депозита.\n\n"
+                f"Реферал: {ref_name}\n"
+                f"Сумма депозита: {deposit_amount} USDT\n"
+                f"Ваш бонус: {reward_amount} USDT (3% от депозита)."
+            )
+            await send_telegram_message(
+                referrer_user.telegram_id,
+                text,
+                message_effect_id=EFFECT_MONEY,
+            )
 
 
 async def apply_referral_rewards_for_investment(
