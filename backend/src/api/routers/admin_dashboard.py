@@ -59,6 +59,7 @@ from src.services.ledger_service import (
     LEDGER_TYPE_INVEST,
     LEDGER_TYPE_PROFIT,
     LEDGER_TYPE_WITHDRAW,
+    LEDGER_TYPE_REFERRAL_BONUS,
     get_balance_usdt,
 )
 from src.services.deal_service import (
@@ -279,6 +280,7 @@ async def user_ledger(
         LedgerTransaction.created_at,
         LedgerTransaction.type,
         LedgerTransaction.amount_usdt,
+        LedgerTransaction.metadata_json,
     ).where(LedgerTransaction.user_id == user_id)
 
     if type:
@@ -303,14 +305,42 @@ async def user_ledger(
     rows = result.all()
 
     items = []
-    for created_at, tx_type, amount_usdt in rows:
+    for created_at, tx_type, amount_usdt, meta in rows:
+        deal_id = None
+        comment = None
+        if isinstance(meta, dict):
+            # deal_id для сделочных операций и реферальных бонусов
+            if "deal_id" in meta:
+                try:
+                    deal_id = int(meta.get("deal_id"))
+                except (TypeError, ValueError):
+                    deal_id = None
+
+            # Пояснение для реферальных бонусов: за какого реферала и по какому источнику.
+            if tx_type == LEDGER_TYPE_REFERRAL_BONUS:
+                source = meta.get("source")
+                from_user_id = meta.get("from_user_id")
+                level = meta.get("level")
+                parts = []
+                if source == "deposit":
+                    parts.append("Бонус с депозита реферала")
+                elif source == "investment":
+                    parts.append("Бонус с инвестиции реферала")
+                else:
+                    parts.append("Реферальный бонус")
+                if from_user_id is not None:
+                    parts.append(f"user_id={from_user_id}")
+                if level is not None:
+                    parts.append(f"уровень {level}")
+                comment = " | ".join(parts)
+
         items.append(
             LedgerItem(
                 created_at=created_at,
                 type=tx_type,
                 amount_usdt=amount_usdt,
-                deal_id=None,
-                comment=None,
+                deal_id=deal_id,
+                comment=comment,
             )
         )
 
