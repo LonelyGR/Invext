@@ -96,6 +96,16 @@ async def invest_participate(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
+@router.callback_query(F.data == "open_invest")
+async def open_invest_from_reminder(callback: CallbackQuery, state: FSMContext):
+    """
+    Обработчик кнопки «📈 Участвовать» из напоминаний бэкенда.
+    Просто открывает раздел «Сделка» для текущего пользователя.
+    """
+    await invest_section(callback.message, state)
+    await callback.answer()
+
+
 @router.message(InvestStates.entering_amount)
 async def invest_amount_entered(message: Message, state: FSMContext):
     telegram_id = message.from_user.id

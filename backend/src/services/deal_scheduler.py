@@ -15,6 +15,7 @@ from src.services.deal_service import (
     close_active_deal_by_schedule,
     open_new_deal_by_schedule,
     process_due_deals,
+    send_referral_bonus_reminders_for_active_deal,
 )
 
 logger = logging.getLogger(__name__)
@@ -52,6 +53,18 @@ def init_deal_scheduler(scheduler: AsyncIOScheduler, db_factory) -> None:
             except Exception as e:
                 await db.rollback()
                 logger.exception("close_deal_1200 job failed: %s", e)
+
+    async def _job_referral_reminder_1100():
+        logger.info("referral_reminder_1100 job started")
+        async with db_factory() as db:
+            logger.debug("referral_reminder_1100: session created")
+            try:
+                sent = await send_referral_bonus_reminders_for_active_deal(db)
+                await db.commit()
+                logger.info("referral_reminder_1100 job finished, sent=%s", sent)
+            except Exception as e:
+                await db.rollback()
+                logger.exception("referral_reminder_1100 job failed: %s", e)
 
     async def _job_open_deal_1300():
         logger.info("open_deal_1300 job started")
@@ -92,6 +105,11 @@ def init_deal_scheduler(scheduler: AsyncIOScheduler, db_factory) -> None:
     )
 
     # Ежедневные задачи по расписанию (UTC+1):
+    scheduler.add_job(
+        _job_referral_reminder_1100,
+        CronTrigger(hour=11, minute=0, timezone=SCHEDULE_TZ),
+        name="referral_reminder_1100_utc_plus_1",
+    )
     scheduler.add_job(
         _job_close_deal_1200,
         CronTrigger(hour=12, minute=0, timezone=SCHEDULE_TZ),

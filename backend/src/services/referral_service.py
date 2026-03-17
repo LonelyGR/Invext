@@ -194,3 +194,55 @@ async def apply_referral_rewards_for_investment(
                 status=STATUS_MISSED,
             )
             db.add(missed)
+
+
+async def get_potential_referral_bonuses_for_deal(
+    db: AsyncSession,
+    deal: Deal,
+) -> dict[int, Decimal]:
+    """
+    Рассчитать потенциальные реферальные бонусы по текущей сделке для пользователей,
+    которые ещё НЕ участвуют в ней, но могут получить бонус, если успеют войти.
+
+    Возвращает словарь {referrer_user_id: сумма_бонуса}.
+    Ничего не записывает в БД, только считает по текущим участиям.
+    """
+    # Все участия в сделке.
+    participations_result = await db.execute(
+        select(DealParticipation).where(DealParticipation.deal_id == deal.id)
+    )
+    participations = list(participations_result.scalars().all())
+    if not participations:
+        return {}
+
+    participant_user_ids = {p.user_id for p in participations}
+
+    bonuses: dict[int, Decimal] = {}
+
+    for p in participations:
+        investor_id = p.user_id
+        amount = p.amount
+        if amount <= 0:
+            continue
+
+        referrers = await _get_referrer_chain(db, investor_id, MAX_LEVELS)
+        if not referrers:
+            continue
+
+        for level_index, referrer in enumerate(referrers):
+            level = level_index + 1
+            if level > len(INVEST_REFERRAL_LEVEL_PERCENTS):
+                break
+
+            # Нас интересуют только те, кто ПОКА не участвует в сделке.
+            if referrer.id in participant_user_ids:
+                continue
+
+            pct = INVEST_REFERRAL_LEVEL_PERCENTS[level_index]
+            reward_amount = (amount * pct / Decimal("100")).quantize(Decimal("0.01"))
+            if reward_amount <= 0:
+                continue
+
+            bonuses[referrer.id] = bonuses.get(referrer.id, Decimal("0")) + reward_amount
+
+    return bonuses

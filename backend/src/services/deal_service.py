@@ -21,10 +21,16 @@ from src.services.ledger_service import (
     LEDGER_TYPE_REFERRAL_BONUS,
     get_balance_usdt,
 )
-from src.services.referral_service import apply_referral_rewards_for_investment
+from src.services.referral_service import (
+    apply_referral_rewards_for_investment,
+    get_potential_referral_bonuses_for_deal,
+)
 from src.services.settings_service import get_system_settings
-from src.services.notification_service import broadcast_deal_closed
-from src.services.notification_service import broadcast_deal_opened
+from src.services.notification_service import (
+    broadcast_deal_closed,
+    broadcast_deal_opened,
+    send_referral_bonus_reminder,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -304,6 +310,55 @@ async def process_due_deals(db: AsyncSession) -> int:
         await close_deal_flow(db, d)
     return len(deals)
 
+
+async def send_referral_bonus_reminders_for_active_deal(db: AsyncSession) -> int:
+    """
+    Найти текущую активную сделку и разослать напоминания пользователям,
+    у которых уже накопилась потенциальная реферальная прибыль по этой сделке,
+    но которые ещё не участвуют.
+    Возвращает количество отправленных напоминаний.
+    """
+    deal = await get_active_deal(db)
+    if not deal:
+        return 0
+
+    # Считаем потенциальные бонусы по этой сделке.
+    bonuses_by_user = await get_potential_referral_bonuses_for_deal(db, deal)
+    if not bonuses_by_user:
+        return 0
+
+    # Маппинг user_id -> telegram_id
+    user_ids = list(bonuses_by_user.keys())
+    users_result = await db.execute(
+        select(User.id, User.telegram_id).where(
+            User.id.in_(user_ids),
+            User.telegram_id.isnot(None),
+        )
+    )
+    rows = users_result.all()
+    sent = 0
+    for uid, tid in rows:
+        if not tid:
+            continue
+        bonus = bonuses_by_user.get(uid)
+        if not bonus or bonus <= 0:
+            continue
+        ok = await send_referral_bonus_reminder(
+            telegram_id=tid,
+            deal_number=deal.number,
+            bonus_amount=float(bonus),
+            close_at=deal.end_at,
+        )
+        if ok:
+            sent += 1
+
+    logger.info(
+        "send_referral_bonus_reminders_for_active_deal: deal_id=%s number=%s sent=%s",
+        deal.id,
+        deal.number,
+        sent,
+    )
+    return sent
 
 async def close_active_deal_by_schedule(db: AsyncSession) -> bool:
     """

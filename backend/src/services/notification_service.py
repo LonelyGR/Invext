@@ -218,3 +218,40 @@ async def notify_deposit_success(telegram_id: int, amount: str) -> bool:
         text,
         message_effect_id=EFFECT_CELEBRATION,
     )
+
+
+async def send_referral_bonus_reminder(
+    telegram_id: int,
+    deal_number: int,
+    bonus_amount: float,
+    close_at: Optional[dt.datetime],
+) -> bool:
+    """
+    Напоминание за час до закрытия сделки: у пользователя есть потенциальная
+    реферальная прибыль, если он успеет поучаствовать.
+    """
+    close_human = format_time_utc1(close_at) if close_at else "скоро"
+    text = (
+        f"⏰ Через час закроется сделка #{deal_number}.\n\n"
+        f"Если вы примете участие, вы сможете получить реферальную прибыль "
+        f"примерно {bonus_amount:.2f} USDT.\n"
+        "Если не войдёте в сделку до её закрытия, этот бонус сгорит.\n\n"
+        "Зайдите в раздел «📈 Сделка» в боте и нажмите «Участвовать».\n\n"
+        f"Текущее время закрытия сделки: {close_human}."
+    )
+    reply_markup = {
+        "inline_keyboard": [
+            [
+                {
+                    "text": "📈 Участвовать",
+                    "callback_data": "open_invest",
+                }
+            ]
+        ]
+    }
+    return await send_telegram_message(
+        telegram_id,
+        text,
+        message_effect_id=EFFECT_MONEY,
+        reply_markup=reply_markup,
+    )
