@@ -7,6 +7,12 @@ from aiogram.utils.deep_linking import create_start_link
 
 from src.api_client.client import api
 from src.keyboards.menus import partners_main_kb, partners_team_kb, partners_bonuses_kb
+from src.texts import (
+    make_partners_main_text,
+    make_partners_share_link_text,
+    make_partners_team_text,
+    make_partners_bonuses_text,
+)
 
 router = Router(name="partners")
 
@@ -18,24 +24,6 @@ REFERRAL_LEVELS = [
     (0.5, "2 уровень (инвестиции)"),
     (0.5, "3 уровень (инвестиции)"),
 ]
-
-
-def _get_partners_main_text(me: dict, link: str) -> str:
-    """Текст главного экрана «Партнёрская программа» с уровнями рефералов."""
-    ref_code = me.get("ref_code", "—")
-    level1 = me.get("referrals_level_1", 0) or me.get("referrals_count", 0)
-    level2 = me.get("referrals_level_2", 0)
-    level3 = me.get("referrals_level_3", 0)
-    counts = [level1, level2, level3]
-    lines = [
-        "<b>👥 Партнёрская программа</b>\n",
-        f"Ваша реферальная ссылка:\n{link}\n",
-        "<b>Уровни рефералов:</b>",
-    ]
-    for i, (pct, label) in enumerate(REFERRAL_LEVELS):
-        count = counts[i] if i < len(counts) else 0
-        lines.append(f"  • {label}: {count} чел. — {pct:.0f}% с депозита")
-    return "\n".join(lines)
 
 
 @router.message(F.text == "👥 Партнёры")
@@ -57,7 +45,7 @@ async def partners(message: Message):
     except Exception:
         link = f"https://t.me/{(await message.bot.get_me()).username}?start={ref_code}"
 
-    text = _get_partners_main_text(me, link)
+    text = make_partners_main_text(me, link, REFERRAL_LEVELS)
     await message.answer(text, reply_markup=partners_main_kb())
 
 
@@ -78,7 +66,7 @@ async def partners_back(callback: CallbackQuery):
         link = await create_start_link(callback.bot, ref_code)
     except Exception:
         link = f"https://t.me/{(await callback.bot.get_me()).username}?start={ref_code}"
-    text = _get_partners_main_text(me, link)
+    text = make_partners_main_text(me, link, REFERRAL_LEVELS)
     try:
         await callback.message.edit_text(text, reply_markup=partners_main_kb())
     except Exception:
@@ -105,11 +93,7 @@ async def partners_share_link(callback: CallbackQuery):
     except Exception:
         link = f"https://t.me/{(await callback.bot.get_me()).username}?start={ref_code}"
 
-    text = (
-        "🔗 <b>Ваша реферальная ссылка</b>\n\n"
-        f"{link}\n\n"
-        "Перешлите это сообщение другу — он откроет бота по вашей ссылке."
-    )
+    text = make_partners_share_link_text(link)
     await callback.message.answer(text)
     await callback.answer("Ссылку можно переслать дальше")
 
@@ -127,23 +111,7 @@ async def partners_team(callback: CallbackQuery):
         await callback.answer("Пользователь не найден.")
         return
 
-    level1 = me.get("referrals_level_1", 0) or me.get("referrals_count", 0)
-    level2 = me.get("referrals_level_2", 0)
-    level3 = me.get("referrals_level_3", 0)
-    team_usdt = me.get("team_deposits_usdt", "0") or "0"
-    try:
-        team_float = float(team_usdt)
-    except (TypeError, ValueError):
-        team_float = 0
-
-    lines = [
-        "<b>📊 Моя команда</b>\n",
-        f"◆ 1 уровень: {level1} участников",
-        f"◆ 2 уровень: {level2} участников",
-        f"◆ 3 уровень: {level3} участников",
-        f"\n💎 Оборот команды (депозиты): {team_float:.2f} USDT",
-    ]
-    text = "\n".join(lines)
+    text = make_partners_team_text(me)
 
     try:
         await callback.message.edit_text(text, reply_markup=partners_team_kb())
@@ -165,24 +133,7 @@ async def partners_bonuses(callback: CallbackQuery):
         await callback.answer("Пользователь не найден.")
         return
 
-    level1 = me.get("referrals_level_1", 0) or me.get("referrals_count", 0)
-    level2 = me.get("referrals_level_2", 0)
-    level3 = me.get("referrals_level_3", 0)
-    team_usdt = me.get("team_deposits_usdt", "0") or "0"
-    try:
-        team_float = float(team_usdt)
-    except (TypeError, ValueError):
-        team_float = 0.0
-
-    text = (
-        "🎁 <b>Реферальные бонусы</b>\n\n"
-        f"1 уровень: {level1} чел. — 3% с депозита\n"
-        f"2 уровень: {level2} чел. — 3% с депозита\n"
-        f"3 уровень: {level3} чел. — 3% с депозита\n\n"
-        f"💎 Оборот команды (депозиты): {team_float:.2f} USDT\n\n"
-        "Бонус начисляется только с подтверждённого пополнения баланса реферала, "
-        "не с инвестиций и не с прибыли по сделкам."
-    )
+    text = make_partners_bonuses_text(me)
     try:
         await callback.message.edit_text(text, reply_markup=partners_bonuses_kb())
     except Exception:

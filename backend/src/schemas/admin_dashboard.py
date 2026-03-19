@@ -106,6 +106,8 @@ class UserInvestment(BaseModel):
     deal_status: str
     amount: Decimal
     profit_amount: Optional[Decimal]
+    status: Optional[str] = None
+    payout_at: Optional[datetime] = None
     created_at: datetime
 
 

@@ -6,39 +6,12 @@ from aiogram.types import Message, CallbackQuery
 
 from src.api_client.client import api
 from src.keyboards.menus import turnover_main_kb, turnover_detail_kb
+from src.texts import (
+    make_team_turnover_main_text,
+    make_team_turnover_detail_text,
+)
 
 router = Router(name="team_turnover")
-
-
-def _format_turnover_main(me: dict) -> str:
-    """Текст главного экрана «Оборот команды»."""
-    usdt = me.get("team_deposits_usdt", "0") or "0"
-    try:
-        total = float(usdt)
-    except (TypeError, ValueError):
-        total = 0
-    return (
-        "📊 <b>Оборот команды</b>\n\n"
-        "Оборот по линиям:\n"
-        f"🔷 Общий оборот команды: {total:.2f} USDT"
-    )
-
-
-def _format_turnover_detail(me: dict) -> str:
-    """Текст экрана «Подробная статистика команды» (оборот по уровням)."""
-    usdt = me.get("team_deposits_usdt", "0") or "0"
-    ref_count = me.get("referrals_count", 0)
-    try:
-        usdt_f = float(usdt)
-    except (TypeError, ValueError):
-        usdt_f = 0
-    return (
-        "📈 <b>Подробная статистика команды</b>\n\n"
-        "Оборот по линиям (депозиты рефералов):\n"
-        f"◆ 1 уровень: {ref_count} уч. — USDT {usdt_f:.2f}\n"
-        "◆ 2 уровень: 0 уч. — USDT 0.00\n"
-        "◆ 3 уровень: 0 уч. — USDT 0.00\n"
-    )
 
 
 async def _send_turnover_main(chat_id: int, bot, edit_message=None):
@@ -58,7 +31,7 @@ async def _send_turnover_main(chat_id: int, bot, edit_message=None):
         else:
             await bot.send_message(chat_id, text)
         return
-    text = _format_turnover_main(me)
+    text = make_team_turnover_main_text(me)
     if edit_message:
         try:
             await edit_message.edit_text(text, reply_markup=turnover_main_kb())
@@ -79,7 +52,7 @@ async def team_turnover(message: Message):
     if not me:
         await message.answer("Пользователь не найден. Отправьте /start.")
         return
-    text = _format_turnover_main(me)
+    text = make_team_turnover_main_text(me)
     await message.answer(text, reply_markup=turnover_main_kb())
 
 
@@ -102,7 +75,7 @@ async def turnover_detail(callback: CallbackQuery):
     if not me:
         await callback.answer("Пользователь не найден.")
         return
-    text = _format_turnover_detail(me)
+    text = make_team_turnover_detail_text(me)
     try:
         await callback.message.edit_text(text, reply_markup=turnover_detail_kb())
     except Exception:

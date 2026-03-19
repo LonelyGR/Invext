@@ -15,6 +15,7 @@ from src.services.deal_service import (
     close_active_deal_by_schedule,
     open_new_deal_by_schedule,
     process_due_deals,
+    process_pending_payouts,
     send_referral_bonus_reminders_for_active_deal,
 )
 

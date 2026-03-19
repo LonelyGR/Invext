@@ -12,6 +12,15 @@ from src.api_client.client import api
 from src.keyboards.menus import main_menu_kb
 from src.utils.effects import send_effect_message, EFFECT_CELEBRATION
 from src.utils.locks import with_double_click_protection, release_double_click_lock
+from src.texts import (
+    make_deposit_start_text,
+    make_deposit_history_intro_text,
+    make_deposit_invoice_text,
+    make_deposit_history_empty_text,
+    make_deposit_history_list_text,
+    make_deposit_invoice_confirmed_text,
+    make_deposit_balance_credited_text,
+)
 import logging
 
 router = Router(name="deposit")
@@ -56,12 +65,11 @@ async def deposit_start(message: Message, state: FSMContext):
     except Exception:
         pass
     await message.answer(
-        "Введите сумму пополнения в USD (оплата в USDT в сети BEP20/BSC).\n"
-        f"Минимум: {min_dep}",
+        make_deposit_start_text(min_dep),
         reply_markup=main_menu_kb(),
     )
     await message.answer(
-        "Ниже можно открыть историю своих пополнений.",
+        make_deposit_history_intro_text(),
         reply_markup=_deposit_history_kb(),
     )
 
@@ -108,10 +116,7 @@ async def deposit_amount_entered(message: Message, state: FSMContext):
             return
 
         await message.answer(
-            "💳 <b>Пополнение через NOWPayments (USDT BEP20)</b>\n\n"
-            f"Сумма: <b>{amount}</b> USD → оплата в USDT (сеть BSC)\n\n"
-            "1) Нажмите «Оплатить» и завершите перевод USDT.\n"
-            "2) После оплаты нажмите «Проверить оплату».\n",
+            make_deposit_invoice_text(amount),
             parse_mode="HTML",
             reply_markup=_invoice_kb(pay_url, int(invoice_id)),
         )
@@ -141,7 +146,7 @@ async def deposit_history(callback: CallbackQuery):
 
     if not items:
         await callback.message.edit_text(
-            "У вас пока нет пополнений.\n\nВведите сумму выше, чтобы создать инвойс на пополнение.",
+            make_deposit_history_empty_text(),
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[
                     [InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_menu")],
@@ -151,29 +156,7 @@ async def deposit_history(callback: CallbackQuery):
         await callback.answer()
         return
 
-    lines = ["📋 <b>История пополнений</b> (USDT BEP20)\n"]
-    status_ru = {
-        "finished": "✅ Оплачен",
-        "waiting": "⏳ Ожидает",
-        "partially_paid": "⏳ Частично оплачен",
-        "expired": "❌ Истёк",
-        "failed": "❌ Ошибка",
-    }
-    for inv in items:
-        st = status_ru.get(inv.get("status", "").lower(), inv.get("status", ""))
-        cred = " (баланс начислен)" if inv.get("balance_credited") else ""
-        dt_str = ""
-        if inv.get("created_at"):
-            try:
-                dt_str = " " + inv["created_at"][:16].replace("T", " ")
-            except Exception:
-                dt_str = ""
-        lines.append(
-            f"• +{inv.get('amount', 0)} USDT — {st}{cred}{dt_str}"
-        )
-    text = "\n".join(lines)
-    if len(text) > 4000:
-        text = "\n".join(lines[:12]) + "\n\n… и ещё."
+    text = make_deposit_history_list_text(items)
     await callback.message.edit_text(
         text,
         parse_mode="HTML",
@@ -213,12 +196,14 @@ async def check_invoice_status(callback: CallbackQuery):
     status = (invoice.get("status") or "").lower()
     balance_credited = invoice.get("balance_credited", False)
     if status == "finished" or balance_credited:
-        await callback.message.edit_text("✅ Оплата подтверждена.", reply_markup=main_menu_kb())
+        await callback.message.edit_text(
+            make_deposit_invoice_confirmed_text(),
+            reply_markup=main_menu_kb(),
+        )
         await send_effect_message(
             callback.bot,
             callback.message.chat.id,
-            "✅ Оплата получена, баланс начислен.\n"
-            "Проверьте раздел «Баланс», чтобы увидеть новый баланс.",
+            make_deposit_balance_credited_text(),
             effect_id=EFFECT_CELEBRATION,
             reply_markup=main_menu_kb(),
         )

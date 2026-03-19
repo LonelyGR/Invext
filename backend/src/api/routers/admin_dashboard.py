@@ -66,6 +66,7 @@ from src.services.deal_service import (
     get_active_deal,
     get_active_deal_legacy,
     open_new_deal,
+    process_pending_payouts,
 )
 from src.services.notification_service import broadcast_deal_opened, send_telegram_message
 from src.core.config import get_settings
@@ -690,7 +691,9 @@ async def open_deal_now(
     """
     admin_token_id, _ = await get_admin_context(request)
 
-    # Не даём открыть новую, если уже есть активная.
+    # Обработать отложенные выплаты перед открытием новой сделки.
+    await process_pending_payouts(db)
+
     active = await get_active_deal(db)
     if active:
         raise HTTPException(
@@ -913,7 +916,9 @@ async def get_user_detail(
                 deal_number=deal.number,
                 deal_status=deal.status,
                 amount=p.amount,
-                profit_amount=None,
+                profit_amount=p.profit_amount,
+                status=p.status,
+                payout_at=p.payout_at,
                 created_at=p.created_at,
             )
         )

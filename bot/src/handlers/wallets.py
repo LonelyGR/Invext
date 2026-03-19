@@ -10,6 +10,20 @@ from src.api_client.client import api
 from src.config.settings import ALLOWED_CURRENCIES
 from src.keyboards.menus import wallets_list_kb, wallet_coin_kb, back_kb
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from src.texts import (
+    make_wallets_list_text,
+    make_wallets_load_error_text,
+    make_wallet_add_enter_name_text,
+    make_wallet_name_empty_text,
+    make_wallet_choose_currency_text,
+    make_wallet_invalid_currency_text,
+    make_wallet_currency_set_text,
+    make_wallet_cancelled_text,
+    make_wallet_invalid_address_text,
+    make_wallet_save_error_text,
+    make_wallet_added_text,
+    make_wallet_deleted_text,
+)
 
 router = Router(name="wallets")
 
@@ -27,17 +41,9 @@ async def _send_wallets_list(target, telegram_id: int, text_prefix: str = "", ca
     try:
         wallets = await api.get_wallets(telegram_id)
     except Exception as e:
-        await target.answer(f"Ошибка: {e}")
+        await target.answer(make_wallets_load_error_text(e))
         return
-    if not wallets:
-        text = (text_prefix + "💼 <b>Ваши кошельки</b>\n\nУ вас нет сохранённых кошельков.").strip()
-    else:
-        lines = []
-        for w in wallets:
-            addr = w["address"]
-            addr_show = f"{addr[:24]}..." if len(addr) > 24 else addr
-            lines.append(f"• {w['name']} ({w['currency']}): <code>{addr_show}</code>")
-        text = (text_prefix + "💼 <b>Ваши кошельки</b>\n\n" + "\n".join(lines)).strip()
+    text = make_wallets_list_text(wallets, text_prefix=text_prefix)
     kb = wallets_list_kb()
     if wallets:
         rows = []
@@ -70,9 +76,7 @@ async def wallets_from_profile(callback: CallbackQuery):
 async def wallets_add_start(callback: CallbackQuery, state: FSMContext):
     await state.clear()
     await state.set_state(AddWalletStates.entering_name)
-    await callback.message.answer(
-        "Введите название для нового кошелька (например: «Мой основной кошелёк»):"
-    )
+    await callback.message.answer(make_wallet_add_enter_name_text())
     await callback.answer()
 
 
@@ -80,12 +84,12 @@ async def wallets_add_start(callback: CallbackQuery, state: FSMContext):
 async def wallet_name_entered(message: Message, state: FSMContext):
     name = (message.text or "").strip()[:255]
     if not name:
-        await message.answer("Название не может быть пустым. Введите название:")
+        await message.answer(make_wallet_name_empty_text())
         return
     await state.update_data(wallet_name=name)
     await state.set_state(AddWalletStates.choosing_currency)
     await message.answer(
-        "Пожалуйста, выберите валюту в кнопочном меню:",
+        make_wallet_choose_currency_text(),
         reply_markup=wallet_coin_kb(),
     )
 
@@ -94,14 +98,11 @@ async def wallet_name_entered(message: Message, state: FSMContext):
 async def wallet_currency_chosen(callback: CallbackQuery, state: FSMContext):
     currency = callback.data.replace("wallet_coin_", "")
     if currency not in ALLOWED_CURRENCIES:
-        await callback.answer("Неверная валюта")
+        await callback.answer(make_wallet_invalid_currency_text())
         return
     await state.update_data(wallet_currency=currency)
     await state.set_state(AddWalletStates.entering_address)
-    await callback.message.edit_text(
-        f"Тип кошелька успешно установлен на {currency}!\n"
-        f"Теперь отправьте адрес вашего кошелька для сети {currency}."
-    )
+    await callback.message.edit_text(make_wallet_currency_set_text(currency))
     await callback.answer()
 
 
@@ -109,14 +110,14 @@ async def wallet_currency_chosen(callback: CallbackQuery, state: FSMContext):
 async def wallet_add_cancel(callback: CallbackQuery, state: FSMContext):
     await state.clear()
     await _send_wallets_list(callback.message, callback.from_user.id, can_edit=True)
-    await callback.answer("Отменено")
+    await callback.answer(make_wallet_cancelled_text())
 
 
 @router.message(AddWalletStates.entering_address, F.text)
 async def wallet_address_entered(message: Message, state: FSMContext):
     address = (message.text or "").strip()
     if not address or len(address) > 512:
-        await message.answer("Адрес не может быть пустым и не более 512 символов.")
+        await message.answer(make_wallet_invalid_address_text())
         return
     data = await state.get_data()
     name = data.get("wallet_name", "")
@@ -125,11 +126,11 @@ async def wallet_address_entered(message: Message, state: FSMContext):
     try:
         await api.create_wallet(telegram_id, name=name, currency=currency, address=address)
     except Exception as e:
-        await message.answer(f"Ошибка при сохранении: {e}")
+        await message.answer(make_wallet_save_error_text(e))
         await state.clear()
         return
     await state.clear()
-    await message.answer(f"✅ Кошелёк «{name}» ({currency}) добавлен.")
+    await message.answer(make_wallet_added_text(name, currency))
     await _send_wallets_list(message, telegram_id, can_edit=False)
 
 
@@ -143,4 +144,4 @@ async def wallet_delete(callback: CallbackQuery):
         await callback.answer(str(e))
         return
     await _send_wallets_list(callback.message, telegram_id, can_edit=True)
-    await callback.answer("Кошелёк удалён")
+    await callback.answer(make_wallet_deleted_text())

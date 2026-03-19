@@ -9,36 +9,13 @@ from aiogram.utils.deep_linking import create_start_link
 
 from src.api_client.client import api
 from src.keyboards.menus import profile_kb, profile_reply_kb
+from src.texts import make_profile_text
 
 router = Router(name="profile")
 
 
 class ProfileEditStates(StatesGroup):
     waiting_value = State()
-
-
-def _format_profile_text(me: dict, usdt, ref_link: str | None = None) -> str:
-    name = me.get("name") or me.get("username") or "не указано"
-    email = me.get("email") or "не указано"
-    country = me.get("country") or "не указано"
-    ref_code = me.get("ref_code", "—")
-    referrals_count = me.get("referrals_count", 0)
-    ref_part = (
-        f"<b>Реферальная ссылка:</b>\n{ref_link}"
-        if ref_link
-        else f"<b>Реферальный код:</b> <code>{ref_code}</code>"
-    )
-
-    return (
-        "👤 <b>Личные данные</b>\n\n"
-        f"<b>Баланс:</b> USDT: {usdt}\n"
-        "🔒 Инвестировано: 0 (в разработке)\n\n"
-        f"<b>Имя:</b> {name}\n"
-        f"<b>Email:</b> {email}\n"
-        f"<b>Страна:</b> {country}\n\n"
-        f"<b>Рефералы:</b> {referrals_count}\n"
-        f"{ref_part}"
-    )
 
 
 @router.message(F.text == "👤 Профиль")
@@ -61,7 +38,7 @@ async def profile(message: Message):
         ref_link = f"https://t.me/{(await message.bot.get_me()).username}?start={ref_code}"
 
     usdt = balances.get("USDT", 0)
-    text = _format_profile_text(me, usdt, ref_link=ref_link)
+    text = make_profile_text(me, usdt, ref_link=ref_link)
     await message.answer(text, reply_markup=profile_reply_kb())
 
 
@@ -116,7 +93,7 @@ async def profile_edit_value(message: Message, state: FSMContext):
         except Exception:
             ref_link = f"https://t.me/{(await message.bot.get_me()).username}?start={ref_code}"
 
-        text = _format_profile_text(
+        text = make_profile_text(
             me,
             balances.get("USDT", 0),
             ref_link=ref_link,

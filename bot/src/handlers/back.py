@@ -7,6 +7,7 @@ from aiogram.fsm.context import FSMContext
 
 from src.keyboards.menus import main_menu_kb
 from src.config.settings import ADMIN_TELEGRAM_IDS
+from src.texts import make_back_menu_title_text, make_back_menu_short_text
 
 router = Router(name="back")
 
@@ -16,10 +17,10 @@ async def back_to_menu_callback(callback: CallbackQuery, state: FSMContext):
     await state.clear()
     is_admin = callback.from_user.id in ADMIN_TELEGRAM_IDS
     try:
-        await callback.message.edit_text("Главное меню. Выберите действие:", reply_markup=None)
+        await callback.message.edit_text(make_back_menu_title_text(), reply_markup=None)
     except Exception:
         pass
-    await callback.message.answer("Выберите действие:", reply_markup=main_menu_kb(is_admin))
+    await callback.message.answer(make_back_menu_short_text(), reply_markup=main_menu_kb(is_admin))
     await callback.answer()
 
 
@@ -28,4 +29,4 @@ async def back_to_menu_message(message: Message, state: FSMContext):
     """Нижняя кнопка «Назад» в профиле — возврат к навигационной клавиатуре."""
     await state.clear()
     is_admin = message.from_user.id in ADMIN_TELEGRAM_IDS
-    await message.answer("Главное меню. Выберите действие:", reply_markup=main_menu_kb(is_admin))
+    await message.answer(make_back_menu_title_text(), reply_markup=main_menu_kb(is_admin))

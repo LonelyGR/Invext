@@ -13,6 +13,12 @@ from src.api_client.client import api
 from src.keyboards.menus import back_kb
 from src.utils.effects import send_effect_message, EFFECT_CELEBRATION
 from src.utils.locks import with_double_click_protection, release_double_click_lock
+from src.texts import (
+    make_invest_main_text_with_deal,
+    make_invest_main_text_no_deal,
+    make_invest_enter_amount_text,
+    make_invest_success_text,
+)
 import logging
 
 router = Router(name="invest")
@@ -32,15 +38,6 @@ def _invest_deal_kb(with_participate: bool) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def _format_invest_screen(available_usdt: str) -> str:
-    return (
-        "<b>Инвестиции</b>\n\n"
-        "💰 <b>Доступный баланс для инвестиций:</b>\n"
-        f"USDT: {available_usdt}\n\n"
-        "Отправьте сумму инвестиций цифрами ответом на это сообщение."
-    )
-
-
 @router.message(F.text == "📈 Сделка")
 async def invest_section(message: Message, state: FSMContext):
     telegram_id = message.from_user.id
@@ -56,19 +53,10 @@ async def invest_section(message: Message, state: FSMContext):
 
     if active.get("active") and active.get("deal_number"):
         deal_number = active["deal_number"]
-        text = (
-            f"<b>Сделка #{deal_number}</b> открыта.\n\n"
-            "💰 <b>Доступный баланс для инвестиций:</b>\n"
-            f"USDT: {available_usdt}\n\n"
-            "Нажмите <b>«Участвовать»</b>, чтобы вложить средства в текущую сделку.\n"
-            "Минимальная сумма участия отображается при вводе суммы."
-        )
+        text = make_invest_main_text_with_deal(deal_number, available_usdt)
         await message.answer(text, reply_markup=_invest_deal_kb(with_participate=True))
     else:
-        text = (
-            "Сейчас нет открытой сделки.\n\n"
-            "Ожидайте уведомление в боте о новой сделке, затем зайдите в раздел <b>📈 Сделка</b> и нажмите <b>«Участвовать»</b>."
-        )
+        text = make_invest_main_text_no_deal()
         await state.clear()
         await message.answer(text, reply_markup=_invest_deal_kb(with_participate=False))
 
@@ -87,8 +75,7 @@ async def invest_participate(callback: CallbackQuery, state: FSMContext):
 
     hint = f"Минимальная сумма: {min_invest} USDT" if min_invest is not None else "Введите сумму инвестиций."
     await callback.message.edit_text(
-        "Введите сумму, которую хотите инвестировать (только цифрами).\n\n"
-        f"{hint}",
+        make_invest_enter_amount_text(hint),
         reply_markup=InlineKeyboardMarkup(
             inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_menu")]]
         ),
@@ -144,13 +131,7 @@ async def invest_amount_entered(message: Message, state: FSMContext):
         new_balance = result.get("balance_usdt")
         invested = result.get("invested_amount_usdt")
 
-        success_text = (
-            "✅ Инвестиция создана.\n"
-            f"Сумма: {invested} USDT\n\n"
-            f"Текущий баланс: {new_balance} USDT\n\n"
-            "Средства переведены в текущую сделку. Начисление прибыли произойдет\n"
-            "после её завершения согласно условиям."
-        )
+        success_text = make_invest_success_text(invested, new_balance)
         await send_effect_message(
             message.bot,
             message.chat.id,

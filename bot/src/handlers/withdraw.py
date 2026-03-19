@@ -11,6 +11,12 @@ from src.api_client.client import api
 from src.config.settings import ALLOWED_CURRENCIES
 from src.keyboards.menus import currency_kb, main_menu_kb
 from src.utils.locks import with_double_click_protection, release_double_click_lock
+from src.texts import (
+    make_withdraw_choose_currency_text,
+    make_withdraw_enter_amount_text,
+    make_withdraw_enter_address_text,
+    make_withdraw_success_text,
+)
 import logging
 
 router = Router(name="withdraw")
@@ -28,7 +34,7 @@ async def withdraw_start(message: Message, state: FSMContext):
     await state.clear()
     await state.set_state(WithdrawStates.choosing_currency)
     await message.answer(
-        "Выберите валюту вывода:",
+        make_withdraw_choose_currency_text(),
         reply_markup=currency_kb("withdraw_"),
     )
 
@@ -51,8 +57,7 @@ async def withdraw_currency_chosen(callback: CallbackQuery, state: FSMContext):
     except Exception:
         pass
     await callback.message.edit_text(
-        f"Введите сумму вывода ({currency}).\n"
-        f"Минимум: {min_wd}, максимум: {max_wd}"
+        make_withdraw_enter_amount_text(currency, min_wd, max_wd)
     )
     await callback.answer()
 
@@ -70,7 +75,7 @@ async def withdraw_amount_entered(message: Message, state: FSMContext):
 
     await state.update_data(amount=message.text.strip())
     await state.set_state(WithdrawStates.entering_address)
-    await message.answer("Введите адрес кошелька для вывода (строка):")
+    await message.answer(make_withdraw_enter_address_text())
 
 
 @router.message(WithdrawStates.entering_address, F.text)
@@ -113,9 +118,7 @@ async def withdraw_address_entered(message: Message, state: FSMContext):
 
         req_id = result.get("id", "—")
         await message.answer(
-            "✅ Ваша заявка на вывод успешно создана и отправлена на рассмотрение.\n"
-            "Средства будут выведены в течение 48 часов после проверки заявки.\n"
-            f"ID заявки: {req_id}",
+            make_withdraw_success_text(req_id),
             reply_markup=main_menu_kb(),
         )
         await state.clear()

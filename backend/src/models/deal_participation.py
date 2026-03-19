@@ -5,9 +5,9 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import DateTime, ForeignKey, Numeric, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Numeric, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -16,6 +16,10 @@ from src.db.base import Base
 if TYPE_CHECKING:
     from src.models.deal import Deal
     from src.models.user import User
+
+PARTICIPATION_STATUS_ACTIVE = "active"
+PARTICIPATION_STATUS_IN_PROGRESS = "in_progress_payout"
+PARTICIPATION_STATUS_COMPLETED = "completed"
 
 
 class DealParticipation(Base):
@@ -29,6 +33,11 @@ class DealParticipation(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
 
     amount: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(24), nullable=False, default=PARTICIPATION_STATUS_ACTIVE, index=True,
+    )
+    profit_amount: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 6), nullable=True)
+    payout_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -38,4 +47,7 @@ class DealParticipation(Base):
     user: Mapped["User"] = relationship("User", back_populates="deal_participations")
 
     def __repr__(self) -> str:
-        return f"<DealParticipation id={self.id} deal_id={self.deal_id} user_id={self.user_id} amount={self.amount}>"
+        return (
+            f"<DealParticipation id={self.id} deal_id={self.deal_id} "
+            f"user_id={self.user_id} amount={self.amount} status={self.status}>"
+        )

@@ -14,6 +14,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models import Deal, DealParticipation, LedgerTransaction, ReferralReward, User
 from src.models.deal import DEAL_STATUS_ACTIVE, DEAL_STATUS_CLOSED
+from src.models.deal_participation import (
+    PARTICIPATION_STATUS_ACTIVE,
+    PARTICIPATION_STATUS_COMPLETED,
+    PARTICIPATION_STATUS_IN_PROGRESS,
+)
 from src.models.referral_reward import STATUS_PAID, STATUS_MISSED
 from src.services.ledger_service import (
     LEDGER_TYPE_INVEST,
@@ -29,6 +34,7 @@ from src.services.settings_service import get_system_settings
 from src.services.notification_service import (
     broadcast_deal_closed,
     broadcast_deal_opened,
+    notify_payout_complete,
     send_referral_bonus_reminder,
 )
 
@@ -121,6 +127,7 @@ async def participate_in_deal(
         deal_id=deal.id,
         user_id=user_locked.id,
         amount=amount,
+        status=PARTICIPATION_STATUS_ACTIVE,
     )
     db.add(participation)
     await db.flush()
@@ -160,8 +167,12 @@ async def _get_referrer_chain(db: AsyncSession, user_id: int) -> List[User]:
 
 async def close_deal_flow(db: AsyncSession, deal: Deal) -> None:
     """
-    Закрытие сделки: статус closed, реферальные начисления (один раз),
-    рассылка уведомлений (один раз), установка флагов.
+    Закрытие сделки:
+    1. Статус сделки → closed.
+    2. Рассчитываем profit_amount для каждого участия, статус → in_progress_payout.
+       Прибыль НЕ зачисляется на баланс (зачисление при открытии следующей сделки).
+    3. Реферальная обработка (флаг).
+    4. Уведомление: «средства в работе».
     """
     now = dt.datetime.now(dt.timezone.utc)
 
@@ -171,57 +182,39 @@ async def close_deal_flow(db: AsyncSession, deal: Deal) -> None:
         deal.closed_at = now
     await db.flush()
 
-    # Начисляем участникам сделки тело вклада + прибыль.
-    # Пользователь инвестировал сумму `amount` (INVEST уменьшил баланс),
-    # при закрытии сделки он должен получить обратно 100% вклада + profit% прибыли.
     profit_percent = deal.profit_percent or deal.percent
-    if profit_percent is not None:
-        # Загружаем все участия в этой сделке.
-        parts_result = await db.execute(
-            select(DealParticipation).where(DealParticipation.deal_id == deal.id)
-        )
-        participations = list(parts_result.scalars().all())
-        for p in participations:
-            total_return = (
-                p.amount * (Decimal("1") + (Decimal(profit_percent) / Decimal("100")))
-            ).quantize(Decimal("0.000001"))
 
-            tx = LedgerTransaction(
-                user_id=p.user_id,
-                type=LEDGER_TYPE_PROFIT,
-                amount_usdt=total_return,
-                metadata_json={
-                    "deal_id": deal.id,
-                    "deal_number": deal.number,
-                    "participation_id": p.id,
-                    "base_amount": str(p.amount),
-                    "profit_percent": str(profit_percent),
-                },
-            )
-            db.add(tx)
-        if participations:
-            # Обновляем кэш баланса для всех участников.
-            participant_ids = {p.user_id for p in participations}
-            for uid in participant_ids:
-                user_obj = await db.get(User, uid)
-                if user_obj:
-                    new_balance = await get_balance_usdt(db, uid)
-                    user_obj.balance_usdt = new_balance
-            await db.flush()
+    parts_result = await db.execute(
+        select(DealParticipation).where(
+            DealParticipation.deal_id == deal.id,
+            DealParticipation.status == PARTICIPATION_STATUS_ACTIVE,
+        )
+    )
+    participations = list(parts_result.scalars().all())
+
+    for p in participations:
+        if profit_percent is not None:
+            profit = (
+                p.amount * Decimal(str(profit_percent)) / Decimal("100")
+            ).quantize(Decimal("0.000001"))
+            p.profit_amount = profit
+        else:
+            p.profit_amount = Decimal("0")
+        p.status = PARTICIPATION_STATUS_IN_PROGRESS
+
+    if participations:
+        await db.flush()
 
     if not deal.referral_processed:
-        # Реферальные бонусы теперь начисляются только с депозитов, а не с участия в сделках.
         deal.referral_processed = True
         await db.flush()
 
     if not deal.close_notification_sent:
-        # Участники сделки (по user_id).
         participant_user_ids_result = await db.execute(
             select(DealParticipation.user_id).where(DealParticipation.deal_id == deal.id)
         )
         participant_user_ids = {r[0] for r in participant_user_ids_result.all()}
 
-        # Все пользователи с telegram_id.
         users_result = await db.execute(
             select(User.id, User.telegram_id).where(User.telegram_id.isnot(None))
         )
@@ -233,28 +226,25 @@ async def close_deal_flow(db: AsyncSession, deal: Deal) -> None:
             tid for tid, uid in user_id_by_tid.items() if uid in participant_user_ids
         }
 
-        # Считаем реферальную прибыль и упущенную прибыль по этой сделке.
-        # Фактические начисленные бонусы: ledger_transactions type=REFERRAL_BONUS, source='investment'.
         referral_profit_by_telegram: dict[int, float] = {}
         referral_missed_by_telegram: dict[int, float] = {}
 
-        # Начисленная реферальная прибыль по сделке.
         lt_result = await db.execute(
-            select(LedgerTransaction.user_id, LedgerTransaction.amount_usdt, LedgerTransaction.metadata_json).where(
-                LedgerTransaction.type == LEDGER_TYPE_REFERRAL_BONUS
-            )
+            select(
+                LedgerTransaction.user_id,
+                LedgerTransaction.amount_usdt,
+                LedgerTransaction.metadata_json,
+            ).where(LedgerTransaction.type == LEDGER_TYPE_REFERRAL_BONUS)
         )
         for uid, amount, meta in lt_result.all():
             if not meta or meta.get("source") != "investment":
                 continue
             if int(meta.get("deal_id", 0)) != deal.id:
                 continue
-            # Переводим в telegram_id.
             for tid, user_id in user_id_by_tid.items():
                 if user_id == uid:
                     referral_profit_by_telegram[tid] = referral_profit_by_telegram.get(tid, 0.0) + float(amount)
 
-        # Упущенные бонусы по этой сделке.
         rr_result = await db.execute(
             select(ReferralReward.to_user_id, ReferralReward.amount).where(
                 ReferralReward.deal_id == deal.id,
@@ -267,7 +257,6 @@ async def close_deal_flow(db: AsyncSession, deal: Deal) -> None:
                     referral_missed_by_telegram[tid] = referral_missed_by_telegram.get(tid, 0.0) + float(amount)
 
         profit_pct = float(deal.profit_percent) if deal.profit_percent is not None else None
-        # Следующая сделка открывается в 13:00 (UTC+1), текущая закрывается в 12:00
         next_open_at = (deal.end_at + dt.timedelta(hours=1)) if deal.end_at else None
         await broadcast_deal_closed(
             telegram_ids,
@@ -282,6 +271,101 @@ async def close_deal_flow(db: AsyncSession, deal: Deal) -> None:
         await db.flush()
 
     logger.info("Deal closed: deal_id=%s number=%s", deal.id, deal.number)
+
+
+async def process_pending_payouts(db: AsyncSession) -> int:
+    """
+    Обработка всех инвестиций в статусе in_progress_payout:
+    — зачисляем тело + прибыль на баланс (PROFIT ledger entry)
+    — статус → completed, payout_at = now
+    — отправляем персональное уведомление каждому пользователю.
+    Вызывается перед открытием новой сделки.
+    Возвращает кол-во обработанных записей.
+    """
+    parts_result = await db.execute(
+        select(DealParticipation)
+        .where(DealParticipation.status == PARTICIPATION_STATUS_IN_PROGRESS)
+        .order_by(DealParticipation.deal_id)
+    )
+    participations = list(parts_result.scalars().all())
+    if not participations:
+        return 0
+
+    now = dt.datetime.now(dt.timezone.utc)
+    processed = 0
+
+    deal_cache: dict[int, Deal] = {}
+    affected_user_ids: set[int] = set()
+
+    for p in participations:
+        profit = p.profit_amount or Decimal("0")
+        total_return = (p.amount + profit).quantize(Decimal("0.000001"))
+
+        if p.deal_id not in deal_cache:
+            deal_obj = await db.get(Deal, p.deal_id)
+            if deal_obj:
+                deal_cache[p.deal_id] = deal_obj
+
+        deal = deal_cache.get(p.deal_id)
+
+        tx = LedgerTransaction(
+            user_id=p.user_id,
+            type=LEDGER_TYPE_PROFIT,
+            amount_usdt=total_return,
+            metadata_json={
+                "deal_id": p.deal_id,
+                "deal_number": deal.number if deal else None,
+                "participation_id": p.id,
+                "base_amount": str(p.amount),
+                "profit_amount": str(profit),
+            },
+        )
+        db.add(tx)
+
+        p.status = PARTICIPATION_STATUS_COMPLETED
+        p.payout_at = now
+        affected_user_ids.add(p.user_id)
+        processed += 1
+
+    await db.flush()
+
+    for uid in affected_user_ids:
+        user_obj = await db.get(User, uid)
+        if user_obj:
+            new_balance = await get_balance_usdt(db, uid)
+            user_obj.balance_usdt = new_balance
+
+    await db.flush()
+
+    # Отправляем персональные уведомления о выплате.
+    user_tids: dict[int, int] = {}
+    if affected_user_ids:
+        users_result = await db.execute(
+            select(User.id, User.telegram_id).where(
+                User.id.in_(affected_user_ids),
+                User.telegram_id.isnot(None),
+            )
+        )
+        user_tids = {r[0]: r[1] for r in users_result.all() if r[1]}
+
+    for p in participations:
+        tid = user_tids.get(p.user_id)
+        if not tid:
+            continue
+        deal = deal_cache.get(p.deal_id)
+        deal_num = deal.number if deal else 0
+        profit = p.profit_amount or Decimal("0")
+        total = (p.amount + profit).quantize(Decimal("0.000001"))
+        await notify_payout_complete(
+            telegram_id=tid,
+            deal_number=deal_num,
+            amount=p.amount,
+            profit=profit,
+            total=total,
+        )
+
+    logger.info("process_pending_payouts: processed=%s users=%s", processed, len(affected_user_ids))
+    return processed
 
 
 async def process_due_deals(db: AsyncSession) -> int:
@@ -389,18 +473,20 @@ async def open_new_deal_by_schedule(
 ) -> Optional[Deal]:
     """
     Открыть новую сделку по расписанию (13:00 UTC+1) и разослать уведомление.
+    Перед открытием обрабатываются все отложенные выплаты (in_progress_payout).
     Защита от дублей: если уже есть active сделка, перекрывающая now — не создаём новую.
-    Транзакция управляется вызывающим кодом (scheduler). Не вызывать db.begin() здесь:
-    get_active_deal(db) уже выполняет запрос и запускает autobegin на сессии.
     """
     now = dt.datetime.now(dt.timezone.utc)
 
-    # Если уже есть активная сделка, то ничего не делаем.
+    # Сначала обрабатываем отложенные выплаты предыдущих сделок.
+    paid = await process_pending_payouts(db)
+    if paid:
+        logger.info("open_new_deal_by_schedule: processed %s pending payouts before opening", paid)
+
     active = await get_active_deal(db)
     if active:
         return None
 
-    # Повторная проверка под локом (на случай гонки между воркерами).
     active_locked = await db.execute(
         select(Deal)
         .where(
@@ -419,7 +505,6 @@ async def open_new_deal_by_schedule(
 
     deal = await open_new_deal(db, start_at=start_at, end_at=end_at)
 
-    # Рассылка всем пользователям (после успешного создания сделки)
     users_result = await db.execute(
         select(User.telegram_id).where(User.telegram_id.isnot(None))
     )
@@ -472,7 +557,7 @@ async def open_new_deal(
         start_at=start_at,
         end_at=end_at,
         status=status,
-        profit_percent=profit_percent or Decimal("0"),
+        profit_percent=profit_percent if profit_percent is not None else Decimal("3"),
     )
     db.add(deal)
     await db.flush()

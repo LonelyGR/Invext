@@ -6,6 +6,7 @@ from aiogram.types import Message
 
 from src.api_client.client import api
 from src.keyboards.menus import main_menu_kb
+from src.texts import make_balance_text
 
 router = Router(name="balance")
 
@@ -21,10 +22,6 @@ async def balance_main(message: Message):
         return
 
     usdt = balances.get("USDT", 0)
-    text = (
-        "💰 <b>Ваш баланс</b>\n\n"
-        f"USDT: {usdt}\n\n"
-        "Реферальные бонусы начисляются на этот баланс и доступны для участия в сделках или вывода."
-    )
+    text = make_balance_text(usdt)
     await message.answer(text, reply_markup=main_menu_kb())
 
