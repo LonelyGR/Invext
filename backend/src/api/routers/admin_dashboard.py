@@ -57,6 +57,7 @@ from src.schemas.admin_dashboard import (
 from src.services.ledger_service import (
     LEDGER_TYPE_DEPOSIT,
     LEDGER_TYPE_INVEST,
+    LEDGER_TYPE_INVEST_RETURN,
     LEDGER_TYPE_PROFIT,
     LEDGER_TYPE_WITHDRAW,
     LEDGER_TYPE_REFERRAL_BONUS,
@@ -129,7 +130,10 @@ async def get_dashboard_stats(
     # Баланс = DEPOSIT + PROFIT − INVEST − WITHDRAW
     deposits_profit_result = await db.execute(
         select(func.coalesce(func.sum(LedgerTransaction.amount_usdt), 0)).where(
-            LedgerTransaction.type.in_((LEDGER_TYPE_DEPOSIT, LEDGER_TYPE_PROFIT))
+            LedgerTransaction.type.in_((
+                LEDGER_TYPE_DEPOSIT, LEDGER_TYPE_INVEST_RETURN,
+                LEDGER_TYPE_PROFIT, LEDGER_TYPE_REFERRAL_BONUS,
+            ))
         )
     )
     invest_withdraw_result = await db.execute(
@@ -317,8 +321,10 @@ async def user_ledger(
                 except (TypeError, ValueError):
                     deal_id = None
 
-            # Пояснение для реферальных бонусов: за какого реферала и по какому источнику.
-            if tx_type == LEDGER_TYPE_REFERRAL_BONUS:
+            if tx_type == LEDGER_TYPE_INVEST_RETURN:
+                comment = "Возврат тела инвестиции"
+
+            elif tx_type == LEDGER_TYPE_REFERRAL_BONUS:
                 source = meta.get("source")
                 from_user_id = meta.get("from_user_id")
                 level = meta.get("level")

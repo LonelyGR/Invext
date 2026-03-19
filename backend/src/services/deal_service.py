@@ -22,6 +22,7 @@ from src.models.deal_participation import (
 from src.models.referral_reward import STATUS_PAID, STATUS_MISSED
 from src.services.ledger_service import (
     LEDGER_TYPE_INVEST,
+    LEDGER_TYPE_INVEST_RETURN,
     LEDGER_TYPE_PROFIT,
     LEDGER_TYPE_REFERRAL_BONUS,
     get_balance_usdt,
@@ -179,7 +180,9 @@ async def close_deal_flow(db: AsyncSession, deal: Deal) -> None:
     deal.status = DEAL_STATUS_CLOSED
     deal.updated_at = now
     if deal.closed_at is None:
-        deal.closed_at = now
+        # Для стабильной логики отложенных выплат стараемся фиксировать время закрытия окна,
+        # чтобы payout-джобы могли корректно определить «пора выплачивать».
+        deal.closed_at = deal.end_at or now
     await db.flush()
 
     profit_percent = deal.profit_percent or deal.percent
@@ -282,16 +285,26 @@ async def process_pending_payouts(db: AsyncSession) -> int:
     Вызывается перед открытием новой сделки.
     Возвращает кол-во обработанных записей.
     """
+    # Не выплачиваем сразу после закрытия: «средства в работе», payout — не раньше чем через 1 час.
+    now = dt.datetime.now(dt.timezone.utc)
+    eligible_before = now - dt.timedelta(hours=1)
+
+    # Важно для идемпотентности при нескольких воркерах:
+    # лочим строки и пропускаем уже залоченные (чтобы не выплатить дважды).
     parts_result = await db.execute(
         select(DealParticipation)
-        .where(DealParticipation.status == PARTICIPATION_STATUS_IN_PROGRESS)
+        .join(Deal, DealParticipation.deal_id == Deal.id)
+        .where(
+            DealParticipation.status == PARTICIPATION_STATUS_IN_PROGRESS,
+            Deal.closed_at.isnot(None),
+            Deal.closed_at <= eligible_before,
+        )
         .order_by(DealParticipation.deal_id)
+        .with_for_update(skip_locked=True)
     )
     participations = list(parts_result.scalars().all())
     if not participations:
         return 0
-
-    now = dt.datetime.now(dt.timezone.utc)
     processed = 0
 
     deal_cache: dict[int, Deal] = {}
@@ -299,7 +312,6 @@ async def process_pending_payouts(db: AsyncSession) -> int:
 
     for p in participations:
         profit = p.profit_amount or Decimal("0")
-        total_return = (p.amount + profit).quantize(Decimal("0.000001"))
 
         if p.deal_id not in deal_cache:
             deal_obj = await db.get(Deal, p.deal_id)
@@ -307,20 +319,30 @@ async def process_pending_payouts(db: AsyncSession) -> int:
                 deal_cache[p.deal_id] = deal_obj
 
         deal = deal_cache.get(p.deal_id)
+        meta_base = {
+            "deal_id": p.deal_id,
+            "deal_number": deal.number if deal else None,
+            "participation_id": p.id,
+        }
 
-        tx = LedgerTransaction(
+        # 1) Возврат тела инвестиции (отменяет INVEST-списание).
+        tx_return = LedgerTransaction(
             user_id=p.user_id,
-            type=LEDGER_TYPE_PROFIT,
-            amount_usdt=total_return,
-            metadata_json={
-                "deal_id": p.deal_id,
-                "deal_number": deal.number if deal else None,
-                "participation_id": p.id,
-                "base_amount": str(p.amount),
-                "profit_amount": str(profit),
-            },
+            type=LEDGER_TYPE_INVEST_RETURN,
+            amount_usdt=p.amount,
+            metadata_json={**meta_base, "base_amount": str(p.amount)},
         )
-        db.add(tx)
+        db.add(tx_return)
+
+        # 2) Прибыль (только чистая прибыль).
+        if profit > 0:
+            tx_profit = LedgerTransaction(
+                user_id=p.user_id,
+                type=LEDGER_TYPE_PROFIT,
+                amount_usdt=profit,
+                metadata_json={**meta_base, "profit_amount": str(profit)},
+            )
+            db.add(tx_profit)
 
         p.status = PARTICIPATION_STATUS_COMPLETED
         p.payout_at = now

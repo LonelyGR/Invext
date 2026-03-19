@@ -99,10 +99,32 @@ def init_deal_scheduler(scheduler: AsyncIOScheduler, db_factory) -> None:
                 await db.rollback()
                 logger.exception("open_deal_1300 job failed: %s", e)
 
+    async def _job_process_pending_payouts():
+        """
+        Страховочный джоб отложенных выплат:
+        - нужен на случай, если контейнер/планировщик был недоступен в момент открытия новой сделки
+        - выплата не раньше чем через 1 час после закрытия сделки (фильтр внутри process_pending_payouts)
+        """
+        logger.info("process_pending_payouts job started")
+        async with db_factory() as db:
+            try:
+                count = await process_pending_payouts(db)
+                await db.commit()
+                logger.info("process_pending_payouts job finished, processed=%s", count)
+            except Exception as e:
+                await db.rollback()
+                logger.exception("process_pending_payouts job failed: %s", e)
+
     scheduler.add_job(
         _job_process_due_deals,
         IntervalTrigger(minutes=1),
         name="process_due_deals",
+    )
+    # Страховка: регулярно обрабатывать отложенные выплаты.
+    scheduler.add_job(
+        _job_process_pending_payouts,
+        IntervalTrigger(minutes=10),
+        name="process_pending_payouts",
     )
 
     # Ежедневные задачи по расписанию (UTC+1):
