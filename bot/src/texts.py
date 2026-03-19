@@ -65,12 +65,11 @@ def format_personal_data(
     email = me.get("email") or "не указано"
     country = me.get("country") or "не указано"
     referrals = me.get("referrals_count", 0)
-    ref_code = me.get("ref_code", "—")
 
     if ref_link:
         ref_block = f"🔗 Реферальная ссылка:\n{ref_link}"
     else:
-        ref_block = f"🔗 Реферальный код: <code>{ref_code}</code>"
+        ref_block = "⚠️ Реферальная ссылка временно недоступна. Попробуйте позже."
 
     return (
         "<b>👤 Профиль</b>\n\n"
@@ -265,21 +264,20 @@ def make_invest_success_text(invested: Any, new_balance: Any) -> str:
 
 # === Партнёрка / команда / бонусы ===
 
-def make_partners_main_text(me: Mapping[str, Any], link: str, levels: list[tuple[float, str]]) -> str:
-    ref_code = me.get("ref_code", "—")
+def make_partners_main_text(me: Mapping[str, Any], link: str | None, levels: list[tuple[float, str]]) -> str:
     level1 = me.get("referrals_level_1", 0) or me.get("referrals_count", 0)
     level2 = me.get("referrals_level_2", 0)
     level3 = me.get("referrals_level_3", 0)
     counts = [level1, level2, level3]
+
+    if link:
+        link_block = f"🔗 Ваша реферальная ссылка:\n{link}"
+    else:
+        link_block = "⚠️ Реферальная ссылка временно недоступна. Попробуйте позже."
+
     lines: list[str] = [
         "<b>👥 Партнёрская программа</b>\n\n"
-        
-        "🔗 Ваша реферальная ссылка:\n"
-        f"{link}\n\n"
-        
-        "🆔 Ваш код:\n"
-        f"<code>{ref_code}</code>\n\n"
-        
+        f"{link_block}\n\n"
         "📊 <b>Уровни рефералов</b>"
     ]
     for i, (pct, label) in enumerate(levels):
@@ -288,12 +286,8 @@ def make_partners_main_text(me: Mapping[str, Any], link: str, levels: list[tuple
     return "\n".join(lines)
 
 
-def make_partners_share_link_text(link: str) -> str:
-    return (
-        "🔗 <b>Реферальная ссылка</b>\n\n"
-        f"{link}\n\n"
-        "Отправьте её другу — он откроет бота по вашей ссылке"
-    )
+def make_partners_no_link_text() -> str:
+    return "⚠️ Реферальная ссылка временно недоступна. Попробуйте позже."
 
 
 def make_partners_team_text(me: Mapping[str, Any]) -> str:
@@ -414,13 +408,12 @@ def make_profile_text(me: Mapping[str, Any], usdt: Any, ref_link: str | None = N
     name = me.get("name") or me.get("username") or "не указано"
     email = me.get("email") or "не указано"
     country = me.get("country") or "не указано"
-    ref_code = me.get("ref_code", "—")
     referrals_count = me.get("referrals_count", 0)
-    ref_part = (
-        f"🔗 <b>Реферальная ссылка</b>\n{ref_link}"
-        if ref_link
-        else f"🆔 <b>Реферальный код</b>\n<code>{ref_code}</code>"
-    )
+
+    if ref_link:
+        ref_part = f"🔗 <b>Реферальная ссылка</b>\n{ref_link}"
+    else:
+        ref_part = "⚠️ Реферальная ссылка временно недоступна. Попробуйте позже."
 
     return (
         "👤 <b>Профиль</b>\n\n"

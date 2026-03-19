@@ -38,11 +38,16 @@ async def _send_welcome_flow(message: Message, telegram_id: int):
     if not balances:
         balances = {"USDT": 0, "USDC": 0}
 
-    ref_code = me.get("ref_code", "—")
-    try:
-        ref_link = await create_start_link(message.bot, ref_code)
-    except Exception:
-        ref_link = f"https://t.me/{(await message.bot.get_me()).username}?start={ref_code}"
+    ref_code = me.get("ref_code", "")
+    ref_link = None
+    if ref_code:
+        try:
+            ref_link = await create_start_link(message.bot, ref_code)
+        except Exception:
+            try:
+                ref_link = f"https://t.me/{(await message.bot.get_me()).username}?start={ref_code}"
+            except Exception:
+                ref_link = None
 
     personal_text = format_personal_data(me, balances, ref_link=ref_link)
     await message.answer(personal_text, reply_markup=main_menu_kb(telegram_id in ADMIN_TELEGRAM_IDS))

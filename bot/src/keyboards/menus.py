@@ -145,16 +145,18 @@ def turnover_detail_kb() -> InlineKeyboardMarkup:
     )
 
 
-def partners_main_kb() -> InlineKeyboardMarkup:
-    """Партнёры: Моя команда, Реферальные бонусы, Поделиться ссылкой, Назад."""
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="📊 Моя команда", callback_data="partners_team")],
-            [InlineKeyboardButton(text="🎁 Реферальные бонусы", callback_data="partners_bonuses")],
-            [InlineKeyboardButton(text="📤 Поделиться ссылкой", callback_data="partners_share_link")],
-            [InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_menu")],
-        ]
-    )
+def partners_main_kb(share_url: str | None = None) -> InlineKeyboardMarkup:
+    """Партнёры: Моя команда, Реферальные бонусы, Поделиться ссылкой (нативный share), Назад."""
+    rows = [
+        [InlineKeyboardButton(text="📊 Моя команда", callback_data="partners_team")],
+        [InlineKeyboardButton(text="🎁 Реферальные бонусы", callback_data="partners_bonuses")],
+    ]
+    if share_url:
+        from urllib.parse import quote
+        telegram_share = f"https://t.me/share/url?url={quote(share_url, safe='')}"
+        rows.append([InlineKeyboardButton(text="📤 Поделиться ссылкой", url=telegram_share)])
+    rows.append([InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def partners_team_kb() -> InlineKeyboardMarkup:

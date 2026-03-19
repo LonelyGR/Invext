@@ -9,21 +9,32 @@ from src.api_client.client import api
 from src.keyboards.menus import partners_main_kb, partners_team_kb, partners_bonuses_kb
 from src.texts import (
     make_partners_main_text,
-    make_partners_share_link_text,
+    make_partners_no_link_text,
     make_partners_team_text,
     make_partners_bonuses_text,
 )
 
 router = Router(name="partners")
 
-# Уровни реферальной программы:
-# - Депозиты: 1 уровень — 3%
-# - Инвестиции: 1–3 уровни — по 0.5% при участии в сделке
 REFERRAL_LEVELS = [
     (3.00, "1 уровень (депозиты)"),
     (0.5, "2 уровень (инвестиции)"),
     (0.5, "3 уровень (инвестиции)"),
 ]
+
+
+async def _build_ref_link(bot, ref_code: str) -> str | None:
+    """Генерирует реферальную ссылку. Возвращает None при ошибке."""
+    if not ref_code or ref_code == "—":
+        return None
+    try:
+        return await create_start_link(bot, ref_code)
+    except Exception:
+        try:
+            username = (await bot.get_me()).username
+            return f"https://t.me/{username}?start={ref_code}"
+        except Exception:
+            return None
 
 
 @router.message(F.text == "👥 Партнёры")
@@ -39,14 +50,11 @@ async def partners(message: Message):
         await message.answer("Пользователь не найден. Отправьте /start.")
         return
 
-    ref_code = me.get("ref_code", "—")
-    try:
-        link = await create_start_link(message.bot, ref_code)
-    except Exception:
-        link = f"https://t.me/{(await message.bot.get_me()).username}?start={ref_code}"
+    ref_code = me.get("ref_code", "")
+    link = await _build_ref_link(message.bot, ref_code)
 
     text = make_partners_main_text(me, link, REFERRAL_LEVELS)
-    await message.answer(text, reply_markup=partners_main_kb())
+    await message.answer(text, reply_markup=partners_main_kb(share_url=link))
 
 
 @router.callback_query(F.data == "partners_back")
@@ -61,41 +69,16 @@ async def partners_back(callback: CallbackQuery):
     if not me:
         await callback.answer("Пользователь не найден.")
         return
-    ref_code = me.get("ref_code", "—")
-    try:
-        link = await create_start_link(callback.bot, ref_code)
-    except Exception:
-        link = f"https://t.me/{(await callback.bot.get_me()).username}?start={ref_code}"
+
+    ref_code = me.get("ref_code", "")
+    link = await _build_ref_link(callback.bot, ref_code)
+
     text = make_partners_main_text(me, link, REFERRAL_LEVELS)
     try:
-        await callback.message.edit_text(text, reply_markup=partners_main_kb())
+        await callback.message.edit_text(text, reply_markup=partners_main_kb(share_url=link))
     except Exception:
-        await callback.message.answer(text, reply_markup=partners_main_kb())
+        await callback.message.answer(text, reply_markup=partners_main_kb(share_url=link))
     await callback.answer()
-
-
-@router.callback_query(F.data == "partners_share_link")
-async def partners_share_link(callback: CallbackQuery):
-    """Отправить отдельным сообщением реферальную ссылку — удобно переслать в один клик."""
-    telegram_id = callback.from_user.id
-    try:
-        me = await api.get_me(telegram_id)
-    except Exception:
-        await callback.answer("Ошибка загрузки данных")
-        return
-    if not me:
-        await callback.answer("Пользователь не найден.")
-        return
-
-    ref_code = me.get("ref_code", "—")
-    try:
-        link = await create_start_link(callback.bot, ref_code)
-    except Exception:
-        link = f"https://t.me/{(await callback.bot.get_me()).username}?start={ref_code}"
-
-    text = make_partners_share_link_text(link)
-    await callback.message.answer(text)
-    await callback.answer("Ссылку можно переслать дальше")
 
 
 @router.callback_query(F.data == "partners_team")

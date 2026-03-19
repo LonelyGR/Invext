@@ -31,11 +31,16 @@ async def profile(message: Message):
         await message.answer("Пользователь не найден. Отправьте /start.")
         return
 
-    ref_code = me.get("ref_code", "—")
-    try:
-        ref_link = await create_start_link(message.bot, ref_code)
-    except Exception:
-        ref_link = f"https://t.me/{(await message.bot.get_me()).username}?start={ref_code}"
+    ref_code = me.get("ref_code", "")
+    ref_link = None
+    if ref_code:
+        try:
+            ref_link = await create_start_link(message.bot, ref_code)
+        except Exception:
+            try:
+                ref_link = f"https://t.me/{(await message.bot.get_me()).username}?start={ref_code}"
+            except Exception:
+                ref_link = None
 
     usdt = balances.get("USDT", 0)
     text = make_profile_text(me, usdt, ref_link=ref_link)
@@ -87,11 +92,16 @@ async def profile_edit_value(message: Message, state: FSMContext):
         me = {}
         balances = {"USDT": 0, "USDC": 0}
     if me:
-        ref_code = me.get("ref_code", "—")
-        try:
-            ref_link = await create_start_link(message.bot, ref_code)
-        except Exception:
-            ref_link = f"https://t.me/{(await message.bot.get_me()).username}?start={ref_code}"
+        ref_code = me.get("ref_code", "")
+        ref_link = None
+        if ref_code:
+            try:
+                ref_link = await create_start_link(message.bot, ref_code)
+            except Exception:
+                try:
+                    ref_link = f"https://t.me/{(await message.bot.get_me()).username}?start={ref_code}"
+                except Exception:
+                    ref_link = None
 
         text = make_profile_text(
             me,
