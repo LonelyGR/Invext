@@ -38,7 +38,16 @@ WELCOME_ABOUT = """<b>Invext</b> — торговое сообщество, об
 2 уровень — 0.5% с инвестиций  
 3 уровень — 0.5% с инвестиций  
 
-⚠️ Для активации: баланс от <b>100 USD</b>
+Создаём программные решения для трейдинга на биржах — спотовые и фьючерсные рынки. 
+📈 Простые условия:
+• 1 сделка в сутки
+• Фиксированный лимит — 50$
+• Минимум действий со стороны пользователя
+💸 Дополнительный доход:
+10-уровневая реферальная система
++0,5% с каждой сделки партнёров.
+🗓 Торговые дни: Пн–Пт
+Выходные: Сб–Вс.
 
 Реферальные начисления приходят автоматически и доступны к выводу сразу (при участии в сделке).
 
@@ -279,7 +288,7 @@ def make_invest_deals_split_text(
 # === Партнёрка / команда / бонусы ===
 
 def make_partners_main_text(me: Mapping[str, Any], link: str | None, levels: list[tuple[float, str]]) -> str:
-    level1 = me.get("referrals_level_1", 0) or me.get("referrals_count", 0)
+    level1 = me.get("referrals_level_1", 0) or me.get("referrals_count", 0) 
     level2 = me.get("referrals_level_2", 0)
     level3 = me.get("referrals_level_3", 0)
     counts = [level1, level2, level3]
