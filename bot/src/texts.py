@@ -272,7 +272,7 @@ def make_invest_deals_split_text(
     return (
         "\n\n📂 <b>Мои сделки</b>\n"
         f"🔄 Активные:\n{active_block}\n\n"
-        f"✅ Завершённые:\n{completed_block}"
+        f"✅ Завершённые(последние 3):\n{completed_block}"
     )
 
 
