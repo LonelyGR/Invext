@@ -16,7 +16,7 @@ router = APIRouter(prefix="/v1/telegram", tags=["auth"])
 
 def _serialize_user_me(u, data: dict) -> dict:
     """Сборка ответа /me и /auth: профиль + статистика. created_at может быть None в БД."""
-    return {
+    payload = {
         "id": u.id,
         "telegram_id": u.telegram_id,
         "username": u.username,
@@ -27,9 +27,6 @@ def _serialize_user_me(u, data: dict) -> dict:
         "referrer_id": u.referrer_id,
         "created_at": u.created_at.isoformat() if u.created_at else None,
         "referrals_count": data["referrals_count"],
-        "referrals_level_1": data["referrals_level_1"],
-        "referrals_level_2": data["referrals_level_2"],
-        "referrals_level_3": data["referrals_level_3"],
         "team_deposits_usdt": str(data["team_deposits_usdt"]),
         "team_deposits_usdc": str(data["team_deposits_usdc"]),
         "my_deposits_total_usdt": str(data["my_deposits_total_usdt"]),
@@ -43,6 +40,9 @@ def _serialize_user_me(u, data: dict) -> dict:
         "profit_total_usdt": str(data["profit_total_usdt"]),
         "referral_income_usdt": str(data["referral_income_usdt"]),
     }
+    for level in range(1, 11):
+        payload[f"referrals_level_{level}"] = data.get(f"referrals_level_{level}", 0)
+    return payload
 
 
 @router.post("/auth")

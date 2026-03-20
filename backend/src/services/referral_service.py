@@ -2,7 +2,7 @@
 Реферальные бонусы:
 
 1) ДЕПОЗИТНАЯ ЛИНИЯ (deposit_referral):
-   - временно отключена (код сохранён, но не используется).
+   - отключена.
 
 2) ИНВЕСТИЦИОННАЯ ЛИНИЯ (investment_referral):
    - До 10 уровней, каждому уровню 0.5% от суммы инвестиции.
@@ -21,11 +21,6 @@ from sqlalchemy.orm import selectinload
 from src.models import Deal, DealParticipation, LedgerTransaction, ReferralReward, User
 from src.models.referral_reward import STATUS_MISSED
 from src.services.ledger_service import LEDGER_TYPE_REFERRAL_BONUS, get_balance_usdt
-from src.services.notification_service import send_telegram_message, EFFECT_MONEY
-
-# Депозитная линия: только 1 уровень, 3%
-# Временно отключено по продуктовым требованиям (код не удаляем).
-DEPOSIT_REFERRAL_PCT = Decimal("3")
 
 # Инвестиционная линия: 10 уровней по 0.5%
 INVEST_REFERRAL_LEVEL_PERCENTS: List[Decimal] = [Decimal("0.5")] * 10
@@ -85,112 +80,11 @@ async def apply_referral_rewards_for_deposit(
     external_payment_id: str,
 ) -> None:
     """
-    Начислить реферальные бонусы за депозит from_user на сумму deposit_amount.
-
-    - Только для депозитов (вызывается из payment_service.apply_payment_to_balance).
-    - Только 1 уровень: 3% от суммы депозита.
-    - История начислений хранится в ledger (type=REFERRAL_BONUS, metadata_json.source='deposit').
+    Депозитная реферальная линия отключена.
+    Функция оставлена для обратной совместимости вызовов.
     """
-    # Временно отключено: бонус 3% с депозита.
-    # Логику оставляем в коде, чтобы можно было быстро вернуть без переписывания.
-    # if deposit_amount <= 0:
-    #     return
-    #
-    # referrers = await _get_referrer_chain(db, from_user.id, max_levels=1)
-    # if not referrers:
-    #     return
-    #
-    # referrer = referrers[0]
-    # reward_amount = (deposit_amount * DEPOSIT_REFERRAL_PCT / Decimal("100")).quantize(Decimal("0.01"))
-    # if reward_amount <= 0:
-    #     return
-    #
-    # ledger_tx = LedgerTransaction(
-    #     user_id=referrer.id,
-    #     type=LEDGER_TYPE_REFERRAL_BONUS,
-    #     amount_usdt=reward_amount,
-    #     metadata_json={
-    #         "source": "deposit",
-    #         "from_user_id": from_user.id,
-    #         "level": 1,
-    #         "deposit_amount": str(deposit_amount),
-    #         "bonus_amount": str(reward_amount),
-    #         "invoice_id": source_invoice_id,
-    #         "external_payment_id": external_payment_id,
-    #     },
-    # )
-    # db.add(ledger_tx)
-    # await db.flush()
-    #
-    # referrer_user = await db.get(User, referrer.id)
-    # if referrer_user:
-    #     new_balance = await get_balance_usdt(db, referrer_user.id)
-    #     referrer_user.balance_usdt = new_balance
-    #
-    #     if referrer_user.telegram_id:
-    #         ref_name = from_user.name or from_user.username or str(from_user.telegram_id)
-    #         text = (
-    #             "🎁 Вам начислен реферальный бонус с депозита.\n\n"
-    #             f"Реферал: {ref_name}\n"
-    #             f"Сумма депозита: {deposit_amount} USDT\n"
-    #             f"Ваш бонус: {reward_amount} USDT (3% от депозита)."
-    #         )
-    #         await send_telegram_message(
-    #             referrer_user.telegram_id,
-    #             text,
-    #             message_effect_id=EFFECT_MONEY,
-    #         )
+    _ = (db, from_user, deposit_amount, source_invoice_id, external_payment_id)
     return
-
-    if deposit_amount <= 0:
-        return
-
-    referrers = await _get_referrer_chain(db, from_user.id, max_levels=1)
-    if not referrers:
-        return
-
-    referrer = referrers[0]
-    reward_amount = (deposit_amount * DEPOSIT_REFERRAL_PCT / Decimal("100")).quantize(Decimal("0.01"))
-    if reward_amount <= 0:
-        return
-
-    ledger_tx = LedgerTransaction(
-        user_id=referrer.id,
-        type=LEDGER_TYPE_REFERRAL_BONUS,
-        amount_usdt=reward_amount,
-        metadata_json={
-            "source": "deposit",
-            "from_user_id": from_user.id,
-            "level": 1,
-            "deposit_amount": str(deposit_amount),
-            "bonus_amount": str(reward_amount),
-            "invoice_id": source_invoice_id,
-            "external_payment_id": external_payment_id,
-        },
-    )
-    db.add(ledger_tx)
-    await db.flush()
-
-    # Обновляем баланс реферера на основе ledger
-    referrer_user = await db.get(User, referrer.id)
-    if referrer_user:
-        new_balance = await get_balance_usdt(db, referrer_user.id)
-        referrer_user.balance_usdt = new_balance
-
-        # Уведомляем о начисленном депозитном бонусе (3% с депозита 1 уровня).
-        if referrer_user.telegram_id:
-            ref_name = from_user.name or from_user.username or str(from_user.telegram_id)
-            text = (
-                "🎁 Вам начислен реферальный бонус с депозита.\n\n"
-                f"Реферал: {ref_name}\n"
-                f"Сумма депозита: {deposit_amount} USDT\n"
-                f"Ваш бонус: {reward_amount} USDT (3% от депозита)."
-            )
-            await send_telegram_message(
-                referrer_user.telegram_id,
-                text,
-                message_effect_id=EFFECT_MONEY,
-            )
 
 
 async def apply_referral_rewards_for_investment(

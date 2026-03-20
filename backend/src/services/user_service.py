@@ -109,26 +109,24 @@ async def get_user_with_stats(db: AsyncSession, telegram_id: int) -> Optional[di
     if not user:
         return None
 
-    # Количество рефералов по уровням (1, 2, 3)
-    level1_ids_result = await db.execute(
-        select(User.id).where(User.referrer_id == user.id)
-    )
-    level1_ids = [r[0] for r in level1_ids_result.all()]
-    referrals_count = len(level1_ids)
-
-    referrals_level_2 = 0
-    referrals_level_3 = 0
-    if level1_ids:
-        level2_ids_result = await db.execute(
-            select(User.id).where(User.referrer_id.in_(level1_ids))
+    # Количество рефералов по уровням (1..10)
+    max_referral_levels = 10
+    level_counts: dict[int, int] = {}
+    current_level_parent_ids = [user.id]
+    level1_ids: list[int] = []
+    for level in range(1, max_referral_levels + 1):
+        if not current_level_parent_ids:
+            level_counts[level] = 0
+            continue
+        level_ids_result = await db.execute(
+            select(User.id).where(User.referrer_id.in_(current_level_parent_ids))
         )
-        level2_ids = [r[0] for r in level2_ids_result.all()]
-        referrals_level_2 = len(level2_ids)
-        if level2_ids:
-            level3_ids_result = await db.execute(
-                select(User.id).where(User.referrer_id.in_(level2_ids))
-            )
-            referrals_level_3 = len([r[0] for r in level3_ids_result.all()])
+        level_ids = [r[0] for r in level_ids_result.all()]
+        level_counts[level] = len(level_ids)
+        if level == 1:
+            level1_ids = level_ids
+        current_level_parent_ids = level_ids
+    referrals_count = level_counts.get(1, 0)
 
     # Оборот команды: сумма депозитов рефералов (USDT по ledger, USDC по wallet_transactions).
     # Подзапрос: user_id рефералов
@@ -250,12 +248,9 @@ async def get_user_with_stats(db: AsyncSession, telegram_id: int) -> Optional[di
     )
     withdrawals_count = withdrawals_count_res.scalar() or 0
 
-    return {
+    result_payload = {
         "user": user,
         "referrals_count": referrals_count,
-        "referrals_level_1": referrals_count,
-        "referrals_level_2": referrals_level_2,
-        "referrals_level_3": referrals_level_3,
         "team_deposits_usdt": team_usdt,
         "team_deposits_usdc": team_usdc,
         "my_deposits_total_usdt": my_d_usdt_res.scalar() or Decimal("0"),
@@ -269,3 +264,6 @@ async def get_user_with_stats(db: AsyncSession, telegram_id: int) -> Optional[di
         "deposits_count": deposits_count,
         "withdrawals_count": withdrawals_count,
     }
+    for level in range(1, max_referral_levels + 1):
+        result_payload[f"referrals_level_{level}"] = level_counts.get(level, 0)
+    return result_payload

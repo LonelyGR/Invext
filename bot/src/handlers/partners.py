@@ -17,9 +17,7 @@ from src.texts import (
 router = Router(name="partners")
 
 REFERRAL_LEVELS = [
-    (3.00, "1 уровень (депозиты)"),
-    (0.5, "2 уровень (инвестиции)"),
-    (0.5, "3 уровень (инвестиции)"),
+    (0.5, f"{i} уровень (инвестиции)") for i in range(1, 11)
 ]
 
 

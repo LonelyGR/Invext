@@ -254,10 +254,11 @@ def make_invest_deals_split_text(
 # === Партнёрка / команда / бонусы ===
 
 def make_partners_main_text(me: Mapping[str, Any], link: str | None, levels: list[tuple[float, str]]) -> str:
-    level1 = me.get("referrals_level_1", 0) or me.get("referrals_count", 0) 
-    level2 = me.get("referrals_level_2", 0)
-    level3 = me.get("referrals_level_3", 0)
-    counts = [level1, level2, level3]
+    def _level_count(level: int) -> int:
+        value = me.get(f"referrals_level_{level}", 0)
+        if level == 1 and not value:
+            value = me.get("referrals_count", 0)
+        return int(value or 0)
 
     if link:
         link_block = f"🔗 Ваша реферальная ссылка:\n{link}"
@@ -270,7 +271,7 @@ def make_partners_main_text(me: Mapping[str, Any], link: str | None, levels: lis
         "📊 <b>Уровни рефералов</b>"
     ]
     for i, (pct, label) in enumerate(levels):
-        count = counts[i] if i < len(counts) else 0
+        count = _level_count(i + 1)
         lines.append(f"  • {label}: {count} чел. — {pct:.1f}%")
     return "\n".join(lines)
 
@@ -301,25 +302,25 @@ def make_partners_team_text(me: Mapping[str, Any]) -> str:
 
 
 def make_partners_bonuses_text(me: Mapping[str, Any]) -> str:
-    level1 = me.get("referrals_level_1", 0) or me.get("referrals_count", 0)
-    level2 = me.get("referrals_level_2", 0)
-    level3 = me.get("referrals_level_3", 0)
     team_usdt = me.get("team_deposits_usdt", "0") or "0"
     try:
         team_float = float(team_usdt)
     except (TypeError, ValueError):
         team_float = 0.0
+    lines: list[str] = []
+    for level in range(1, 11):
+        count = me.get(f"referrals_level_{level}", 0)
+        if level == 1 and not count:
+            count = me.get("referrals_count", 0)
+        lines.append(f"{level} уровень — {int(count or 0)} чел. • 0.5% с инвестиций")
+
     return (
         "🎁 <b>Реферальные бонусы</b>\n\n"
-        
-        f"1 уровень — {level1} чел. • 3% с депозитов + 0.5% с инвестиций\n"
-        f"2 уровень — {level2} чел. • 0.5% с инвестиций\n"
-        f"3 уровень — {level3} чел. • 0.5% с инвестиций\n\n"
-        
+        + "\n".join(lines)
+        + "\n\n"
         f"💎 Оборот команды: {team_float:.2f} USDT\n\n"
-        
-        "📌 Бонус с депозитов начисляется автоматически\n"
-        "Бонус с инвестиций — только если вы участвуете в той же сделке"
+        "📌 Бонус: 0.5% с инвестиций на каждом уровне\n"
+        "Начисляется, только если вы участвуете в той же сделке"
     )
 
 
