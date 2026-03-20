@@ -76,6 +76,30 @@ async def deposit_start(message: Message, state: FSMContext):
 
 @router.message(DepositStates.entering_amount, F.text)
 async def deposit_amount_entered(message: Message, state: FSMContext):
+    # Если пользователь нажал кнопку другого раздела, выходим из FSM пополнения
+    # и сразу переводим в выбранный раздел (без второго нажатия).
+    menu_text = (message.text or "").strip()
+    if menu_text in {"👥 Партнёры", "📈 Сделка", "💰 Баланс", "📊 Статистика", "📥 Пополнить", "📤 Вывести"}:
+        await state.clear()
+        if menu_text == "👥 Партнёры":
+            from src.handlers.partners import partners as partners_handler
+            await partners_handler(message)
+        elif menu_text == "📈 Сделка":
+            from src.handlers.invest import invest_section
+            await invest_section(message, state)
+        elif menu_text == "💰 Баланс":
+            from src.handlers.balance import balance_main
+            await balance_main(message)
+        elif menu_text == "📊 Статистика":
+            from src.handlers.stats import stats as stats_handler
+            await stats_handler(message)
+        elif menu_text == "📥 Пополнить":
+            await deposit_start(message, state)
+        elif menu_text == "📤 Вывести":
+            from src.handlers.withdraw import withdraw_start
+            await withdraw_start(message, state)
+        return
+
     if not await with_double_click_protection(message, "deposit"):
         return
     try:

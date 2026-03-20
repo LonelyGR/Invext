@@ -202,6 +202,8 @@ class BackendClient:
                 self._url("/api/deals/my"),
                 params={"user_id": telegram_id},
             )
+            if r.status_code == 404:
+                return {"active_deals": [], "completed_deals": []}
             r.raise_for_status()
             return r.json()
 
