@@ -52,7 +52,7 @@ def _format_payout_at(payout_at_iso: str | None) -> str:
 
 def _make_deal_lines(items: list[dict]) -> list[str]:
     lines: list[str] = []
-    for item in items[:5]:
+    for item in items[:3]:
         deal_number = item.get("deal_number")
         amount = item.get("amount_usdt")
         status = item.get("status")
