@@ -29,6 +29,7 @@ from src.models import (
     Deal,
     DealInvestment,
     DealParticipation,
+    ReferralReward,
     WithdrawRequest,
     AdminLog,
     PaymentInvoice,
