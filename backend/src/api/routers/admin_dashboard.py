@@ -8,7 +8,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status, Query
 from fastapi.responses import PlainTextResponse
-from sqlalchemy import and_, desc, func, or_, select, String
+from sqlalchemy import and_, desc, func, or_, select, String, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.admin_auth import (
@@ -22,6 +22,9 @@ from src.db.session import get_db
 from src.models import (
     AdminToken,
     User,
+    UserWallet,
+    WalletTransaction,
+    Invoice,
     LedgerTransaction,
     Deal,
     DealInvestment,
@@ -1349,4 +1352,60 @@ async def update_system_settings_admin(
 
     invalidate_system_settings_cache()
     return {"ok": True}
+
+
+@router.post("/maintenance/reset-data")
+async def reset_test_data(
+    request: Request,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Очистить тестовые данные из БД (без удаления схемы).
+    По умолчанию сохраняет system_settings.
+    """
+    admin_token_id, _ = await get_admin_context(request)
+
+    confirm = str(body.get("confirm", "")).strip().upper()
+    keep_settings = bool(body.get("keep_settings", True))
+    if confirm != "RESET":
+        raise HTTPException(status_code=400, detail="Подтверждение не пройдено. Передайте confirm=RESET")
+
+    # Полная очистка данных, кроме system_settings (по умолчанию).
+    table_names = [
+        ReferralReward.__table__.name,
+        DealParticipation.__table__.name,
+        DealInvestment.__table__.name,
+        Deal.__table__.name,
+        WithdrawRequest.__table__.name,
+        WalletTransaction.__table__.name,
+        UserWallet.__table__.name,
+        LedgerTransaction.__table__.name,
+        PaymentWebhookEvent.__table__.name,
+        PaymentInvoice.__table__.name,
+        Invoice.__table__.name,
+        User.__table__.name,
+        AdminLog.__table__.name,
+    ]
+    if not keep_settings:
+        table_names.append(SystemSettings.__table__.name)
+
+    table_names_sql = ", ".join(f'"{name}"' for name in table_names)
+    await db.execute(text(f"TRUNCATE TABLE {table_names_sql} RESTART IDENTITY CASCADE"))
+    await db.flush()
+
+    # После очистки оставляем один служебный лог о выполнении операции.
+    await log_admin_action(
+        db=db,
+        admin_token_id=admin_token_id,
+        action_type="MAINTENANCE_RESET_DATA",
+        entity_type="DATABASE",
+        entity_id=0,
+    )
+
+    return {
+        "ok": True,
+        "tables_cleared": table_names,
+        "keep_settings": keep_settings,
+    }
 

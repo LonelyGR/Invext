@@ -24,6 +24,16 @@ body.dark::before {
   display: none;
 }
 
+#app {
+  min-height: 100vh;
+}
+
+#main-view {
+  display: flex;
+  align-items: stretch;
+  min-height: 100vh;
+}
+
 #login-view {
   max-width: 400px;
   margin: 80px auto;
@@ -288,15 +298,19 @@ body.dark {
 
 .content {
   flex: 1;
-  padding: 12px 40px 28px;
+  padding: 4px 32px 24px;
   box-sizing: border-box;
   max-width: 1200px;
   margin: 0 auto;
 }
 
 .section h1 {
-  margin: 0 0 10px;
+  margin: 0 0 8px;
   font-size: 22px;
+}
+
+.section {
+  padding-top: 0;
 }
 
 /* --- Tables --- */
@@ -310,7 +324,7 @@ body.dark {
 }
 
 .table-wrapper-inner {
-  max-height: 520px;
+  max-height: 620px;
   overflow-y: auto;
 }
 
@@ -331,9 +345,9 @@ thead th {
 
 th,
 td {
-  padding: 11px 14px;
+  padding: 8px 10px;
   border-bottom: 1px solid #111827;
-  font-size: 13px;
+  font-size: 12px;
 }
 
 tbody tr:nth-child(even) {
@@ -349,7 +363,7 @@ th {
   color: #9ca3af;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  font-size: 11px;
+  font-size: 10px;
 }
 
 /* Логи и длинные таблицы */
@@ -414,13 +428,67 @@ th {
   grid-column: span 2;
 }
 
+.dashboard-panels {
+  margin-top: 14px;
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  gap: 14px;
+}
+
+.dashboard-panel-title {
+  margin: 0 0 10px;
+  font-size: 14px;
+  color: #cbd5e1;
+}
+
+.quick-actions-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.quick-action-btn {
+  margin-top: 0;
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #1f2937;
+  background: rgba(2, 6, 23, 0.85);
+  color: #e5e7eb;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.quick-action-btn:hover {
+  background: rgba(37, 99, 235, 0.2);
+  border-color: #2563eb;
+}
+
+.health-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.health-list li {
+  font-size: 13px;
+  color: #cbd5e1;
+  padding: 9px 10px;
+  border-radius: 8px;
+  border: 1px solid #1f2937;
+  background: rgba(2, 6, 23, 0.75);
+}
+
 /* --- Generic panel card (for sections) --- */
 
 .panel-card {
   margin-top: 4px;
   background: radial-gradient(circle at 0% 0%, rgba(15, 23, 42, 0.92), #020617);
   border-radius: 14px;
-  padding: 16px 18px 18px;
+  padding: 12px 14px 14px;
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
   border: 1px solid #111827;
 }
@@ -850,6 +918,83 @@ tbody tr:hover .row-actions {
 
 .btn-primary-wide[disabled] {
   opacity: 0.6;
+  cursor: default;
+}
+
+.danger-zone-card {
+  margin-top: 16px;
+  border: 1px solid rgba(220, 38, 38, 0.45);
+  background: radial-gradient(circle at 0% 0%, rgba(127, 29, 29, 0.25), rgba(2, 6, 23, 0.95));
+}
+
+.danger-zone-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.danger-zone-header h2 {
+  margin: 0;
+  font-size: 18px;
+  color: #fecaca;
+}
+
+.danger-zone-icon {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: rgba(220, 38, 38, 0.2);
+  border: 1px solid rgba(220, 38, 38, 0.4);
+}
+
+.danger-zone-note {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(127, 29, 29, 0.45);
+  background: rgba(2, 6, 23, 0.75);
+  color: #fca5a5;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.danger-zone-toolbar {
+  margin-top: 12px;
+  margin-bottom: 0;
+}
+
+.btn-danger-wide {
+  width: auto;
+  min-width: 220px;
+  padding: 11px 20px;
+  border-radius: 999px;
+  border: 1px solid #7f1d1d;
+  background: linear-gradient(180deg, #991b1b, #7f1d1d);
+  color: #fee2e2;
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: background-color 0.15s ease, transform 0.08s ease, box-shadow 0.15s ease;
+}
+
+.btn-danger-wide:hover {
+  background: linear-gradient(180deg, #b91c1c, #991b1b);
+  box-shadow: 0 10px 24px rgba(185, 28, 28, 0.35);
+}
+
+.btn-danger-wide:active {
+  transform: translateY(1px);
+}
+
+.btn-danger-wide[disabled] {
+  opacity: 0.7;
   cursor: default;
 }
 

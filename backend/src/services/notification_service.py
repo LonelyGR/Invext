@@ -109,8 +109,8 @@ async def broadcast_deal_opened(
     close_at: Optional[dt.datetime] = None,
 ) -> None:
     """
-    Рассылка об открытии новой сделки (регистрация открыта).
-    Шаблон: открыта сделка, раздел «Сделка», время закрытия регистрации в UTC+1.
+    Рассылка об открытии нового этапа сбора средств.
+    Шаблон: открыт сбор на сделку, раздел «Сделка», время закрытия регистрации.
     """
     if not telegram_ids:
         return
@@ -118,7 +118,7 @@ async def broadcast_deal_opened(
     close_time_human = format_time_utc1(close_at) if close_at else "—"
 
     text = (
-        f"🔔 Открыта новая сделка #{deal_number}\n\n"
+        f"🔔 Открыт сбор на сделку №{deal_number}\n\n"
         "Вы можете инвестировать USDT в разделе:\n"
         "📈 Сделка\n\n"
         f"⏳ Регистрация открыта до:\n{close_time_human}\n\n"
@@ -149,7 +149,7 @@ async def broadcast_deal_closed(
     next_open_at: Optional[dt.datetime] = None,
 ) -> None:
     """
-    Рассылка о закрытии сделки.
+    Рассылка о закрытии этапа сбора.
     Прибыль НЕ начисляется сразу — участникам показываем «средства в работе».
     Реферальная прибыль / упущенная прибыль включаются как прежде.
     """
@@ -160,7 +160,7 @@ async def broadcast_deal_closed(
 
     sent = 0
     for tid in telegram_ids:
-        lines: list[str] = [f"🔔 Сделка #{deal_number} закрыта.\n"]
+        lines: list[str] = ["⏳ Сбор закрыт\nСредства ушли в работу\n"]
 
         if tid in participant_telegram_ids:
             lines.append("⏳ Средства отправлены в работу.\n")
@@ -173,9 +173,9 @@ async def broadcast_deal_closed(
         ref_missed = referral_missed_by_telegram.get(tid)
         if ref_missed and ref_missed > 0:
             lines.append(f"\nУпущенная прибыль с рефералов: {ref_missed:.2f} USDT.\n")
-            lines.append("⚠️ Вы не участвовали в сделке, поэтому не получили реферальное вознаграждение.\n")
+            lines.append("⚠️ Вы не участвовали в сборе, поэтому не получили реферальное вознаграждение.\n")
 
-        lines.append(f"\nСледующая сделка откроется:\n⏰ {next_open_human}\n\n")
+        lines.append(f"\nСледующий сбор откроется:\n⏰ {next_open_human}\n\n")
         lines.append("Для участия используйте нашего Telegram бота.")
 
         text = "".join(lines)
@@ -240,17 +240,17 @@ async def send_referral_bonus_reminder(
     close_at: Optional[dt.datetime],
 ) -> bool:
     """
-    Напоминание за час до закрытия сделки: у пользователя есть потенциальная
+    Напоминание за час до закрытия сбора: у пользователя есть потенциальная
     реферальная прибыль, если он успеет поучаствовать.
     """
     close_human = format_time_utc1(close_at) if close_at else "скоро"
     text = (
-        f"⏰ Через час закроется сделка #{deal_number}.\n\n"
+        f"⏰ Через час закроется сбор на сделку №{deal_number}.\n\n"
         f"Если вы примете участие, вы сможете получить реферальную прибыль "
         f"примерно {bonus_amount:.2f} USDT.\n"
-        "Если не войдёте в сделку до её закрытия, этот бонус сгорит.\n\n"
+        "Если не войдёте в сбор до его закрытия, этот бонус сгорит.\n\n"
         "Зайдите в раздел «📈 Сделка» в боте и нажмите «Участвовать».\n\n"
-        f"Текущее время закрытия сделки: {close_human}."
+        f"Текущее время закрытия сбора: {close_human}."
     )
     reply_markup = {
         "inline_keyboard": [

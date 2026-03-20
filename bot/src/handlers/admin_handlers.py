@@ -263,7 +263,7 @@ async def admin_deal_force_close_callback(callback: CallbackQuery):
     if action == "approve":
         try:
             await api.admin_deal_force_close(decided_by_telegram_id=callback.from_user.id)
-            await callback.message.edit_text(callback.message.text + "\n\n✅ Сделка досрочно закрыта.")
+            await callback.message.edit_text(callback.message.text + "\n\n✅ Сбор досрочно закрыт. Средства ушли в работу.")
             await callback.answer(make_admin_deal_closed_text())
         except Exception as e:
             await callback.message.edit_text(f"{callback.message.text}\n\n❌ Ошибка закрытия: {e}")

@@ -69,6 +69,13 @@ async function loadDashboard() {
   section.innerHTML = "<h1>Дашборд</h1><p>Загрузка...</p>";
   try {
     const data = await apiRequest("/dashboard");
+    const activeDealText = data.active_deal_number
+      ? `#${data.active_deal_number} · ${data.active_deal_percent}% · инвестировано ${data.active_deal_invested_usdt} USDT`
+      : "Нет активной сделки";
+    const activeDealCloseText = data.active_deal_closes_at
+      ? new Date(data.active_deal_closes_at).toLocaleString()
+      : "—";
+
     section.innerHTML = `
       <h1>Дашборд</h1>
       <div class="cards-grid">
@@ -86,16 +93,38 @@ async function loadDashboard() {
         </div>
         <div class="stat-card stat-wide">
           <div class="stat-label">Текущая сделка</div>
-          <div class="stat-value">
-            ${
-              data.active_deal_number
-                ? `#${data.active_deal_number} · ${data.active_deal_percent}% · инвестировано ${data.active_deal_invested_usdt} USDT`
-                : "Нет активной сделки"
-            }
+          <div class="stat-value">${activeDealText}</div>
+        </div>
+      </div>
+      <div class="dashboard-panels">
+        <div class="panel-card">
+          <h3 class="dashboard-panel-title">Быстрые действия</h3>
+          <div class="quick-actions-grid">
+            <button type="button" class="quick-action-btn" data-target="#users">Пользователи</button>
+            <button type="button" class="quick-action-btn" data-target="#deals">Сделки</button>
+            <button type="button" class="quick-action-btn" data-target="#deposits">Пополнения</button>
+            <button type="button" class="quick-action-btn" data-target="#withdrawals">Выводы</button>
           </div>
+        </div>
+        <div class="panel-card">
+          <h3 class="dashboard-panel-title">Состояние системы</h3>
+          <ul class="health-list">
+            <li>Активная сделка: <strong>${data.active_deal_number ? "да" : "нет"}</strong></li>
+            <li>Закрытие текущей сделки: <strong>${activeDealCloseText}</strong></li>
+            <li>Ожидают вывода: <strong>${data.pending_withdrawals_count}</strong></li>
+          </ul>
         </div>
       </div>
     `;
+
+    section.querySelectorAll(".quick-action-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const target = btn.getAttribute("data-target");
+        if (target) {
+          location.hash = target;
+        }
+      });
+    });
   } catch (e) {
     section.innerHTML = `<h1>Дашборд</h1><div class="error">${e.message}</div>`;
   }
@@ -945,6 +974,24 @@ async function loadSettings() {
           </div>
         </form>
       </div>
+      <div class="panel-card danger-zone-card">
+        <div class="danger-zone-header">
+          <div class="danger-zone-icon">⚠️</div>
+          <div>
+            <h2>Опасная зона</h2>
+            <p class="section-desc">Необратимые действия с тестовой БД перед запуском в прод.</p>
+          </div>
+        </div>
+        <div class="danger-zone-note">
+          Будут удалены: пользователи, сделки, платежи, выводы, леджер, логи.
+          <br />Структура БД и финансовые настройки сохраняются.
+        </div>
+        <div class="toolbar danger-zone-toolbar">
+          <button type="button" id="db-reset-btn" class="btn-danger-wide">
+            <span class="btn-label">Очистить базу данных</span>
+          </button>
+        </div>
+      </div>
     `;
 
     const form = document.getElementById("settings-form");
@@ -1009,6 +1056,43 @@ async function loadSettings() {
             saveBtn.disabled = false;
             saveBtn.innerHTML = originalText;
           }
+        }
+      };
+    }
+
+    const resetBtn = document.getElementById("db-reset-btn");
+    if (resetBtn) {
+      resetBtn.onclick = async () => {
+        const firstConfirm = confirm(
+          "Это удалит ВСЕ тестовые данные (пользователи, сделки, платежи, леджер, выводы). Продолжить?"
+        );
+        if (!firstConfirm) return;
+
+        const phrase = prompt('Для подтверждения введите слово RESET');
+        if ((phrase || "").trim().toUpperCase() !== "RESET") {
+          alert("Очистка отменена: подтверждение не пройдено.");
+          return;
+        }
+
+        try {
+          resetBtn.disabled = true;
+          resetBtn.innerHTML = '<span class="btn-spinner"></span><span>Очистка…</span>';
+          await apiRequest("/maintenance/reset-data", {
+            method: "POST",
+            body: JSON.stringify({ confirm: "RESET", keep_settings: true }),
+          });
+          showToast("База очищена. Тестовые данные удалены.");
+          loadDashboard();
+          if (location.hash === "#users") loadUsers();
+          if (location.hash === "#deals") loadDeals();
+          if (location.hash === "#deposits") loadDeposits();
+          if (location.hash === "#withdrawals") loadWithdrawals();
+          if (location.hash === "#logs") loadLogs();
+        } catch (e) {
+          alert(e.message || "Ошибка очистки базы");
+        } finally {
+          resetBtn.disabled = false;
+          resetBtn.innerHTML = '<span class="btn-label">Очистить базу данных</span>';
         }
       };
     }
