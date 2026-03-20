@@ -511,16 +511,23 @@ async def send_referral_bonus_reminders_for_active_deal(db: AsyncSession) -> int
     )
     return sent
 
-async def close_active_deal_by_schedule(db: AsyncSession) -> bool:
+async def close_active_deal_by_schedule(db: AsyncSession, *, force: bool = False) -> bool:
     """
     Закрыть текущую активную сделку (если есть) и разослать уведомления.
     Используется планировщиком (12:00 Europe/Chisinau).
     Идемпотентно: если активной сделки нет — False.
+    Если force=False, закрывает только сделку, у которой end_at <= now.
+    Если force=True, закрывает активную сделку досрочно (для админки).
     Транзакция управляется вызывающим кодом (scheduler); не вызывать db.begin() здесь.
     """
+    now = dt.datetime.now(dt.timezone.utc)
+    filters = [Deal.status == DEAL_STATUS_ACTIVE]
+    if not force:
+        filters.append(Deal.end_at <= now)
+
     deal_result = await db.execute(
         select(Deal)
-        .where(Deal.status == DEAL_STATUS_ACTIVE)
+        .where(*filters)
         .order_by(Deal.start_at.desc())
         .limit(1)
         .with_for_update()

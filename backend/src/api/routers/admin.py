@@ -178,7 +178,7 @@ async def admin_deal_force_close(
     if not active:
         raise HTTPException(status_code=400, detail="Нет активной сделки для досрочного закрытия.")
 
-    closed = await close_active_deal_by_schedule(db)
+    closed = await close_active_deal_by_schedule(db, force=True)
     if not closed:
         raise HTTPException(
             status_code=400,
