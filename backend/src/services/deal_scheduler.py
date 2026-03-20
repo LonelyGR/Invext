@@ -21,8 +21,8 @@ from src.services.deal_service import (
 
 logger = logging.getLogger(__name__)
 
-# Весь календарь сделок завязан на времени МСК.
-SCHEDULE_TZ = ZoneInfo("Europe/Moscow")
+# Весь календарь сделок завязан на времени Кишинёва.
+SCHEDULE_TZ = ZoneInfo("Europe/Chisinau")
 
 
 def init_deal_scheduler(scheduler: AsyncIOScheduler, db_factory) -> None:
@@ -69,7 +69,7 @@ def init_deal_scheduler(scheduler: AsyncIOScheduler, db_factory) -> None:
 
     async def _job_open_deal_1300():
         logger.info("open_deal_1300 job started")
-        # Окно сделки: с 13:00 (UTC+1) до следующего дня 12:00 (UTC+1).
+        # Окно сделки: с 13:00 до следующего дня 12:00 по времени Кишинёва.
         now_utc = dt.datetime.now(dt.timezone.utc)
         now_local = now_utc.astimezone(SCHEDULE_TZ)
         start_local = now_local.replace(hour=13, minute=0, second=0, microsecond=0)
@@ -127,19 +127,19 @@ def init_deal_scheduler(scheduler: AsyncIOScheduler, db_factory) -> None:
         name="process_pending_payouts",
     )
 
-    # Ежедневные задачи по расписанию (UTC+1):
+    # Ежедневные задачи по времени Кишинёва:
     scheduler.add_job(
         _job_referral_reminder_1100,
         CronTrigger(hour=11, minute=0, timezone=SCHEDULE_TZ),
-        name="referral_reminder_1100_utc_plus_1",
+        name="referral_reminder_1100_chisinau",
     )
     scheduler.add_job(
         _job_close_deal_1200,
         CronTrigger(hour=12, minute=0, timezone=SCHEDULE_TZ),
-        name="close_deal_1200_utc_plus_1",
+        name="close_deal_1200_chisinau",
     )
     scheduler.add_job(
         _job_open_deal_1300,
         CronTrigger(hour=13, minute=0, timezone=SCHEDULE_TZ),
-        name="open_deal_1300_utc_plus_1",
+        name="open_deal_1300_chisinau",
     )

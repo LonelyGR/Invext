@@ -196,6 +196,15 @@ class BackendClient:
             r.raise_for_status()
             return r.json()
 
+    async def get_my_deals(self, telegram_id: int) -> Dict[str, Any]:
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            r = await client.get(
+                self._url("/api/deals/my"),
+                params={"user_id": telegram_id},
+            )
+            r.raise_for_status()
+            return r.json()
+
     async def invest(
         self,
         telegram_id: int,

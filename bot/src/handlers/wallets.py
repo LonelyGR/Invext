@@ -136,7 +136,11 @@ async def wallet_address_entered(message: Message, state: FSMContext):
 
 @router.callback_query(F.data.startswith("wallets_del_"))
 async def wallet_delete(callback: CallbackQuery):
-    wallet_id = int(callback.data.replace("wallets_del_", ""))
+    try:
+        wallet_id = int(callback.data.replace("wallets_del_", ""))
+    except (ValueError, TypeError):
+        await callback.answer("Некорректные данные")
+        return
     telegram_id = callback.from_user.id
     try:
         await api.delete_wallet(telegram_id, wallet_id)

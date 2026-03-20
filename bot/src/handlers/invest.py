@@ -2,6 +2,7 @@
 Раздел «Сделка»: отображение открытой сделки, кнопка «Участвовать», ввод суммы.
 Инвестиции — списание баланса USDT через /api/invest.
 """
+from datetime import datetime
 from decimal import Decimal, InvalidOperation
 
 from aiogram import Router, F
@@ -16,6 +17,7 @@ from src.utils.locks import with_double_click_protection, release_double_click_l
 from src.texts import (
     make_invest_main_text_with_deal,
     make_invest_main_text_no_deal,
+    make_invest_deals_split_text,
     make_invest_enter_amount_text,
     make_invest_success_text,
 )
@@ -38,12 +40,36 @@ def _invest_deal_kb(with_participate: bool) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def _format_payout_at(payout_at_iso: str | None) -> str:
+    if not payout_at_iso:
+        return "не назначена"
+    try:
+        dt_obj = datetime.fromisoformat(payout_at_iso.replace("Z", "+00:00"))
+        return f"{dt_obj.strftime('%d.%m')} после 15:00"
+    except Exception:
+        return payout_at_iso
+
+
+def _make_deal_lines(items: list[dict]) -> list[str]:
+    lines: list[str] = []
+    for item in items[:5]:
+        deal_number = item.get("deal_number")
+        amount = item.get("amount_usdt")
+        status = item.get("status")
+        payout_at = _format_payout_at(item.get("payout_at"))
+        lines.append(
+            f"• #{deal_number}: {amount} USDT • {status} • Выплата: {payout_at}"
+        )
+    return lines
+
+
 @router.message(F.text == "📈 Сделка")
 async def invest_section(message: Message, state: FSMContext):
     telegram_id = message.from_user.id
     try:
         balances = await api.get_balances(telegram_id)
         active = await api.get_active_deal()
+        my_deals = await api.get_my_deals(telegram_id)
     except Exception as e:
         await message.answer(f"Ошибка: {e}")
         return
@@ -54,9 +80,17 @@ async def invest_section(message: Message, state: FSMContext):
     if active.get("active") and active.get("deal_number"):
         deal_number = active["deal_number"]
         text = make_invest_main_text_with_deal(deal_number, available_usdt)
+        text += make_invest_deals_split_text(
+            _make_deal_lines(my_deals.get("active_deals", [])),
+            _make_deal_lines(my_deals.get("completed_deals", [])),
+        )
         await message.answer(text, reply_markup=_invest_deal_kb(with_participate=True))
     else:
         text = make_invest_main_text_no_deal()
+        text += make_invest_deals_split_text(
+            _make_deal_lines(my_deals.get("active_deals", [])),
+            _make_deal_lines(my_deals.get("completed_deals", [])),
+        )
         await state.clear()
         await message.answer(text, reply_markup=_invest_deal_kb(with_participate=False))
 
@@ -87,9 +121,36 @@ async def invest_participate(callback: CallbackQuery, state: FSMContext):
 async def open_invest_from_reminder(callback: CallbackQuery, state: FSMContext):
     """
     Обработчик кнопки «📈 Участвовать» из напоминаний бэкенда.
-    Просто открывает раздел «Сделка» для текущего пользователя.
+    callback.message.from_user — это бот, а не пользователь,
+    поэтому отправляем новое сообщение напрямую пользователю.
     """
-    await invest_section(callback.message, state)
+    telegram_id = callback.from_user.id
+    try:
+        balances = await api.get_balances(telegram_id)
+        active = await api.get_active_deal()
+        my_deals = await api.get_my_deals(telegram_id)
+    except Exception as e:
+        await callback.answer(f"Ошибка: {e}", show_alert=True)
+        return
+
+    usdt = float(balances.get("USDT", 0) or 0)
+    available_usdt = f"{usdt:.2f}"
+
+    if active.get("active") and active.get("deal_number"):
+        deal_number = active["deal_number"]
+        text = make_invest_main_text_with_deal(deal_number, available_usdt)
+        text += make_invest_deals_split_text(
+            _make_deal_lines(my_deals.get("active_deals", [])),
+            _make_deal_lines(my_deals.get("completed_deals", [])),
+        )
+        await callback.message.answer(text, reply_markup=_invest_deal_kb(with_participate=True))
+    else:
+        text = make_invest_main_text_no_deal()
+        text += make_invest_deals_split_text(
+            _make_deal_lines(my_deals.get("active_deals", [])),
+            _make_deal_lines(my_deals.get("completed_deals", [])),
+        )
+        await callback.message.answer(text, reply_markup=_invest_deal_kb(with_participate=False))
     await callback.answer()
 
 
@@ -130,13 +191,15 @@ async def invest_amount_entered(message: Message, state: FSMContext):
 
         new_balance = result.get("balance_usdt")
         invested = result.get("invested_amount_usdt")
+        payout_hint = _format_payout_at(result.get("payout_at"))
 
-        success_text = make_invest_success_text(invested, new_balance)
+        success_text = make_invest_success_text(invested, new_balance, payout_hint=payout_hint)
         await send_effect_message(
             message.bot,
             message.chat.id,
             success_text,
             effect_id=EFFECT_CELEBRATION,
+            reply_markup=_invest_deal_kb(with_participate=False),
         )
         await state.clear()
         logger.info("user %s invested %s USDT into current deal", telegram_id, invested)

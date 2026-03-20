@@ -11,8 +11,19 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.session import get_db
+from src.models import Deal, DealParticipation
+from src.models.deal_participation import (
+    PARTICIPATION_STATUS_ACTIVE,
+    PARTICIPATION_STATUS_IN_PROGRESS,
+    PARTICIPATION_STATUS_COMPLETED,
+)
 from src.models.user import User
-from src.schemas.invest import InvestRequest, InvestResponse
+from src.schemas.invest import (
+    InvestRequest,
+    InvestResponse,
+    MyDealsResponse,
+    DealParticipationItem,
+)
 from src.services.ledger_service import get_balance_usdt
 from src.services.deal_service import get_active_deal, get_active_deal_legacy, participate_in_deal
 from src.services.settings_service import get_system_settings
@@ -85,5 +96,52 @@ async def invest(
     return InvestResponse(
         invested_amount_usdt=amount,
         balance_usdt=new_balance,
+        payout_at=participation.payout_at,
+    )
+
+
+@router.get("/api/deals/my", response_model=MyDealsResponse)
+async def get_my_deals(
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Список участий пользователя в сделках, разделённый на:
+    - active_deals: active/in_progress_payout
+    - completed_deals: completed
+    """
+    result = await db.execute(select(User).where(User.telegram_id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    rows_result = await db.execute(
+        select(DealParticipation, Deal.number)
+        .join(Deal, Deal.id == DealParticipation.deal_id)
+        .where(DealParticipation.user_id == user.id)
+        .order_by(DealParticipation.created_at.desc())
+    )
+    rows = rows_result.all()
+
+    active_statuses = {PARTICIPATION_STATUS_ACTIVE, PARTICIPATION_STATUS_IN_PROGRESS}
+    active_deals: list[DealParticipationItem] = []
+    completed_deals: list[DealParticipationItem] = []
+
+    for p, deal_number in rows:
+        item = DealParticipationItem(
+            deal_number=deal_number,
+            amount_usdt=p.amount,
+            status=p.status,
+            payout_at=p.payout_at,
+            created_at=p.created_at,
+        )
+        if p.status in active_statuses:
+            active_deals.append(item)
+        elif p.status == PARTICIPATION_STATUS_COMPLETED:
+            completed_deals.append(item)
+
+    return MyDealsResponse(
+        active_deals=active_deals,
+        completed_deals=completed_deals,
     )
 

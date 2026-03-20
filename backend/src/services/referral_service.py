@@ -2,11 +2,10 @@
 Реферальные бонусы:
 
 1) ДЕПОЗИТНАЯ ЛИНИЯ (deposit_referral):
-   - 1 уровень, 3% от суммы депозита реферала.
-   - Начисление только с подтверждённого депозита (DEPOSIT в ledger).
+   - временно отключена (код сохранён, но не используется).
 
 2) ИНВЕСТИЦИОННАЯ ЛИНИЯ (investment_referral):
-   - До 3 уровней, каждому уровню 0.5% от суммы инвестиции.
+   - До 10 уровней, каждому уровню 0.5% от суммы инвестиции.
    - Начисление только если получатель бонуса сам участвовал в этой сделке.
    - Если не участвовал — бонус не начисляется, но фиксируется как упущенный.
 """
@@ -25,15 +24,12 @@ from src.services.ledger_service import LEDGER_TYPE_REFERRAL_BONUS, get_balance_
 from src.services.notification_service import send_telegram_message, EFFECT_MONEY
 
 # Депозитная линия: только 1 уровень, 3%
+# Временно отключено по продуктовым требованиям (код не удаляем).
 DEPOSIT_REFERRAL_PCT = Decimal("3")
 
-# Инвестиционная линия: 3 уровня по 0.5%
-INVEST_REFERRAL_LEVEL_PERCENTS: List[Decimal] = [
-    Decimal("0.5"),
-    Decimal("0.5"),
-    Decimal("0.5"),
-]
-MAX_LEVELS = 3
+# Инвестиционная линия: 10 уровней по 0.5%
+INVEST_REFERRAL_LEVEL_PERCENTS: List[Decimal] = [Decimal("0.5")] * 10
+MAX_LEVELS = 10
 
 
 async def _get_referrer_chain(
@@ -46,13 +42,13 @@ async def _get_referrer_chain(
     Защита от самореферала и циклов.
     """
     chain: list[User] = []
+    origin_user_id = user_id
     current_id: Optional[int] = user_id
-    visited: set[int] = set()
+    visited: set[int] = {origin_user_id}
 
     for _ in range(max_levels):
-        if current_id is None or current_id in visited:
+        if current_id is None:
             break
-        visited.add(current_id)
 
         res = await db.execute(select(User).where(User.id == current_id))
         u = res.scalar_one_or_none()
@@ -63,12 +59,20 @@ async def _get_referrer_chain(
         if u.referrer_id == u.id:
             break
 
-        current_id = u.referrer_id
-        res_ref = await db.execute(select(User).where(User.id == current_id))
+        next_referrer_id = u.referrer_id
+        # Защита от циклов и возврата к исходному пользователю.
+        if next_referrer_id in visited:
+            break
+
+        res_ref = await db.execute(select(User).where(User.id == next_referrer_id))
         referrer = res_ref.scalar_one_or_none()
         if not referrer:
             break
+        if referrer.id == origin_user_id:
+            break
         chain.append(referrer)
+        visited.add(referrer.id)
+        current_id = referrer.id
 
     return chain
 
@@ -87,6 +91,57 @@ async def apply_referral_rewards_for_deposit(
     - Только 1 уровень: 3% от суммы депозита.
     - История начислений хранится в ledger (type=REFERRAL_BONUS, metadata_json.source='deposit').
     """
+    # Временно отключено: бонус 3% с депозита.
+    # Логику оставляем в коде, чтобы можно было быстро вернуть без переписывания.
+    # if deposit_amount <= 0:
+    #     return
+    #
+    # referrers = await _get_referrer_chain(db, from_user.id, max_levels=1)
+    # if not referrers:
+    #     return
+    #
+    # referrer = referrers[0]
+    # reward_amount = (deposit_amount * DEPOSIT_REFERRAL_PCT / Decimal("100")).quantize(Decimal("0.01"))
+    # if reward_amount <= 0:
+    #     return
+    #
+    # ledger_tx = LedgerTransaction(
+    #     user_id=referrer.id,
+    #     type=LEDGER_TYPE_REFERRAL_BONUS,
+    #     amount_usdt=reward_amount,
+    #     metadata_json={
+    #         "source": "deposit",
+    #         "from_user_id": from_user.id,
+    #         "level": 1,
+    #         "deposit_amount": str(deposit_amount),
+    #         "bonus_amount": str(reward_amount),
+    #         "invoice_id": source_invoice_id,
+    #         "external_payment_id": external_payment_id,
+    #     },
+    # )
+    # db.add(ledger_tx)
+    # await db.flush()
+    #
+    # referrer_user = await db.get(User, referrer.id)
+    # if referrer_user:
+    #     new_balance = await get_balance_usdt(db, referrer_user.id)
+    #     referrer_user.balance_usdt = new_balance
+    #
+    #     if referrer_user.telegram_id:
+    #         ref_name = from_user.name or from_user.username or str(from_user.telegram_id)
+    #         text = (
+    #             "🎁 Вам начислен реферальный бонус с депозита.\n\n"
+    #             f"Реферал: {ref_name}\n"
+    #             f"Сумма депозита: {deposit_amount} USDT\n"
+    #             f"Ваш бонус: {reward_amount} USDT (3% от депозита)."
+    #         )
+    #         await send_telegram_message(
+    #             referrer_user.telegram_id,
+    #             text,
+    #             message_effect_id=EFFECT_MONEY,
+    #         )
+    return
+
     if deposit_amount <= 0:
         return
 
@@ -146,7 +201,7 @@ async def apply_referral_rewards_for_investment(
 ) -> None:
     """
     Инвестиционная реферальная линия:
-    - до 3 уровней, каждому уровню 0.5% от суммы инвестиции;
+    - до 10 уровней, каждому уровню 0.5% от суммы инвестиции;
     - бонус начисляется только если реферер сам участвует в этой сделке;
     - иначе фиксируется запись ReferralReward со статусом MISSED (упущенная прибыль).
     """
@@ -166,10 +221,44 @@ async def apply_referral_rewards_for_investment(
     participations = participations_result.scalars().all()
     participant_user_ids = {p.user_id for p in participations}
 
+    # Защита от двойного начисления:
+    # собираем уже созданные бонусы по этой сделке/инвестору и пропускаем дубли.
+    referrer_ids = [r.id for r in referrers]
+    existing_bonus_result = await db.execute(
+        select(LedgerTransaction.user_id, LedgerTransaction.metadata_json).where(
+            LedgerTransaction.type == LEDGER_TYPE_REFERRAL_BONUS,
+            LedgerTransaction.user_id.in_(referrer_ids),
+        )
+    )
+    existing_bonus_keys: set[tuple[int, int]] = set()
+    for to_user_id, meta in existing_bonus_result.all():
+        if not isinstance(meta, dict):
+            continue
+        if meta.get("source") != "investment":
+            continue
+        if int(meta.get("deal_id", 0) or 0) != deal.id:
+            continue
+        if int(meta.get("from_user_id", 0) or 0) != investor.id:
+            continue
+        lvl = int(meta.get("level", 0) or 0)
+        if lvl > 0:
+            existing_bonus_keys.add((int(to_user_id), lvl))
+
+    existing_missed_result = await db.execute(
+        select(ReferralReward.to_user_id, ReferralReward.level).where(
+            ReferralReward.deal_id == deal.id,
+            ReferralReward.from_user_id == investor.id,
+        )
+    )
+    existing_missed_keys = {(int(r[0]), int(r[1])) for r in existing_missed_result.all()}
+
     for level_index, referrer in enumerate(referrers):
         level = level_index + 1
         if level > len(INVEST_REFERRAL_LEVEL_PERCENTS):
             break
+        already_paid = (referrer.id, level) in existing_bonus_keys
+        if already_paid:
+            continue
 
         pct = INVEST_REFERRAL_LEVEL_PERCENTS[level_index]
         reward_amount = (investment_amount * pct / Decimal("100")).quantize(Decimal("0.01"))
@@ -201,6 +290,8 @@ async def apply_referral_rewards_for_investment(
                 referrer_user.balance_usdt = new_balance
         else:
             # Фиксируем упущенную прибыль.
+            if (referrer.id, level) in existing_missed_keys:
+                continue
             missed = ReferralReward(
                 deal_id=deal.id,
                 from_user_id=investor.id,

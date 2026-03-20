@@ -18,7 +18,6 @@ from src.models import LedgerTransaction, PaymentInvoice, User
 from src.models.payment_invoice import PROVIDER_NOWPAYMENTS
 from src.services.ledger_service import LEDGER_TYPE_DEPOSIT, get_balance_usdt
 from src.services.notification_service import notify_deposit_success
-from src.services.referral_service import apply_referral_rewards_for_deposit
 
 logger = logging.getLogger(__name__)
 
@@ -72,23 +71,23 @@ async def apply_payment_to_balance(
     invoice.status = "finished"
     invoice.completed_at = dt.datetime.now(dt.timezone.utc)
 
-    # Реферальные бонусы только с депозита, и только один раз (для данного инвойса).
-    try:
-        await apply_referral_rewards_for_deposit(
-            db=db,
-            from_user=user,
-            deposit_amount=amount,
-            source_invoice_id=invoice.id,
-            external_payment_id=external_payment_id or ledger_tx.external_payment_id,
-        )
-    except Exception as e:
-        # Не падаем из-за ошибок реферальной системы; логируем и продолжаем.
-        logger.exception(
-            "Failed to apply referral rewards for invoice_id=%s user_id=%s: %s",
-            invoice.id,
-            invoice.user_id,
-            e,
-        )
+    # Реферальный бонус с депозита временно отключён (код сохранён).
+    # try:
+    #     await apply_referral_rewards_for_deposit(
+    #         db=db,
+    #         from_user=user,
+    #         deposit_amount=amount,
+    #         source_invoice_id=invoice.id,
+    #         external_payment_id=external_payment_id or ledger_tx.external_payment_id,
+    #     )
+    # except Exception as e:
+    #     # Не падаем из-за ошибок реферальной системы; логируем и продолжаем.
+    #     logger.exception(
+    #         "Failed to apply referral rewards for invoice_id=%s user_id=%s: %s",
+    #         invoice.id,
+    #         invoice.user_id,
+    #         e,
+    #     )
 
     logger.info(
         "Applied payment order_id=%s user_id=%s amount=%s new_balance=%s",

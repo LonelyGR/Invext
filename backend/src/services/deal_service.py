@@ -8,6 +8,7 @@ import datetime as dt
 import logging
 from decimal import Decimal
 from typing import List, Optional
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -40,12 +41,53 @@ from src.services.notification_service import (
 )
 
 logger = logging.getLogger(__name__)
+PAYOUT_TZ = ZoneInfo("Europe/Chisinau")
 
 # Проценты реферального бонуса по уровням (1–10)
 REFERRAL_LEVEL_PERCENTS: List[float] = [
     7.0, 2.0, 1.0, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5,
 ]
 MAX_REFERRAL_LEVELS = 10
+
+
+def calculate_payout_at_for_investment(now_utc: Optional[dt.datetime] = None) -> dt.datetime:
+    """
+    Фиксированный график выплаты (Europe/Chisinau):
+    - инвестиция до 12:00 -> T+1;
+    - инвестиция с 13:00 и позже -> T+2;
+    - пятница с 13:00, суббота, воскресенье -> ближайший вторник;
+    - время выплаты всегда 15:00.
+    Возвращает datetime в UTC для хранения в БД.
+    """
+    now_utc = now_utc or dt.datetime.now(dt.timezone.utc)
+    local_now = now_utc.astimezone(PAYOUT_TZ)
+    local_date = local_now.date()
+    weekday = local_now.weekday()  # Mon=0 ... Sun=6
+    hour = local_now.hour
+
+    if weekday == 5:  # Saturday
+        days_to_tuesday = 3
+        payout_date = local_date + dt.timedelta(days=days_to_tuesday)
+    elif weekday == 6:  # Sunday
+        days_to_tuesday = 2
+        payout_date = local_date + dt.timedelta(days=days_to_tuesday)
+    elif weekday == 4 and hour >= 13:  # Friday after 13:00
+        days_to_tuesday = 4
+        payout_date = local_date + dt.timedelta(days=days_to_tuesday)
+    else:
+        days_to_add = 1 if hour < 12 else 2
+        payout_date = local_date + dt.timedelta(days=days_to_add)
+        # Если расчет попал на выходные — переносим на ближайший вторник.
+        if payout_date.weekday() == 5:  # Saturday
+            payout_date = payout_date + dt.timedelta(days=3)
+        elif payout_date.weekday() == 6:  # Sunday
+            payout_date = payout_date + dt.timedelta(days=2)
+
+    payout_local = dt.datetime.combine(
+        payout_date,
+        dt.time(hour=15, minute=0, second=0, tzinfo=PAYOUT_TZ),
+    )
+    return payout_local.astimezone(dt.timezone.utc)
 
 
 async def get_active_deal(db: AsyncSession) -> Optional[Deal]:
@@ -129,6 +171,7 @@ async def participate_in_deal(
         user_id=user_locked.id,
         amount=amount,
         status=PARTICIPATION_STATUS_ACTIVE,
+        payout_at=calculate_payout_at_for_investment(),
     )
     db.add(participation)
     await db.flush()
@@ -136,7 +179,7 @@ async def participate_in_deal(
     user_locked.balance_usdt = current_balance - amount
     await db.flush()
 
-    # Инвестиционная реферальная линия (3 уровня по 0.5% с инвестиции),
+    # Инвестиционная реферальная линия (10 уровней по 0.5% с инвестиции),
     # учитывающая участие реферера в этой же сделке.
     await apply_referral_rewards_for_investment(db, investor=user_locked, deal=deal, investment_amount=amount)
 
@@ -180,9 +223,7 @@ async def close_deal_flow(db: AsyncSession, deal: Deal) -> None:
     deal.status = DEAL_STATUS_CLOSED
     deal.updated_at = now
     if deal.closed_at is None:
-        # Для стабильной логики отложенных выплат стараемся фиксировать время закрытия окна,
-        # чтобы payout-джобы могли корректно определить «пора выплачивать».
-        deal.closed_at = deal.end_at or now
+        deal.closed_at = now
     await db.flush()
 
     profit_percent = deal.profit_percent or deal.percent
@@ -311,43 +352,44 @@ async def process_pending_payouts(db: AsyncSession) -> int:
     affected_user_ids: set[int] = set()
 
     for p in participations:
-        profit = p.profit_amount or Decimal("0")
+        try:
+            profit = p.profit_amount or Decimal("0")
 
-        if p.deal_id not in deal_cache:
-            deal_obj = await db.get(Deal, p.deal_id)
-            if deal_obj:
-                deal_cache[p.deal_id] = deal_obj
+            if p.deal_id not in deal_cache:
+                deal_obj = await db.get(Deal, p.deal_id)
+                if deal_obj:
+                    deal_cache[p.deal_id] = deal_obj
 
-        deal = deal_cache.get(p.deal_id)
-        meta_base = {
-            "deal_id": p.deal_id,
-            "deal_number": deal.number if deal else None,
-            "participation_id": p.id,
-        }
+            deal = deal_cache.get(p.deal_id)
+            meta_base = {
+                "deal_id": p.deal_id,
+                "deal_number": deal.number if deal else None,
+                "participation_id": p.id,
+            }
 
-        # 1) Возврат тела инвестиции (отменяет INVEST-списание).
-        tx_return = LedgerTransaction(
-            user_id=p.user_id,
-            type=LEDGER_TYPE_INVEST_RETURN,
-            amount_usdt=p.amount,
-            metadata_json={**meta_base, "base_amount": str(p.amount)},
-        )
-        db.add(tx_return)
-
-        # 2) Прибыль (только чистая прибыль).
-        if profit > 0:
-            tx_profit = LedgerTransaction(
+            tx_return = LedgerTransaction(
                 user_id=p.user_id,
-                type=LEDGER_TYPE_PROFIT,
-                amount_usdt=profit,
-                metadata_json={**meta_base, "profit_amount": str(profit)},
+                type=LEDGER_TYPE_INVEST_RETURN,
+                amount_usdt=p.amount,
+                metadata_json={**meta_base, "base_amount": str(p.amount)},
             )
-            db.add(tx_profit)
+            db.add(tx_return)
 
-        p.status = PARTICIPATION_STATUS_COMPLETED
-        p.payout_at = now
-        affected_user_ids.add(p.user_id)
-        processed += 1
+            if profit > 0:
+                tx_profit = LedgerTransaction(
+                    user_id=p.user_id,
+                    type=LEDGER_TYPE_PROFIT,
+                    amount_usdt=profit,
+                    metadata_json={**meta_base, "profit_amount": str(profit)},
+                )
+                db.add(tx_profit)
+
+            p.status = PARTICIPATION_STATUS_COMPLETED
+            p.payout_at = now
+            affected_user_ids.add(p.user_id)
+            processed += 1
+        except Exception:
+            logger.exception("process_pending_payouts: failed to process participation %s", p.id)
 
     await db.flush()
 
@@ -372,19 +414,22 @@ async def process_pending_payouts(db: AsyncSession) -> int:
 
     for p in participations:
         tid = user_tids.get(p.user_id)
-        if not tid:
+        if not tid or p.status != PARTICIPATION_STATUS_COMPLETED:
             continue
-        deal = deal_cache.get(p.deal_id)
-        deal_num = deal.number if deal else 0
-        profit = p.profit_amount or Decimal("0")
-        total = (p.amount + profit).quantize(Decimal("0.000001"))
-        await notify_payout_complete(
-            telegram_id=tid,
-            deal_number=deal_num,
-            amount=p.amount,
-            profit=profit,
-            total=total,
-        )
+        try:
+            deal = deal_cache.get(p.deal_id)
+            deal_num = deal.number if deal else 0
+            profit = p.profit_amount or Decimal("0")
+            total = (p.amount + profit).quantize(Decimal("0.000001"))
+            await notify_payout_complete(
+                telegram_id=tid,
+                deal_number=deal_num,
+                amount=p.amount,
+                profit=profit,
+                total=total,
+            )
+        except Exception:
+            logger.exception("notify_payout_complete failed for user_id=%s participation=%s", p.user_id, p.id)
 
     logger.info("process_pending_payouts: processed=%s users=%s", processed, len(affected_user_ids))
     return processed
@@ -469,7 +514,7 @@ async def send_referral_bonus_reminders_for_active_deal(db: AsyncSession) -> int
 async def close_active_deal_by_schedule(db: AsyncSession) -> bool:
     """
     Закрыть текущую активную сделку (если есть) и разослать уведомления.
-    Используется планировщиком (12:00 UTC+1).
+    Используется планировщиком (12:00 Europe/Chisinau).
     Идемпотентно: если активной сделки нет — False.
     Транзакция управляется вызывающим кодом (scheduler); не вызывать db.begin() здесь.
     """
@@ -494,16 +539,20 @@ async def open_new_deal_by_schedule(
     end_at: dt.datetime,
 ) -> Optional[Deal]:
     """
-    Открыть новую сделку по расписанию (13:00 UTC+1) и разослать уведомление.
+    Открыть новую сделку по расписанию (13:00 Europe/Chisinau) и разослать уведомление.
     Перед открытием обрабатываются все отложенные выплаты (in_progress_payout).
     Защита от дублей: если уже есть active сделка, перекрывающая now — не создаём новую.
     """
     now = dt.datetime.now(dt.timezone.utc)
 
     # Сначала обрабатываем отложенные выплаты предыдущих сделок.
-    paid = await process_pending_payouts(db)
-    if paid:
-        logger.info("open_new_deal_by_schedule: processed %s pending payouts before opening", paid)
+    # Ошибка в payouts не должна блокировать открытие новой сделки.
+    try:
+        paid = await process_pending_payouts(db)
+        if paid:
+            logger.info("open_new_deal_by_schedule: processed %s pending payouts before opening", paid)
+    except Exception:
+        logger.exception("open_new_deal_by_schedule: process_pending_payouts failed, continuing with deal open")
 
     active = await get_active_deal(db)
     if active:

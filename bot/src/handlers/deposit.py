@@ -196,16 +196,12 @@ async def check_invoice_status(callback: CallbackQuery):
     status = (invoice.get("status") or "").lower()
     balance_credited = invoice.get("balance_credited", False)
     if status == "finished" or balance_credited:
-        await callback.message.edit_text(
-            make_deposit_invoice_confirmed_text(),
-            reply_markup=main_menu_kb(),
-        )
+        await callback.message.edit_text(make_deposit_invoice_confirmed_text())
         await send_effect_message(
             callback.bot,
             callback.message.chat.id,
             make_deposit_balance_credited_text(),
             effect_id=EFFECT_CELEBRATION,
-            reply_markup=main_menu_kb(),
         )
         await callback.answer()
     else:

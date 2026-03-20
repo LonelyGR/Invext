@@ -250,15 +250,29 @@ def make_invest_enter_amount_text(hint: str) -> str:
     )
 
 
-def make_invest_success_text(invested: Any, new_balance: Any) -> str:
+def make_invest_success_text(invested: Any, new_balance: Any, payout_hint: str | None = None) -> str:
+    payout_line = f"⏳ Выплата: {payout_hint}\n\n" if payout_hint else ""
     return (
         "✅ <b>Инвестиция принята</b>\n\n"
         
         f"💰 Сумма: {invested} USDT\n"
         f"📊 Баланс: {new_balance} USDT\n\n"
-        
+        f"{payout_line}"
         "Средства участвуют в текущей сделке.\n"
         "Прибыль будет начислена в течение 24 часов после закрытия сделки."
+    )
+
+
+def make_invest_deals_split_text(
+    active_items: list[str],
+    completed_items: list[str],
+) -> str:
+    active_block = "\n".join(active_items) if active_items else "— нет"
+    completed_block = "\n".join(completed_items) if completed_items else "— нет"
+    return (
+        "\n\n📂 <b>Мои сделки</b>\n"
+        f"🔄 Активные:\n{active_block}\n\n"
+        f"✅ Завершённые:\n{completed_block}"
     )
 
 
@@ -323,14 +337,14 @@ def make_partners_bonuses_text(me: Mapping[str, Any]) -> str:
     return (
         "🎁 <b>Реферальные бонусы</b>\n\n"
         
-        f"1 уровень — {level1} чел. • 3% с депозита\n"
-        f"2 уровень — {level2} чел. • 3% с депозита\n"
-        f"3 уровень — {level3} чел. • 3% с депозита\n\n"
+        f"1 уровень — {level1} чел. • 3% с депозитов + 0.5% с инвестиций\n"
+        f"2 уровень — {level2} чел. • 0.5% с инвестиций\n"
+        f"3 уровень — {level3} чел. • 0.5% с инвестиций\n\n"
         
         f"💎 Оборот команды: {team_float:.2f} USDT\n\n"
         
-        "📌 Бонус начисляется только с пополнений рефералов\n"
-        "Не учитываются инвестиции и прибыль по сделкам"
+        "📌 Бонус с депозитов начисляется автоматически\n"
+        "Бонус с инвестиций — только если вы участвуете в той же сделке"
     )
 
 
@@ -410,6 +424,12 @@ def make_profile_text(me: Mapping[str, Any], usdt: Any, ref_link: str | None = N
     country = me.get("country") or "не указано"
     referrals_count = me.get("referrals_count", 0)
 
+    invested_raw = me.get("invested_total_usdt", "0")
+    try:
+        invested = f"{float(invested_raw):.2f}"
+    except (TypeError, ValueError):
+        invested = "0.00"
+
     if ref_link:
         ref_part = f"🔗 <b>Реферальная ссылка</b>\n{ref_link}"
     else:
@@ -422,7 +442,7 @@ def make_profile_text(me: Mapping[str, Any], usdt: Any, ref_link: str | None = N
         f"{usdt} USDT\n\n"
         
         "🔒 <b>В инвестициях</b>\n"
-        "0 (в разработке)\n\n"
+        f"{invested} USDT\n\n"
         
         "📌 <b>Личные данные</b>\n"
         f"Имя: {name}\n"
