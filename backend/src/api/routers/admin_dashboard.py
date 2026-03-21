@@ -697,7 +697,9 @@ async def open_deal_now(
 ):
     """
     Создать и сразу открыть новую активную сделку вручную.
-    Окно: с текущего момента до следующего дня в 12:00 (UTC+1), как в планировщике.
+    Окно как в планировщике Europe/Chisinau:
+    - обычный день: до следующего дня 12:00
+    - если открыта в пятницу: до понедельника 12:00
     При открытии рассылается уведомление пользователям.
     """
     admin_token_id, _ = await get_admin_context(request)
@@ -713,15 +715,20 @@ async def open_deal_now(
         )
 
     now_utc = dt.datetime.now(dt.timezone.utc)
-    # Логика окна как в планировщике: до следующего дня 12:00 по МСК (UTC+1 условно).
+    # Логика окна как в планировщике Europe/Chisinau.
     from zoneinfo import ZoneInfo  # локальный импорт, чтобы не тянуть наверх
 
-    schedule_tz = ZoneInfo("Europe/Moscow")
+    schedule_tz = ZoneInfo("Europe/Chisinau")
     now_local = now_utc.astimezone(schedule_tz)
     start_local = now_local
-    close_local = (start_local + dt.timedelta(days=1)).replace(
-        hour=12, minute=0, second=0, microsecond=0
-    )
+    if start_local.weekday() == 4:  # Friday
+        close_local = (start_local + dt.timedelta(days=3)).replace(
+            hour=12, minute=0, second=0, microsecond=0
+        )
+    else:
+        close_local = (start_local + dt.timedelta(days=1)).replace(
+            hour=12, minute=0, second=0, microsecond=0
+        )
     start_at = start_local.astimezone(dt.timezone.utc)
     end_at = close_local.astimezone(dt.timezone.utc)
 
@@ -1289,6 +1296,7 @@ async def get_system_settings_admin(
         "max_withdraw_usdt": str(row.max_withdraw_usdt),
         "min_invest_usdt": str(row.min_invest_usdt),
         "max_invest_usdt": str(row.max_invest_usdt),
+        "allow_deposits": bool(row.allow_deposits),
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
     }
 
@@ -1306,13 +1314,6 @@ async def update_system_settings_admin(
 
     if not field:
         raise HTTPException(status_code=400, detail="field is required")
-    try:
-        value = Decimal(raw_value)
-    except Exception:
-        raise HTTPException(status_code=400, detail="value must be a number")
-    if value <= 0:
-        raise HTTPException(status_code=400, detail="value must be greater than 0")
-
     allowed_fields = {
         "min_deposit_usdt",
         "max_deposit_usdt",
@@ -1320,6 +1321,7 @@ async def update_system_settings_admin(
         "max_withdraw_usdt",
         "min_invest_usdt",
         "max_invest_usdt",
+        "allow_deposits",
     }
     if field not in allowed_fields:
         raise HTTPException(status_code=400, detail="unknown field")
@@ -1328,20 +1330,41 @@ async def update_system_settings_admin(
         result = await db.execute(select(SystemSettings).limit(1).with_for_update())
         row = result.scalar_one()
 
-        if field == "min_deposit_usdt" and value >= row.max_deposit_usdt:
-            raise HTTPException(status_code=400, detail="Минимальный депозит должен быть меньше максимального")
-        if field == "max_deposit_usdt" and value <= row.min_deposit_usdt:
-            raise HTTPException(status_code=400, detail="Максимальный депозит должен быть больше минимального")
-        if field == "min_withdraw_usdt" and value >= row.max_withdraw_usdt:
-            raise HTTPException(status_code=400, detail="Минимальный вывод должен быть меньше максимального")
-        if field == "max_withdraw_usdt" and value <= row.min_withdraw_usdt:
-            raise HTTPException(status_code=400, detail="Максимальный вывод должен быть больше минимального")
-        if field == "min_invest_usdt" and value >= row.max_invest_usdt:
-            raise HTTPException(status_code=400, detail="Минимальная инвестиция должна быть меньше максимальной")
-        if field == "max_invest_usdt" and value <= row.min_invest_usdt:
-            raise HTTPException(status_code=400, detail="Максимальная инвестиция должна быть больше минимальной")
+        if field == "allow_deposits":
+            value_raw = body.get("value")
+            if isinstance(value_raw, bool):
+                bool_value = value_raw
+            else:
+                value_norm = str(value_raw).strip().lower()
+                if value_norm in {"1", "true", "yes", "on"}:
+                    bool_value = True
+                elif value_norm in {"0", "false", "no", "off"}:
+                    bool_value = False
+                else:
+                    raise HTTPException(status_code=400, detail="value must be boolean")
+            row.allow_deposits = bool_value
+        else:
+            try:
+                value = Decimal(raw_value)
+            except Exception:
+                raise HTTPException(status_code=400, detail="value must be a number")
+            if value <= 0:
+                raise HTTPException(status_code=400, detail="value must be greater than 0")
 
-        setattr(row, field, value)
+            if field == "min_deposit_usdt" and value >= row.max_deposit_usdt:
+                raise HTTPException(status_code=400, detail="Минимальный депозит должен быть меньше максимального")
+            if field == "max_deposit_usdt" and value <= row.min_deposit_usdt:
+                raise HTTPException(status_code=400, detail="Максимальный депозит должен быть больше минимального")
+            if field == "min_withdraw_usdt" and value >= row.max_withdraw_usdt:
+                raise HTTPException(status_code=400, detail="Минимальный вывод должен быть меньше максимального")
+            if field == "max_withdraw_usdt" and value <= row.min_withdraw_usdt:
+                raise HTTPException(status_code=400, detail="Максимальный вывод должен быть больше минимального")
+            if field == "min_invest_usdt" and value >= row.max_invest_usdt:
+                raise HTTPException(status_code=400, detail="Минимальная инвестиция должна быть меньше максимальной")
+            if field == "max_invest_usdt" and value <= row.min_invest_usdt:
+                raise HTTPException(status_code=400, detail="Максимальная инвестиция должна быть больше минимальной")
+
+            setattr(row, field, value)
 
         await log_admin_action(
             db=db,

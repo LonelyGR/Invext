@@ -963,6 +963,16 @@ async function loadSettings() {
               </div>
               <input type="number" step="0.01" min="0" id="max_invest_usdt" class="settings-input" value="${s.max_invest_usdt}" />
             </div>
+            <div class="settings-field">
+              <div>
+                <div class="settings-label">Пополнения</div>
+                <div class="settings-hint">Разрешить создание новых инвойсов пополнения</div>
+              </div>
+              <label class="switch">
+                <input type="checkbox" id="allow_deposits" ${s.allow_deposits ? "checked" : ""} />
+                <span class="switch-slider"></span>
+              </label>
+            </div>
           </div>
           <div class="settings-footer">
             <div class="settings-updated-at">
@@ -1047,6 +1057,14 @@ async function loadSettings() {
               body: JSON.stringify({ field, value: String(values[field]) }),
             });
           }
+          const allowDepositsInput = document.getElementById("allow_deposits");
+          await apiRequest("/system-settings", {
+            method: "PATCH",
+            body: JSON.stringify({
+              field: "allow_deposits",
+              value: Boolean(allowDepositsInput?.checked),
+            }),
+          });
           showToast("Настройки успешно обновлены");
           loadSettings();
         } catch (e) {

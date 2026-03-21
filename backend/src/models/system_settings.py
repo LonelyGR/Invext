@@ -1,7 +1,7 @@
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import DateTime, Numeric
+from sqlalchemy import Boolean, DateTime, Numeric, true
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
 
@@ -36,6 +36,10 @@ class SystemSettings(Base):
     )
     max_invest_usdt: Mapped[Decimal] = mapped_column(
         Numeric(18, 2), nullable=False, default=Decimal("100000")
+    )
+
+    allow_deposits: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=true()
     )
 
     deal_amount_usdt: Mapped[Decimal] = mapped_column(

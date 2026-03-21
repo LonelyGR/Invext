@@ -1,6 +1,7 @@
 """
 Отправка уведомлений в Telegram. Бот расчётов не делает — только рассылка с бэкенда.
-Время форматируется в UTC+1 в человекочитаемом виде. Для ключевых событий поддерживаются
+Время форматируется в Europe/Chisinau в человекочитаемом виде (UTC+2/UTC+3 по сезону).
+Для ключевых событий поддерживаются
 Telegram message effects (только в личных чатах; с бэкенда отправка по chat_id = личный чат).
 """
 from __future__ import annotations
@@ -8,6 +9,7 @@ from __future__ import annotations
 import datetime as dt
 import logging
 from typing import List, Optional
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -15,8 +17,8 @@ from src.core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-# UTC+1 для отображения времени пользователям
-DISPLAY_TZ = dt.timezone(dt.timedelta(hours=1))
+# Единый TZ для пользовательского отображения времени
+DISPLAY_TZ = ZoneInfo("Europe/Chisinau")
 
 # Telegram message effect IDs (работают только в личных чатах)
 # https://core.telegram.org/api/effects
@@ -36,10 +38,17 @@ _WEEKDAYS_RU = (
 )
 
 
-def format_time_utc1(when: dt.datetime) -> str:
+def _tz_suffix(local_dt: dt.datetime) -> str:
+    offset = local_dt.utcoffset() or dt.timedelta(0)
+    hours = int(offset.total_seconds() // 3600)
+    sign = "+" if hours >= 0 else "-"
+    return f"(UTC{sign}{abs(hours)})"
+
+
+def format_time_chisinau(when: dt.datetime) -> str:
     """
-    Форматировать время в UTC+1 в человекочитаемый вид.
-    «сегодня в 13:00 (UTC+1)», «завтра в 12:00 (UTC+1)» или «понедельник, 13:00 (UTC+1)».
+    Форматировать время Europe/Chisinau в человекочитаемый вид.
+    «сегодня в 13:00 (UTC+2/UTC+3)», «завтра ...», «понедельник, 13:00 ...».
     """
     if when.tzinfo is None:
         when = when.replace(tzinfo=dt.timezone.utc)
@@ -47,7 +56,7 @@ def format_time_utc1(when: dt.datetime) -> str:
     today = dt.datetime.now(DISPLAY_TZ).date()
     date_part = local.date()
     time_part = local.strftime("%H:%M")
-    suffix = " (UTC+1)"
+    suffix = f" {_tz_suffix(local)}"
 
     if date_part == today:
         return f"сегодня в {time_part}{suffix}"
@@ -115,7 +124,7 @@ async def broadcast_deal_opened(
     if not telegram_ids:
         return
 
-    close_time_human = format_time_utc1(close_at) if close_at else "—"
+    close_time_human = format_time_chisinau(close_at) if close_at else "—"
 
     text = (
         f"🔔 Открыт сбор на сделку №{deal_number}\n\n"
@@ -156,7 +165,7 @@ async def broadcast_deal_closed(
     if not telegram_ids:
         return
 
-    next_open_human = format_time_utc1(next_open_at) if next_open_at else "—"
+    next_open_human = format_time_chisinau(next_open_at) if next_open_at else "—"
 
     sent = 0
     for tid in telegram_ids:
@@ -243,7 +252,7 @@ async def send_referral_bonus_reminder(
     Напоминание за час до закрытия сбора: у пользователя есть потенциальная
     реферальная прибыль, если он успеет поучаствовать.
     """
-    close_human = format_time_utc1(close_at) if close_at else "скоро"
+    close_human = format_time_chisinau(close_at) if close_at else "скоро"
     text = (
         f"⏰ Через час закроется сбор на сделку №{deal_number}.\n\n"
         f"Если вы примете участие, вы сможете получить реферальную прибыль "

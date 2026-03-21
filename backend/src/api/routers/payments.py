@@ -76,8 +76,15 @@ async def create_deposit_invoice(
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-    # Schema already enforces min 10 USDT, step 1; enforce dynamic min/max from SystemSettings.
+    # Глобальный флаг: временный запрет пополнений.
     sys_settings = await get_system_settings(db)
+    if not sys_settings.allow_deposits:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="На данный момент пополнение недоступно. Пожалуйста, ожидайте.",
+        )
+
+    # Schema already enforces min 10 USDT, step 1; enforce dynamic min/max from SystemSettings.
     if payload.amount < sys_settings.min_deposit_usdt:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

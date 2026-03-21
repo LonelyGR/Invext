@@ -53,17 +53,26 @@ def _deposit_history_kb() -> InlineKeyboardMarkup:
 async def deposit_start(message: Message, state: FSMContext):
     """Начать пополнение: спросить сумму для инвойса NOWPayments (USDT BEP20)."""
     await state.clear()
-    await state.set_state(DepositStates.entering_amount)
     # Для текстовых подсказок пытаемся получить лимиты с бэкенда,
     # но логика проверки всё равно на стороне бэкенда.
     min_dep = "10"
     max_dep = "100000"
+    allow_deposits = True
     try:
         settings = await api.get_system_settings()
         min_dep = settings.get("min_deposit_usdt", min_dep)
         max_dep = settings.get("max_deposit_usdt", max_dep)
+        allow_deposits = bool(settings.get("allow_deposits", True))
     except Exception:
         pass
+    if not allow_deposits:
+        await message.answer(
+            "На данный момент пополнение недоступно. Пожалуйста, ожидайте.",
+            reply_markup=main_menu_kb(),
+        )
+        return
+
+    await state.set_state(DepositStates.entering_amount)
     await message.answer(
         make_deposit_start_text(min_dep),
         reply_markup=main_menu_kb(),
@@ -126,7 +135,10 @@ async def deposit_amount_entered(message: Message, state: FSMContext):
                 except Exception:
                     pass
             logger.error("deposit invoice creation failed for user %s: %s", telegram_id, err)
-            await message.answer(f"Ошибка при создании инвойса: {err}", reply_markup=main_menu_kb())
+            if "На данный момент пополнение недоступно" in err:
+                await message.answer(err, reply_markup=main_menu_kb())
+            else:
+                await message.answer(f"Ошибка при создании инвойса: {err}", reply_markup=main_menu_kb())
             await state.clear()
             return
 
