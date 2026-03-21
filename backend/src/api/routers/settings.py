@@ -32,6 +32,7 @@ async def get_system_settings_admin(
         "min_invest_usdt": str(row.min_invest_usdt),
         "max_invest_usdt": str(row.max_invest_usdt),
         "deal_amount_usdt": str(row.deal_amount_usdt),
+        "allow_deposits": bool(row.allow_deposits),
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
     }
 
@@ -48,19 +49,6 @@ async def update_system_setting_field(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="field is required",
         )
-    try:
-        value = Decimal(raw_value)
-    except InvalidOperation:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="value must be a number",
-        )
-    if value <= 0:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="value must be greater than 0",
-        )
-
     allowed_fields = {
         "min_deposit_usdt",
         "max_deposit_usdt",
@@ -69,6 +57,7 @@ async def update_system_setting_field(
         "min_invest_usdt",
         "max_invest_usdt",
         "deal_amount_usdt",
+        "allow_deposits",
     }
     if field not in allowed_fields:
         raise HTTPException(
@@ -80,39 +69,69 @@ async def update_system_setting_field(
         result = await db.execute(select(SystemSettings).limit(1).with_for_update())
         row = result.scalar_one()
 
-        # Валидация min/max для соответствующих пар.
-        if field == "min_deposit_usdt" and value >= row.max_deposit_usdt:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Минимальный депозит должен быть меньше максимального",
-            )
-        if field == "max_deposit_usdt" and value <= row.min_deposit_usdt:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Максимальный депозит должен быть больше минимального",
-            )
-        if field == "min_withdraw_usdt" and value >= row.max_withdraw_usdt:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Минимальный вывод должен быть меньше максимального",
-            )
-        if field == "max_withdraw_usdt" and value <= row.min_withdraw_usdt:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Максимальный вывод должен быть больше минимального",
-            )
-        if field == "min_invest_usdt" and value >= row.max_invest_usdt:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Минимальная инвестиция должна быть меньше максимальной",
-            )
-        if field == "max_invest_usdt" and value <= row.min_invest_usdt:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Максимальная инвестиция должна быть больше минимальной",
-            )
+        if field == "allow_deposits":
+            value_raw = payload.get("value")
+            if isinstance(value_raw, bool):
+                bool_value = value_raw
+            else:
+                value_norm = str(value_raw).strip().lower()
+                if value_norm in {"1", "true", "yes", "on"}:
+                    bool_value = True
+                elif value_norm in {"0", "false", "no", "off"}:
+                    bool_value = False
+                else:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="value must be boolean",
+                    )
+            row.allow_deposits = bool_value
+        else:
+            try:
+                value = Decimal(raw_value)
+            except InvalidOperation:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="value must be a number",
+                )
+            if value <= 0:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="value must be greater than 0",
+                )
 
-        setattr(row, field, value)
+            # Валидация min/max для соответствующих пар.
+            if field == "min_deposit_usdt" and value >= row.max_deposit_usdt:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Минимальный депозит должен быть меньше максимального",
+                )
+            if field == "max_deposit_usdt" and value <= row.min_deposit_usdt:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Максимальный депозит должен быть больше минимального",
+                )
+            if field == "min_withdraw_usdt" and value >= row.max_withdraw_usdt:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Минимальный вывод должен быть меньше максимального",
+                )
+            if field == "max_withdraw_usdt" and value <= row.min_withdraw_usdt:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Максимальный вывод должен быть больше минимального",
+                )
+            if field == "min_invest_usdt" and value >= row.max_invest_usdt:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Минимальная инвестиция должна быть меньше максимальной",
+                )
+            if field == "max_invest_usdt" and value <= row.min_invest_usdt:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Максимальная инвестиция должна быть больше минимальной",
+                )
+
+            setattr(row, field, value)
 
     invalidate_system_settings_cache()
     return {"ok": True}
