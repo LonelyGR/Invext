@@ -281,9 +281,13 @@ def make_partners_no_link_text() -> str:
 
 
 def make_partners_team_text(me: Mapping[str, Any]) -> str:
-    level1 = me.get("referrals_level_1", 0) or me.get("referrals_count", 0)
-    level2 = me.get("referrals_level_2", 0)
-    level3 = me.get("referrals_level_3", 0)
+    levels_lines: list[str] = []
+    for level in range(1, 11):
+        count = me.get(f"referrals_level_{level}", 0)
+        if level == 1 and not count:
+            count = me.get("referrals_count", 0)
+        levels_lines.append(f"{level} уровень — {int(count or 0)}")
+
     team_usdt = me.get("team_deposits_usdt", "0") or "0"
     try:
         team_float = float(team_usdt)
@@ -291,11 +295,8 @@ def make_partners_team_text(me: Mapping[str, Any]) -> str:
         team_float = 0.0
     lines = [
         "<b>📊 Моя команда</b>\n\n"
-        
-        f"1 уровень — {level1}\n"
-        f"2 уровень — {level2}\n"
-        f"3 уровень — {level3}\n\n"
-        
+        + "\n".join(levels_lines)
+        + "\n\n"
         f"💎 Оборот команды: {team_float:.2f} USDT"
     ]
     return "\n".join(lines)
@@ -339,19 +340,23 @@ def make_team_turnover_main_text(me: Mapping[str, Any]) -> str:
 
 def make_team_turnover_detail_text(me: Mapping[str, Any]) -> str:
     usdt = me.get("team_deposits_usdt", "0") or "0"
-    ref_count = me.get("referrals_count", 0)
     try:
         usdt_f = float(usdt)
     except (TypeError, ValueError):
         usdt_f = 0.0
+    levels_lines: list[str] = []
+    for level in range(1, 11):
+        count = me.get(f"referrals_level_{level}", 0)
+        if level == 1 and not count:
+            count = me.get("referrals_count", 0)
+        levels_lines.append(f"{level} уровень — {int(count or 0)} чел.")
+    levels_block = "\n".join(levels_lines)
+
     return (
         "📈 <b>Статистика команды</b>\n\n"
-        
-        "💎 Оборот по уровням:\n\n"
-        
-        f"1 уровень — {ref_count} • {usdt_f:.2f} USDT\n"
-        "2 уровень — 0 • 0.00 USDT\n"
-        "3 уровень — 0 • 0.00 USDT\n"
+        "👥 Рефералы по уровням:\n\n"
+        f"{levels_block}\n\n"
+        f"💎 Общий оборот команды: {usdt_f:.2f} USDT\n"
     )
 
 
