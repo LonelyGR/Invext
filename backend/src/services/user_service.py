@@ -27,6 +27,38 @@ def _generate_ref_code() -> str:
     return uuid.uuid4().hex[:8].upper()
 
 
+async def _would_create_referrer_cycle(
+    db: AsyncSession,
+    *,
+    user_id: int,
+    candidate_referrer_id: int,
+    max_levels: int = 100,
+) -> bool:
+    """
+    Проверить, создаст ли привязка user -> candidate_referrer цикл.
+    Идём вверх по цепочке candidate_referrer.referrer_id и ищем user_id.
+    """
+    if user_id == candidate_referrer_id:
+        return True
+
+    visited: set[int] = set()
+    current_id: Optional[int] = candidate_referrer_id
+    for _ in range(max_levels):
+        if current_id is None:
+            return False
+        if current_id == user_id:
+            return True
+        if current_id in visited:
+            # В цепочке уже есть цикл: считаем связь небезопасной.
+            return True
+        visited.add(current_id)
+
+        result = await db.execute(select(User.referrer_id).where(User.id == current_id))
+        current_id = result.scalar_one_or_none()
+    # Защитный предел от бесконечных/грязных данных.
+    return True
+
+
 async def get_or_create_user(
     db: AsyncSession,
     telegram_id: int,
@@ -52,6 +84,12 @@ async def get_or_create_user(
             )
             referrer = ref_result.scalar_one_or_none()
             if referrer and referrer.id != user.id:
+                if await _would_create_referrer_cycle(
+                    db,
+                    user_id=user.id,
+                    candidate_referrer_id=referrer.id,
+                ):
+                    return user, False
                 user.referrer_id = referrer.id
         return user, False
 
@@ -113,6 +151,9 @@ async def get_user_with_stats(db: AsyncSession, telegram_id: int) -> Optional[di
     max_referral_levels = 10
     level_counts: dict[int, int] = {}
     current_level_parent_ids = [user.id]
+    # Защита от циклов/повторного учёта: каждый пользователь учитывается только один раз
+    # в рамках лесенки конкретного пользователя.
+    visited_ids: set[int] = {user.id}
     level1_ids: list[int] = []
     for level in range(1, max_referral_levels + 1):
         if not current_level_parent_ids:
@@ -121,10 +162,14 @@ async def get_user_with_stats(db: AsyncSession, telegram_id: int) -> Optional[di
         level_ids_result = await db.execute(
             select(User.id).where(User.referrer_id.in_(current_level_parent_ids))
         )
-        level_ids = [r[0] for r in level_ids_result.all()]
+        # Дедуп + исключение уже посещённых id для защиты от "петель" в графе.
+        raw_level_ids = [r[0] for r in level_ids_result.all()]
+        unique_level_ids = list(dict.fromkeys(raw_level_ids))
+        level_ids = [uid for uid in unique_level_ids if uid not in visited_ids]
         level_counts[level] = len(level_ids)
         if level == 1:
             level1_ids = level_ids
+        visited_ids.update(level_ids)
         current_level_parent_ids = level_ids
     referrals_count = level_counts.get(1, 0)
 
