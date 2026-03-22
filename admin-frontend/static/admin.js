@@ -1,5 +1,17 @@
 const API_BASE = "/database/api";
 
+/** Состояние списка пользователей (пагинация + поиск). */
+let usersListState = { page: 1, pageSize: 25, search: "" };
+
+function escapeHtmlAttr(s) {
+  if (s == null || s === "") return "";
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
 async function apiRequest(path, options = {}) {
   const resp = await fetch(API_BASE + path, {
     credentials: "include",
@@ -132,24 +144,62 @@ async function loadDashboard() {
 
 async function loadUsers() {
   const section = document.getElementById("users-section");
+  const searchEl = document.getElementById("users-search");
+  if (searchEl) {
+    usersListState.search = searchEl.value.trim();
+  }
+
   section.innerHTML = `
     <h1>Пользователи</h1>
-    <p class="section-desc">Список пользователей, кеш баланса и текущие инвестиции.</p>
+    <p class="section-desc">Список пользователей, кеш баланса и текущие инвестиции. Пагинация и поиск — без бесконечной прокрутки.</p>
+    <div class="panel-card bulk-credit-card">
+      <div class="bulk-credit-header">
+        <h3>Массовое начисление</h3>
+        <p class="section-desc">Одна сумма на баланс (ledger) для <b>всех</b> пользователей. Двойное подтверждение.</p>
+      </div>
+      <div class="bulk-credit-row">
+        <label class="bulk-credit-label">Сумма (USDT)</label>
+        <input type="number" step="0.01" min="0" id="bulk-credit-amount" class="settings-input bulk-credit-input" placeholder="100" />
+        <label class="bulk-credit-label">Комментарий в ledger</label>
+        <input type="text" id="bulk-credit-comment" class="settings-input bulk-credit-input" placeholder="Необязательно" />
+        <button type="button" id="bulk-credit-btn" class="btn-bulk-credit">Зачислить всем</button>
+      </div>
+    </div>
     <div class="panel-card">
-      <div class="toolbar">
+      <div class="toolbar users-toolbar">
         <div class="search-field">
           <span class="search-field-icon">🔍</span>
-          <input id="users-search" type="text" placeholder="Поиск по username / Telegram ID" />
+          <input id="users-search" type="text" placeholder="Поиск по username / Telegram ID" value="${escapeHtmlAttr(usersListState.search)}" />
         </div>
-        <button id="users-search-btn">Искать</button>
+        <button type="button" id="users-search-btn">Искать</button>
+        <label class="page-size-label">На странице
+          <select id="users-page-size" class="page-size-select">
+            <option value="25">25</option>
+            <option value="50">50</option>
+            <option value="100">100</option>
+          </select>
+        </label>
       </div>
       <p>Загрузка...</p>
     </div>
   `;
+
+  const sizeSel = document.getElementById("users-page-size");
+  if (sizeSel) sizeSel.value = String(usersListState.pageSize);
+
   try {
-    const searchInput = document.getElementById("users-search");
-    const q = searchInput && searchInput.value ? `&search=${encodeURIComponent(searchInput.value)}` : "";
-    const data = await apiRequest(`/users?page=1&page_size=50${q}`);
+    const q = usersListState.search
+      ? `&search=${encodeURIComponent(usersListState.search)}`
+      : "";
+    const data = await apiRequest(
+      `/users?page=${usersListState.page}&page_size=${usersListState.pageSize}${q}`
+    );
+    const totalPages = Math.max(1, Math.ceil(data.total / data.page_size) || 1);
+    if (usersListState.page > totalPages) {
+      usersListState.page = totalPages;
+      return loadUsers();
+    }
+
     const rows = data.items
       .map((u) => {
         const mismatch =
@@ -167,17 +217,49 @@ async function loadUsers() {
         </tr>`;
       })
       .join("");
+
+    const paginationHtml = `
+      <div class="pagination-bar">
+        <span class="pagination-info">Страница <strong>${data.page}</strong> из <strong>${totalPages}</strong> · всего пользователей: <strong>${data.total}</strong></span>
+        <div class="pagination-actions">
+          <button type="button" id="users-prev" class="btn-secondary-small" ${data.page <= 1 ? "disabled" : ""}>← Назад</button>
+          <button type="button" id="users-next" class="btn-secondary-small" ${data.page >= totalPages ? "disabled" : ""}>Вперёд →</button>
+        </div>
+      </div>
+    `;
+
     section.innerHTML = `
       <h1>Пользователи</h1>
-      <p class="section-desc">Список пользователей, кеш баланса и текущие инвестиции.</p>
+      <p class="section-desc">Список пользователей, кеш баланса и текущие инвестиции. Пагинация и поиск — без бесконечной прокрутки.</p>
+      <div class="panel-card bulk-credit-card">
+        <div class="bulk-credit-header">
+          <h3>Массовое начисление</h3>
+          <p class="section-desc">Одна сумма на баланс (ledger) для <b>всех</b> пользователей. Двойное подтверждение.</p>
+        </div>
+        <div class="bulk-credit-row">
+          <label class="bulk-credit-label">Сумма (USDT)</label>
+          <input type="number" step="0.01" min="0" id="bulk-credit-amount" class="settings-input bulk-credit-input" placeholder="100" />
+          <label class="bulk-credit-label">Комментарий в ledger</label>
+          <input type="text" id="bulk-credit-comment" class="settings-input bulk-credit-input" placeholder="Необязательно" />
+          <button type="button" id="bulk-credit-btn" class="btn-bulk-credit">Зачислить всем</button>
+        </div>
+      </div>
       <div class="panel-card">
-        <div class="toolbar">
+        <div class="toolbar users-toolbar">
           <div class="search-field">
             <span class="search-field-icon">🔍</span>
-            <input id="users-search" type="text" placeholder="Поиск по username / Telegram ID" />
+            <input id="users-search" type="text" placeholder="Поиск по username / Telegram ID" value="${escapeHtmlAttr(usersListState.search)}" />
           </div>
-          <button id="users-search-btn">Искать</button>
+          <button type="button" id="users-search-btn">Искать</button>
+          <label class="page-size-label">На странице
+            <select id="users-page-size" class="page-size-select">
+              <option value="25">25</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+            </select>
+          </label>
         </div>
+        ${paginationHtml}
         <div class="table-wrapper">
           <div class="table-wrapper-inner">
             <table>
@@ -195,13 +277,85 @@ async function loadUsers() {
             </table>
           </div>
         </div>
+        ${paginationHtml}
       </div>
     `;
 
-    const btn = document.getElementById("users-search-btn");
-    if (btn) {
-      btn.onclick = () => loadUsers();
+    const sizeSelect = document.getElementById("users-page-size");
+    if (sizeSelect) {
+      sizeSelect.value = String(usersListState.pageSize);
+      sizeSelect.onchange = () => {
+        usersListState.pageSize = parseInt(sizeSelect.value, 10) || 25;
+        usersListState.page = 1;
+        loadUsers();
+      };
     }
+
+    document.getElementById("users-search-btn").onclick = () => {
+      const v = document.getElementById("users-search")?.value?.trim() ?? "";
+      usersListState.search = v;
+      usersListState.page = 1;
+      loadUsers();
+    };
+    document.getElementById("users-search")?.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") {
+        ev.preventDefault();
+        document.getElementById("users-search-btn").click();
+      }
+    });
+
+    document.getElementById("users-prev").onclick = () => {
+      if (usersListState.page > 1) {
+        usersListState.page -= 1;
+        loadUsers();
+      }
+    };
+    document.getElementById("users-next").onclick = () => {
+      usersListState.page += 1;
+      loadUsers();
+    };
+
+    document.getElementById("bulk-credit-btn").onclick = async () => {
+      const amtRaw = document.getElementById("bulk-credit-amount")?.value?.trim();
+      const comment = document.getElementById("bulk-credit-comment")?.value?.trim() ?? "";
+      const amt = parseFloat(amtRaw.replace(",", "."));
+      if (!amtRaw || Number.isNaN(amt) || amt <= 0) {
+        alert("Укажите сумму больше 0");
+        return;
+      }
+      const first = confirm(
+        `Всем пользователям будет зачислено ${amt} USDT каждому (ledger DEPOSIT). Продолжить?`
+      );
+      if (!first) return;
+      const phrase = prompt('Для подтверждения введите: BULK_CREDIT');
+      if ((phrase || "").trim().toUpperCase() !== "BULK_CREDIT") {
+        alert("Операция отменена.");
+        return;
+      }
+      const btn = document.getElementById("bulk-credit-btn");
+      try {
+        btn.disabled = true;
+        btn.textContent = "Обработка…";
+        const res = await apiRequest("/users/bulk-ledger-credit", {
+          method: "POST",
+          body: JSON.stringify({
+            amount_usdt: String(amt),
+            comment: comment || undefined,
+            confirm: "BULK_CREDIT",
+          }),
+        });
+        showToast(
+          `Зачислено: ${res.users_affected} польз. × ${res.amount_usdt} USDT (всего ${res.total_usdt_credited} USDT)`
+        );
+        loadUsers();
+        loadDashboard();
+      } catch (e) {
+        alert(e.message || "Ошибка");
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Зачислить всем";
+      }
+    };
 
     section.querySelectorAll("tr.table-row-link").forEach((row) => {
       const id = row.getAttribute("data-user-id");

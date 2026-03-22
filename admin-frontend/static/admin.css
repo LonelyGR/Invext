@@ -1200,3 +1200,115 @@ tbody tr:hover .row-actions {
   color: #fff !important;
 }
 
+/* --- Users: pagination + bulk credit --- */
+
+.users-toolbar {
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.users-toolbar #users-search-btn {
+  width: auto;
+  min-width: 100px;
+  margin-top: 0;
+}
+
+.page-size-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #9ca3af;
+  margin-left: auto;
+}
+
+.page-size-select {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid #374151;
+  background: #020617;
+  color: #e5e7eb;
+}
+
+.pagination-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 8px 0 12px;
+  padding: 10px 12px;
+  background: rgba(15, 23, 42, 0.6);
+  border-radius: 10px;
+  border: 1px solid #1f2937;
+}
+
+.pagination-info {
+  font-size: 13px;
+  color: #9ca3af;
+}
+
+.pagination-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.btn-secondary-small {
+  width: auto !important;
+  margin-top: 0 !important;
+  padding: 8px 14px !important;
+  font-size: 13px !important;
+  background: #1e293b !important;
+  border: 1px solid #334155 !important;
+}
+
+.btn-secondary-small:hover:not(:disabled) {
+  background: #334155 !important;
+}
+
+.btn-secondary-small:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.bulk-credit-card {
+  margin-bottom: 16px;
+  border: 1px solid rgba(37, 99, 235, 0.35);
+  background: radial-gradient(circle at 0% 0%, rgba(37, 99, 235, 0.12), rgba(15, 23, 42, 0.95));
+}
+
+.bulk-credit-header h3 {
+  margin: 0 0 4px;
+  font-size: 16px;
+}
+
+.bulk-credit-row {
+  display: grid;
+  grid-template-columns: minmax(100px, 140px) 1fr;
+  gap: 8px 16px;
+  align-items: center;
+  margin-top: 12px;
+}
+
+@media (max-width: 700px) {
+  .bulk-credit-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+.bulk-credit-label {
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+.bulk-credit-input {
+  max-width: 320px;
+}
+
+.btn-bulk-credit {
+  grid-column: 1 / -1;
+  max-width: 220px;
+  margin-top: 4px !important;
+  background: linear-gradient(135deg, #2563eb, #1d4ed8) !important;
+}
+

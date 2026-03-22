@@ -275,6 +275,83 @@ async def list_users(
     return PaginatedUsers(items=items, total=total, page=page, page_size=page_size)
 
 
+@router.post("/users/bulk-ledger-credit")
+async def bulk_ledger_credit_all_users(
+    request: Request,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Зачислить одинаковую сумму USDT на баланс (ledger DEPOSIT) всем пользователям.
+    Использует ту же модель, что и ручная корректировка в боте (ADMIN_MANUAL).
+    Требует confirm=\"BULK_CREDIT\".
+    """
+    admin_token_id, _ = await get_admin_context(request)
+
+    confirm = str(body.get("confirm", "")).strip().upper()
+    if confirm != "BULK_CREDIT":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail='Подтвердите операцию: передайте confirm="BULK_CREDIT"',
+        )
+
+    raw_amt = body.get("amount_usdt")
+    try:
+        amount = Decimal(str(raw_amt).replace(",", ".").strip())
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Некорректная сумма")
+    if amount <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Сумма должна быть больше 0",
+        )
+    if amount > Decimal("1000000"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Сумма слишком велика",
+        )
+
+    comment = (body.get("comment") or "").strip() or "Массовое начисление с админки"
+
+    result = await db.execute(select(User.id))
+    user_ids = [row[0] for row in result.all()]
+
+    for uid in user_ids:
+        tx = LedgerTransaction(
+            user_id=uid,
+            type=LEDGER_TYPE_DEPOSIT,
+            amount_usdt=amount,
+            provider="ADMIN_MANUAL",
+            metadata_json={
+                "comment": comment,
+                "bulk_credit": True,
+            },
+        )
+        db.add(tx)
+    await db.flush()
+
+    for uid in user_ids:
+        u = await db.get(User, uid)
+        if u:
+            u.balance_usdt = await get_balance_usdt(db, uid)
+
+    await log_admin_action(
+        db=db,
+        admin_token_id=admin_token_id,
+        action_type="BULK_LEDGER_CREDIT",
+        entity_type="SYSTEM",
+        entity_id=0,
+    )
+
+    total_credited = amount * Decimal(len(user_ids))
+    return {
+        "ok": True,
+        "users_affected": len(user_ids),
+        "amount_usdt": str(amount),
+        "total_usdt_credited": str(total_credited),
+    }
+
+
 @router.get("/users/{user_id}/ledger", response_model=LedgerList)
 async def user_ledger(
     request: Request,
