@@ -5,7 +5,8 @@
    - отключена.
 
 2) ИНВЕСТИЦИОННАЯ ЛИНИЯ (investment_referral):
-   - До 10 уровней, каждому уровню 0.5% от суммы инвестиции.
+   - До 10 уровней, каждому уровню 0.5% от фактической прибыли реферала по сделке
+     (после расчёта profit_amount при закрытии сделки).
    - Начисление только если получатель бонуса сам участвовал в этой сделке.
    - Если не участвовал — бонус не начисляется, но фиксируется как упущенный.
 """
@@ -91,15 +92,18 @@ async def apply_referral_rewards_for_investment(
     db: AsyncSession,
     investor: User,
     deal: Deal,
-    investment_amount: Decimal,
+    user_profit_usdt: Decimal,
 ) -> None:
     """
     Инвестиционная реферальная линия:
-    - до 10 уровней, каждому уровню 0.5% от суммы инвестиции;
+    - до 10 уровней, каждому уровню 0.5% от фактической прибыли инвестора по сделке
+      (user_profit_usdt — то же, что profit_amount у участия после закрытия сделки);
     - бонус начисляется только если реферер сам участвует в этой сделке;
     - иначе фиксируется запись ReferralReward со статусом MISSED (упущенная прибыль).
+
+    Вызывается из close_deal_flow после расчёта profit_amount по участию (не при вводе суммы инвестиции).
     """
-    if investment_amount <= 0:
+    if user_profit_usdt <= 0:
         return
 
     referrers = await _get_referrer_chain(db, investor.id, MAX_LEVELS)
@@ -155,7 +159,7 @@ async def apply_referral_rewards_for_investment(
             continue
 
         pct = INVEST_REFERRAL_LEVEL_PERCENTS[level_index]
-        reward_amount = (investment_amount * pct / Decimal("100")).quantize(Decimal("0.01"))
+        reward_amount = (user_profit_usdt * pct / Decimal("100")).quantize(Decimal("0.000001"))
         if reward_amount <= 0:
             continue
 
@@ -171,7 +175,7 @@ async def apply_referral_rewards_for_investment(
                     "from_user_id": investor.id,
                     "level": level,
                     "deal_id": deal.id,
-                    "investment_amount": str(investment_amount),
+                    "user_profit_usdt": str(user_profit_usdt),
                     "bonus_amount": str(reward_amount),
                 },
             )
@@ -220,6 +224,7 @@ async def get_potential_referral_bonuses_for_deal(
 
     bonuses: dict[int, Decimal] = {}
 
+    profit_pct = deal.profit_percent or deal.percent
     for p in participations:
         investor_id = p.user_id
         amount = p.amount
@@ -229,6 +234,14 @@ async def get_potential_referral_bonuses_for_deal(
         referrers = await _get_referrer_chain(db, investor_id, MAX_LEVELS)
         if not referrers:
             continue
+
+        # Оценка потенциальной прибыли по текущему % сделки (для напоминания до закрытия).
+        if profit_pct is None:
+            estimated_profit = Decimal("0")
+        else:
+            estimated_profit = (
+                amount * Decimal(str(profit_pct)) / Decimal("100")
+            ).quantize(Decimal("0.000001"))
 
         for level_index, referrer in enumerate(referrers):
             level = level_index + 1
@@ -240,7 +253,7 @@ async def get_potential_referral_bonuses_for_deal(
                 continue
 
             pct = INVEST_REFERRAL_LEVEL_PERCENTS[level_index]
-            reward_amount = (amount * pct / Decimal("100")).quantize(Decimal("0.01"))
+            reward_amount = (estimated_profit * pct / Decimal("100")).quantize(Decimal("0.000001"))
             if reward_amount <= 0:
                 continue
 

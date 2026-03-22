@@ -313,14 +313,14 @@ def make_partners_bonuses_text(me: Mapping[str, Any]) -> str:
         count = me.get(f"referrals_level_{level}", 0)
         if level == 1 and not count:
             count = me.get("referrals_count", 0)
-        lines.append(f"{level} уровень — {int(count or 0)} чел. • 0.5% с инвестиций")
+        lines.append(f"{level} уровень — {int(count or 0)} чел. • 0.5% с прибыли по сделке")
 
     return (
         "🎁 <b>Реферальные бонусы</b>\n\n"
         + "\n".join(lines)
         + "\n\n"
         f"💎 Оборот команды: {team_float:.2f} USDT\n\n"
-        "📌 Бонус: 0.5% с инвестиций на каждом уровне\n"
+        "📌 Бонус: 0.5% от прибыли реферала по сделке на каждом уровне\n"
         "Начисляется, только если вы участвуете в той же сделке"
     )
 

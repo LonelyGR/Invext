@@ -225,9 +225,8 @@ async def participate_in_deal(
     user_locked.balance_usdt = current_balance - amount
     await db.flush()
 
-    # Инвестиционная реферальная линия (10 уровней по 0.5% с инвестиции),
-    # учитывающая участие реферера в этой же сделке.
-    await apply_referral_rewards_for_investment(db, investor=user_locked, deal=deal, investment_amount=amount)
+    # Реферальные бонусы с инвестиций начисляются при закрытии сделки от фактической прибыли
+    # (см. close_deal_flow + apply_referral_rewards_for_investment).
 
     logger.info(
         "Deal participation created: deal_id=%s user_id=%s amount=%s",
@@ -292,6 +291,22 @@ async def close_deal_flow(db: AsyncSession, deal: Deal) -> None:
             p.profit_amount = Decimal("0")
         p.status = PARTICIPATION_STATUS_IN_PROGRESS
 
+    if participations:
+        await db.flush()
+
+    # Реферальная линия: 0.5% с уровня от фактической прибыли участника по этой сделке
+    # (profit_amount), а не от суммы инвестиции.
+    for p in participations:
+        inv_user = await db.get(User, p.user_id)
+        if not inv_user:
+            continue
+        profit_for_ref = p.profit_amount or Decimal("0")
+        await apply_referral_rewards_for_investment(
+            db,
+            investor=inv_user,
+            deal=deal,
+            user_profit_usdt=profit_for_ref,
+        )
     if participations:
         await db.flush()
 
