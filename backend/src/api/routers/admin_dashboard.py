@@ -69,6 +69,7 @@ from src.services.ledger_service import (
     get_balance_usdt,
 )
 from src.services.deal_service import (
+    collection_end_local_for_start,
     get_active_deal,
     get_active_deal_legacy,
     open_new_deal,
@@ -715,20 +716,17 @@ async def open_deal_now(
         )
 
     now_utc = dt.datetime.now(dt.timezone.utc)
-    # Логика окна как в планировщике Europe/Chisinau.
     from zoneinfo import ZoneInfo  # локальный импорт, чтобы не тянуть наверх
 
     schedule_tz = ZoneInfo("Europe/Chisinau")
     now_local = now_utc.astimezone(schedule_tz)
+    if now_local.weekday() in (5, 6):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="В субботу и воскресенье открытие нового сбора отключено. Дождитесь понедельника.",
+        )
     start_local = now_local
-    if start_local.weekday() == 4:  # Friday
-        close_local = (start_local + dt.timedelta(days=3)).replace(
-            hour=12, minute=0, second=0, microsecond=0
-        )
-    else:
-        close_local = (start_local + dt.timedelta(days=1)).replace(
-            hour=12, minute=0, second=0, microsecond=0
-        )
+    close_local = collection_end_local_for_start(start_local)
     start_at = start_local.astimezone(dt.timezone.utc)
     end_at = close_local.astimezone(dt.timezone.utc)
 

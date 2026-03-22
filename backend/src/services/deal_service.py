@@ -42,12 +42,58 @@ from src.services.notification_service import (
 
 logger = logging.getLogger(__name__)
 PAYOUT_TZ = ZoneInfo("Europe/Chisinau")
+# Единый календарь сделок (окно сбора) — то же, что в планировщике и админке.
+SCHEDULE_TZ = PAYOUT_TZ
 
 # Проценты реферального бонуса по уровням (1–10)
 REFERRAL_LEVEL_PERCENTS: List[float] = [
     7.0, 2.0, 1.0, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5,
 ]
 MAX_REFERRAL_LEVELS = 10
+
+
+def collection_end_local_for_start(start_local: dt.datetime) -> dt.datetime:
+    """
+    Момент закрытия сбора по локальному времени начала (Europe/Chisinau).
+
+    Правила (как в планировщике 13:00):
+    - Пн–Чт и т.д.: закрытие на следующий календарный день в 12:00;
+    - Пятница: закрытие в понедельник в 12:00 (суббота/воскресенье не используются как день закрытия).
+
+    Не смешивать с «72 часа»: это именно календарные сутки / перенос через выходные для пятницы.
+    """
+    if start_local.tzinfo is None:
+        start_local = start_local.replace(tzinfo=SCHEDULE_TZ)
+    else:
+        start_local = start_local.astimezone(SCHEDULE_TZ)
+    if start_local.weekday() == 4:  # Friday
+        return (start_local + dt.timedelta(days=3)).replace(
+            hour=12, minute=0, second=0, microsecond=0
+        )
+    return (start_local + dt.timedelta(days=1)).replace(
+        hour=12, minute=0, second=0, microsecond=0
+    )
+
+
+def scheduled_collection_window_1300_chisinau(
+    now_utc: dt.datetime,
+) -> Optional[tuple[dt.datetime, dt.datetime]]:
+    """
+    Окно сбора для автоматического открытия сделки в 13:00 Europe/Chisinau.
+
+    В субботу и воскресенье новые сделки по расписанию не открываются (возвращает None).
+    Иначе start = сегодня 13:00 локально, end = collection_end_local_for_start(start).
+    Возвращает (start_at UTC, end_at UTC).
+    """
+    now_local = now_utc.astimezone(SCHEDULE_TZ)
+    if now_local.weekday() in (5, 6):
+        return None
+    start_local = now_local.replace(hour=13, minute=0, second=0, microsecond=0)
+    end_local = collection_end_local_for_start(start_local)
+    return (
+        start_local.astimezone(dt.timezone.utc),
+        end_local.astimezone(dt.timezone.utc),
+    )
 
 
 def calculate_payout_at_for_investment(now_utc: Optional[dt.datetime] = None) -> dt.datetime:

@@ -16,6 +16,7 @@ from src.services.deal_service import (
     open_new_deal_by_schedule,
     process_due_deals,
     process_pending_payouts,
+    scheduled_collection_window_1300_chisinau,
     send_referral_bonus_reminders_for_active_deal,
 )
 
@@ -69,22 +70,14 @@ def init_deal_scheduler(scheduler: AsyncIOScheduler, db_factory) -> None:
 
     async def _job_open_deal_1300():
         logger.info("open_deal_1300 job started")
-        # Окно сделки:
-        # - обычный день: с 13:00 до следующего дня 12:00;
-        # - если открылась в пятницу: закрытие в понедельник в 12:00 (без закрытия в выходные).
+        # Окно сбора — единая функция в deal_service (пятница → понедельник 12:00;
+        # суббота/воскресенье: новые сделки по cron не открываем).
         now_utc = dt.datetime.now(dt.timezone.utc)
-        now_local = now_utc.astimezone(SCHEDULE_TZ)
-        start_local = now_local.replace(hour=13, minute=0, second=0, microsecond=0)
-        if start_local.weekday() == 4:  # Friday
-            close_local = (start_local + dt.timedelta(days=3)).replace(
-                hour=12, minute=0, second=0, microsecond=0
-            )
-        else:
-            close_local = (start_local + dt.timedelta(days=1)).replace(
-                hour=12, minute=0, second=0, microsecond=0
-            )
-        start_at = start_local.astimezone(dt.timezone.utc)
-        end_at = close_local.astimezone(dt.timezone.utc)
+        window = scheduled_collection_window_1300_chisinau(now_utc)
+        if window is None:
+            logger.info("open_deal_1300: skipped (weekend — no scheduled collection open)")
+            return
+        start_at, end_at = window
 
         async with db_factory() as db:
             logger.debug("open_deal_1300: session created")
