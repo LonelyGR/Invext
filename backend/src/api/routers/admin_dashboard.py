@@ -353,6 +353,72 @@ async def bulk_ledger_credit_all_users(
     }
 
 
+@router.post("/users/bulk-ledger-reset")
+async def bulk_ledger_reset_all_users(
+    request: Request,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Обнулить баланс всем пользователям (очистка их ledger-записей).
+    Никакие другие сущности не удаляются.
+    Требует confirm="RESET_ALL_BALANCES".
+    """
+    admin_token_id, _ = await get_admin_context(request)
+
+    confirm = str(body.get("confirm", "")).strip().upper()
+    if confirm != "RESET_ALL_BALANCES":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail='Подтвердите операцию: передайте confirm="RESET_ALL_BALANCES"',
+        )
+
+    has_active_participations = await db.execute(
+        select(DealParticipation.id)
+        .where(DealParticipation.status.in_(("active", "in_progress_payout")))
+        .limit(1)
+    )
+    if has_active_participations.scalar_one_or_none() is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Нельзя обнулить всем: есть незавершённые участия в сделках",
+        )
+
+    has_active_legacy_investments = await db.execute(
+        select(DealInvestment.id).where(DealInvestment.status == "active").limit(1)
+    )
+    if has_active_legacy_investments.scalar_one_or_none() is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Нельзя обнулить всем: есть активные инвестиции",
+        )
+
+    user_ids_result = await db.execute(select(User.id))
+    user_ids = [row[0] for row in user_ids_result.all()]
+    deleted_total = 0
+    for uid in user_ids:
+        deleted_total += await clear_user_ledger_entries(db, user_id=uid)
+        u = await db.get(User, uid)
+        if u:
+            u.balance_usdt = Decimal("0")
+    await db.flush()
+
+    await log_admin_action(
+        db=db,
+        admin_token_id=admin_token_id,
+        action_type="BULK_LEDGER_RESET",
+        entity_type="SYSTEM",
+        entity_id=0,
+    )
+
+    return {
+        "ok": True,
+        "users_affected": len(user_ids),
+        "deleted_ledger_rows": deleted_total,
+        "new_balance_usdt": "0",
+    }
+
+
 @router.get("/users/{user_id}/ledger", response_model=LedgerList)
 async def user_ledger(
     request: Request,
@@ -1451,6 +1517,7 @@ async def get_system_settings_admin(
         "min_invest_usdt": str(row.min_invest_usdt),
         "max_invest_usdt": str(row.max_invest_usdt),
         "allow_deposits": bool(row.allow_deposits),
+        "allow_investments": bool(row.allow_investments),
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
     }
 
@@ -1476,6 +1543,7 @@ async def update_system_settings_admin(
         "min_invest_usdt",
         "max_invest_usdt",
         "allow_deposits",
+        "allow_investments",
     }
     if field not in allowed_fields:
         raise HTTPException(status_code=400, detail="unknown field")
@@ -1484,7 +1552,7 @@ async def update_system_settings_admin(
         result = await db.execute(select(SystemSettings).limit(1).with_for_update())
         row = result.scalar_one()
 
-        if field == "allow_deposits":
+        if field in {"allow_deposits", "allow_investments"}:
             value_raw = body.get("value")
             if isinstance(value_raw, bool):
                 bool_value = value_raw
@@ -1496,7 +1564,10 @@ async def update_system_settings_admin(
                     bool_value = False
                 else:
                     raise HTTPException(status_code=400, detail="value must be boolean")
-            row.allow_deposits = bool_value
+            if field == "allow_deposits":
+                row.allow_deposits = bool_value
+            else:
+                row.allow_investments = bool_value
         else:
             try:
                 value = Decimal(raw_value)

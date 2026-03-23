@@ -18,6 +18,7 @@ class SettingsDTO:
     max_invest_usdt: Decimal
     deal_amount_usdt: Decimal
     allow_deposits: bool
+    allow_investments: bool
 
 
 _SETTINGS_CACHE: Optional[SettingsDTO] = None
@@ -45,6 +46,7 @@ async def get_system_settings(db: AsyncSession) -> SettingsDTO:
         max_invest_usdt=Decimal(row.max_invest_usdt),
         deal_amount_usdt=Decimal(row.deal_amount_usdt),
         allow_deposits=bool(row.allow_deposits),
+        allow_investments=bool(row.allow_investments),
     )
     return _SETTINGS_CACHE
 

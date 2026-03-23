@@ -59,6 +59,11 @@ async def invest(
     Минимальная сумма — берется из SystemSettings. Баланс считается по ledger.
     """
     sys_settings = await get_system_settings(db)
+    if not getattr(sys_settings, "allow_investments", True):
+        raise HTTPException(
+            status_code=400,
+            detail="Участие в сделках временно недоступно по техническим причинам. Попробуйте позже.",
+        )
     amount = body.amount_usdt.quantize(Decimal("0.01"))
     if amount < sys_settings.min_invest_usdt:
         raise HTTPException(

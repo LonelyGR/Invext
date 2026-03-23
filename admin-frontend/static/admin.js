@@ -152,19 +152,6 @@ async function loadUsers() {
   section.innerHTML = `
     <h1>Пользователи</h1>
     <p class="section-desc">Список пользователей, кеш баланса и текущие инвестиции. Пагинация и поиск — без бесконечной прокрутки.</p>
-    <div class="panel-card bulk-credit-card">
-      <div class="bulk-credit-header">
-        <h3>Массовое начисление</h3>
-        <p class="section-desc">Одна сумма на баланс (ledger) для <b>всех</b> пользователей. Двойное подтверждение.</p>
-      </div>
-      <div class="bulk-credit-row">
-        <label class="bulk-credit-label">Сумма (USDT)</label>
-        <input type="number" step="0.01" min="0" id="bulk-credit-amount" class="settings-input bulk-credit-input" placeholder="100" />
-        <label class="bulk-credit-label">Комментарий в ledger</label>
-        <input type="text" id="bulk-credit-comment" class="settings-input bulk-credit-input" placeholder="Необязательно" />
-        <button type="button" id="bulk-credit-btn" class="btn-bulk-credit">Зачислить всем</button>
-      </div>
-    </div>
     <div class="panel-card">
       <div class="toolbar users-toolbar">
         <div class="search-field">
@@ -231,19 +218,6 @@ async function loadUsers() {
     section.innerHTML = `
       <h1>Пользователи</h1>
       <p class="section-desc">Список пользователей, кеш баланса и текущие инвестиции. Пагинация и поиск — без бесконечной прокрутки.</p>
-      <div class="panel-card bulk-credit-card">
-        <div class="bulk-credit-header">
-          <h3>Массовое начисление</h3>
-          <p class="section-desc">Одна сумма на баланс (ledger) для <b>всех</b> пользователей. Двойное подтверждение.</p>
-        </div>
-        <div class="bulk-credit-row">
-          <label class="bulk-credit-label">Сумма (USDT)</label>
-          <input type="number" step="0.01" min="0" id="bulk-credit-amount" class="settings-input bulk-credit-input" placeholder="100" />
-          <label class="bulk-credit-label">Комментарий в ledger</label>
-          <input type="text" id="bulk-credit-comment" class="settings-input bulk-credit-input" placeholder="Необязательно" />
-          <button type="button" id="bulk-credit-btn" class="btn-bulk-credit">Зачислить всем</button>
-        </div>
-      </div>
       <div class="panel-card">
         <div class="toolbar users-toolbar">
           <div class="search-field">
@@ -313,48 +287,6 @@ async function loadUsers() {
     document.getElementById("users-next").onclick = () => {
       usersListState.page += 1;
       loadUsers();
-    };
-
-    document.getElementById("bulk-credit-btn").onclick = async () => {
-      const amtRaw = document.getElementById("bulk-credit-amount")?.value?.trim();
-      const comment = document.getElementById("bulk-credit-comment")?.value?.trim() ?? "";
-      const amt = parseFloat(amtRaw.replace(",", "."));
-      if (!amtRaw || Number.isNaN(amt) || amt <= 0) {
-        alert("Укажите сумму больше 0");
-        return;
-      }
-      const first = confirm(
-        `Всем пользователям будет зачислено ${amt} USDT каждому (ledger DEPOSIT). Продолжить?`
-      );
-      if (!first) return;
-      const phrase = prompt('Для подтверждения введите: BULK_CREDIT');
-      if ((phrase || "").trim().toUpperCase() !== "BULK_CREDIT") {
-        alert("Операция отменена.");
-        return;
-      }
-      const btn = document.getElementById("bulk-credit-btn");
-      try {
-        btn.disabled = true;
-        btn.textContent = "Обработка…";
-        const res = await apiRequest("/users/bulk-ledger-credit", {
-          method: "POST",
-          body: JSON.stringify({
-            amount_usdt: String(amt),
-            comment: comment || undefined,
-            confirm: "BULK_CREDIT",
-          }),
-        });
-        showToast(
-          `Зачислено: ${res.users_affected} польз. × ${res.amount_usdt} USDT (всего ${res.total_usdt_credited} USDT)`
-        );
-        loadUsers();
-        loadDashboard();
-      } catch (e) {
-        alert(e.message || "Ошибка");
-      } finally {
-        btn.disabled = false;
-        btn.textContent = "Зачислить всем";
-      }
     };
 
     section.querySelectorAll("tr.table-row-link").forEach((row) => {
@@ -877,7 +809,6 @@ async function loadUserDetail(userId) {
               </label>
               <button type="button" id="balance-adjust-apply-btn">Начислить / списать</button>
             </div>
-            <button type="button" id="balance-reset-btn" class="btn-reject">Обнулить только баланс</button>
             <button id="ledger-export-btn">Экспорт CSV</button>
           </div>
         </div>
@@ -971,39 +902,6 @@ async function loadUserDetail(userId) {
       };
     }
 
-    const resetBtn = document.getElementById("balance-reset-btn");
-    if (resetBtn) {
-      resetBtn.onclick = async () => {
-        const first = confirm(
-          "Будут удалены только ledger-записи, которые формируют баланс пользователя. Профиль, рефералы, настройки и другие данные не затрагиваются. Продолжить?"
-        );
-        if (!first) return;
-        const phrase = prompt("Для подтверждения введите: RESET_BALANCE");
-        if ((phrase || "").trim().toUpperCase() !== "RESET_BALANCE") {
-          alert("Операция отменена.");
-          return;
-        }
-        try {
-          resetBtn.disabled = true;
-          resetBtn.textContent = "Сброс…";
-          const res = await apiRequest(`/users/${userId}/ledger-reset`, {
-            method: "POST",
-            body: JSON.stringify({ confirm: "RESET_BALANCE" }),
-          });
-          showToast(
-            `Баланс обнулён. Удалено ledger-записей: ${res.deleted_ledger_rows}`
-          );
-          loadUserDetail(userId);
-          loadUsers();
-          loadDashboard();
-        } catch (e) {
-          alert(e.message || "Ошибка обнуления баланса");
-        } finally {
-          resetBtn.disabled = false;
-          resetBtn.textContent = "Обнулить только баланс";
-        }
-      };
-    }
   } catch (e) {
     section.innerHTML = `<h1>Пользователь</h1><div class="error">${e.message}</div>`;
   }
@@ -1162,6 +1060,16 @@ async function loadSettings() {
                 <span class="switch-slider"></span>
               </label>
             </div>
+            <div class="settings-field">
+              <div>
+                <div class="settings-label">Участие в сделках</div>
+                <div class="settings-hint">Технический запрет/разрешение новых инвестиций</div>
+              </div>
+              <label class="switch">
+                <input type="checkbox" id="allow_investments" ${s.allow_investments !== false ? "checked" : ""} />
+                <span class="switch-slider"></span>
+              </label>
+            </div>
           </div>
           <div class="settings-footer">
             <div class="settings-updated-at">
@@ -1172,6 +1080,20 @@ async function loadSettings() {
             </button>
           </div>
         </form>
+      </div>
+      <div class="panel-card bulk-credit-card">
+        <div class="bulk-credit-header">
+          <h2>Массовые действия с балансом</h2>
+          <p class="section-desc">Операции применяются сразу ко всем пользователям. Используйте только при необходимости.</p>
+        </div>
+        <div class="bulk-credit-row">
+          <label class="bulk-credit-label">Сумма (USDT)</label>
+          <input type="number" step="0.01" min="0" id="bulk-credit-amount" class="settings-input bulk-credit-input" placeholder="100" />
+          <label class="bulk-credit-label">Комментарий в ledger</label>
+          <input type="text" id="bulk-credit-comment" class="settings-input bulk-credit-input" placeholder="Необязательно" />
+          <button type="button" id="bulk-credit-btn" class="btn-bulk-credit">Зачислить всем</button>
+          <button type="button" id="bulk-reset-btn" class="btn-reject">Обнулить баланс всем</button>
+        </div>
       </div>
       <div class="panel-card danger-zone-card">
         <div class="danger-zone-header">
@@ -1254,6 +1176,14 @@ async function loadSettings() {
               value: Boolean(allowDepositsInput?.checked),
             }),
           });
+          const allowInvestmentsInput = document.getElementById("allow_investments");
+          await apiRequest("/system-settings", {
+            method: "PATCH",
+            body: JSON.stringify({
+              field: "allow_investments",
+              value: Boolean(allowInvestmentsInput?.checked),
+            }),
+          });
           showToast("Настройки успешно обновлены");
           loadSettings();
         } catch (e) {
@@ -1263,6 +1193,83 @@ async function loadSettings() {
             saveBtn.disabled = false;
             saveBtn.innerHTML = originalText;
           }
+        }
+      };
+    }
+
+    const bulkCreditBtn = document.getElementById("bulk-credit-btn");
+    if (bulkCreditBtn) {
+      bulkCreditBtn.onclick = async () => {
+        const amtRaw = document.getElementById("bulk-credit-amount")?.value?.trim();
+        const comment = document.getElementById("bulk-credit-comment")?.value?.trim() ?? "";
+        const amt = parseFloat((amtRaw || "").replace(",", "."));
+        if (!amtRaw || Number.isNaN(amt) || amt <= 0) {
+          alert("Укажите сумму больше 0");
+          return;
+        }
+        const first = confirm(
+          `Всем пользователям будет зачислено ${amt} USDT каждому (ledger DEPOSIT). Продолжить?`
+        );
+        if (!first) return;
+        const phrase = prompt("Для подтверждения введите: BULK_CREDIT");
+        if ((phrase || "").trim().toUpperCase() !== "BULK_CREDIT") {
+          alert("Операция отменена.");
+          return;
+        }
+        try {
+          bulkCreditBtn.disabled = true;
+          bulkCreditBtn.textContent = "Обработка…";
+          const res = await apiRequest("/users/bulk-ledger-credit", {
+            method: "POST",
+            body: JSON.stringify({
+              amount_usdt: String(amt),
+              comment: comment || undefined,
+              confirm: "BULK_CREDIT",
+            }),
+          });
+          showToast(
+            `Зачислено: ${res.users_affected} польз. × ${res.amount_usdt} USDT (всего ${res.total_usdt_credited} USDT)`
+          );
+          loadSettings();
+          loadDashboard();
+        } catch (e) {
+          alert(e.message || "Ошибка");
+        } finally {
+          bulkCreditBtn.disabled = false;
+          bulkCreditBtn.textContent = "Зачислить всем";
+        }
+      };
+    }
+
+    const bulkResetBtn = document.getElementById("bulk-reset-btn");
+    if (bulkResetBtn) {
+      bulkResetBtn.onclick = async () => {
+        const first = confirm(
+          "Будет удалён только ledger у всех пользователей и баланс станет 0. Остальные данные не затрагиваются. Продолжить?"
+        );
+        if (!first) return;
+        const phrase = prompt("Для подтверждения введите: RESET_ALL_BALANCES");
+        if ((phrase || "").trim().toUpperCase() !== "RESET_ALL_BALANCES") {
+          alert("Операция отменена.");
+          return;
+        }
+        try {
+          bulkResetBtn.disabled = true;
+          bulkResetBtn.textContent = "Сброс…";
+          const res = await apiRequest("/users/bulk-ledger-reset", {
+            method: "POST",
+            body: JSON.stringify({ confirm: "RESET_ALL_BALANCES" }),
+          });
+          showToast(
+            `Баланс обнулён у ${res.users_affected} пользователей. Удалено записей ledger: ${res.deleted_ledger_rows}`
+          );
+          loadSettings();
+          loadDashboard();
+        } catch (e) {
+          alert(e.message || "Ошибка обнуления баланса");
+        } finally {
+          bulkResetBtn.disabled = false;
+          bulkResetBtn.textContent = "Обнулить баланс всем";
         }
       };
     }

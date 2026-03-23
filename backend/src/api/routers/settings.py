@@ -33,6 +33,7 @@ async def get_system_settings_admin(
         "max_invest_usdt": str(row.max_invest_usdt),
         "deal_amount_usdt": str(row.deal_amount_usdt),
         "allow_deposits": bool(row.allow_deposits),
+        "allow_investments": bool(row.allow_investments),
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
     }
 
@@ -58,6 +59,7 @@ async def update_system_setting_field(
         "max_invest_usdt",
         "deal_amount_usdt",
         "allow_deposits",
+        "allow_investments",
     }
     if field not in allowed_fields:
         raise HTTPException(
@@ -69,7 +71,7 @@ async def update_system_setting_field(
         result = await db.execute(select(SystemSettings).limit(1).with_for_update())
         row = result.scalar_one()
 
-        if field == "allow_deposits":
+        if field in {"allow_deposits", "allow_investments"}:
             value_raw = payload.get("value")
             if isinstance(value_raw, bool):
                 bool_value = value_raw
@@ -84,7 +86,10 @@ async def update_system_setting_field(
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail="value must be boolean",
                     )
-            row.allow_deposits = bool_value
+            if field == "allow_deposits":
+                row.allow_deposits = bool_value
+            else:
+                row.allow_investments = bool_value
         else:
             try:
                 value = Decimal(raw_value)

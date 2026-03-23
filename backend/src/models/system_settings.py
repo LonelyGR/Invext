@@ -41,6 +41,9 @@ class SystemSettings(Base):
     allow_deposits: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default=true()
     )
+    allow_investments: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=true()
+    )
 
     deal_amount_usdt: Mapped[Decimal] = mapped_column(
         Numeric(18, 2), nullable=False, default=Decimal("50")
