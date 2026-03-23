@@ -373,26 +373,6 @@ async def bulk_ledger_reset_all_users(
             detail='Подтвердите операцию: передайте confirm="RESET_ALL_BALANCES"',
         )
 
-    has_active_participations = await db.execute(
-        select(DealParticipation.id)
-        .where(DealParticipation.status.in_(("active", "in_progress_payout")))
-        .limit(1)
-    )
-    if has_active_participations.scalar_one_or_none() is not None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Нельзя обнулить всем: есть незавершённые участия в сделках",
-        )
-
-    has_active_legacy_investments = await db.execute(
-        select(DealInvestment.id).where(DealInvestment.status == "active").limit(1)
-    )
-    if has_active_legacy_investments.scalar_one_or_none() is not None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Нельзя обнулить всем: есть активные инвестиции",
-        )
-
     user_ids_result = await db.execute(select(User.id))
     user_ids = [row[0] for row in user_ids_result.all()]
     deleted_total = 0

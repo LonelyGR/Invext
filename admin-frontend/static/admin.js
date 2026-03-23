@@ -431,7 +431,7 @@ async function loadDeals() {
           await apiRequest("/deals/open-now", { method: "POST" });
           loadDeals();
         } catch (e) {
-          alert(e.message);
+          showToast(e.message || "Ошибка открытия сделки", "error");
         }
       };
     }
@@ -441,10 +441,10 @@ async function loadDeals() {
       sendNotifBtn.onclick = async () => {
         try {
           const res = await apiRequest("/deals/send-notifications", { method: "POST" });
-          alert(`Уведомления отправлены: ${res.sent_count} получателей.`);
+          showToast(`Уведомления отправлены: ${res.sent_count} получателей.`, "success");
           loadDeals();
         } catch (e) {
-          alert(e.message || "Ошибка отправки уведомлений");
+          showToast(e.message || "Ошибка отправки уведомлений", "error");
         }
       };
     }
@@ -452,15 +452,21 @@ async function loadDeals() {
     const forceCloseBtn = document.getElementById("deal-force-close-btn");
     if (forceCloseBtn) {
       forceCloseBtn.onclick = async () => {
-        if (!confirm("Вы уверены, что хотите досрочно закрыть текущую активную сделку?")) {
+        const forceCloseConfirm = await openUxDialog({
+          title: "Досрочное закрытие",
+          message: "Вы уверены, что хотите досрочно закрыть текущую активную сделку?",
+          confirmText: "Закрыть",
+          cancelText: "Отмена",
+        });
+        if (!forceCloseConfirm.confirmed) {
           return;
         }
         try {
           await apiRequest("/deals/force-close", { method: "POST" });
-          alert("Сделка досрочно закрыта. Участникам отправлены уведомления.");
+          showToast("Сделка досрочно закрыта. Участникам отправлены уведомления.", "success");
           loadDeals();
         } catch (e) {
-          alert(e.message || "Ошибка досрочного закрытия сделки");
+          showToast(e.message || "Ошибка досрочного закрытия сделки", "error");
         }
       };
     }
@@ -474,7 +480,7 @@ async function loadDeals() {
         if (!dealId || !input) return;
         const value = parseFloat(input.value.replace(",", "."));
         if (Number.isNaN(value)) {
-          alert("Введите корректное значение процента");
+          showToast("Введите корректное значение процента", "error");
           return;
         }
         try {
@@ -482,10 +488,10 @@ async function loadDeals() {
             method: "PATCH",
             body: JSON.stringify({ profit_percent: value }),
           });
-          alert("Доходность сделки обновлена");
+          showToast("Доходность сделки обновлена", "success");
           loadDeals();
         } catch (e) {
-          alert(e.message);
+          showToast(e.message || "Ошибка обновления доходности", "error");
         }
       };
     });
@@ -883,7 +889,7 @@ async function loadUserDetail(userId) {
         const raw = amountInput.value;
         const amount = parseFloat(raw.replace(",", "."));
         if (!raw || Number.isNaN(amount) || amount === 0) {
-          alert("Введите ненулевую сумму корректировки (можно со знаком - для списания).");
+          showToast("Введите ненулевую сумму корректировки (можно со знаком - для списания).", "error");
           return;
         }
         try {
@@ -894,10 +900,10 @@ async function loadUserDetail(userId) {
               comment: commentInput ? commentInput.value : null,
             }),
           });
-          alert("Запрос на корректировку отправлен администраторам в бота. Итоговый баланс изменится после подтверждения.");
+          showToast("Запрос на корректировку отправлен администраторам в бота. Итоговый баланс изменится после подтверждения.", "info");
           loadUserDetail(userId);
         } catch (e) {
-          alert(e.message || "Ошибка корректировки баланса");
+          showToast(e.message || "Ошибка корректировки баланса", "error");
         }
       };
     }
@@ -984,7 +990,7 @@ async function loadWithdrawals() {
           });
           loadWithdrawals();
         } catch (e) {
-          alert(e.message);
+          showToast(e.message || "Ошибка обработки вывода", "error");
         }
       };
     });
@@ -1138,22 +1144,22 @@ async function loadSettings() {
             const raw = input.value.trim().replace(",", ".");
             const num = parseFloat(raw);
             if (Number.isNaN(num) || num <= 0) {
-              alert(`Поле "${field}" должно быть числом больше 0`);
+              showToast(`Поле "${field}" должно быть числом больше 0`, "error");
               return;
             }
             values[field] = num;
           }
 
           if (values.min_deposit_usdt > values.max_deposit_usdt) {
-            alert("Мин. депозит не может быть больше макс. депозита");
+            showToast("Мин. депозит не может быть больше макс. депозита", "error");
             return;
           }
           if (values.min_withdraw_usdt > values.max_withdraw_usdt) {
-            alert("Мин. вывод не может быть больше макс. вывода");
+            showToast("Мин. вывод не может быть больше макс. вывода", "error");
             return;
           }
           if (values.min_invest_usdt > values.max_invest_usdt) {
-            alert("Мин. инвестиция не может быть больше макс. инвестиции");
+            showToast("Мин. инвестиция не может быть больше макс. инвестиции", "error");
             return;
           }
 
@@ -1187,7 +1193,7 @@ async function loadSettings() {
           showToast("Настройки успешно обновлены");
           loadSettings();
         } catch (e) {
-          alert(e.message);
+          showToast(e.message || "Ошибка сохранения настроек", "error");
         } finally {
           if (saveBtn) {
             saveBtn.disabled = false;
@@ -1204,16 +1210,25 @@ async function loadSettings() {
         const comment = document.getElementById("bulk-credit-comment")?.value?.trim() ?? "";
         const amt = parseFloat((amtRaw || "").replace(",", "."));
         if (!amtRaw || Number.isNaN(amt) || amt <= 0) {
-          alert("Укажите сумму больше 0");
+          showToast("Укажите сумму больше 0", "error");
           return;
         }
-        const first = confirm(
-          `Всем пользователям будет зачислено ${amt} USDT каждому (ledger DEPOSIT). Продолжить?`
-        );
-        if (!first) return;
-        const phrase = prompt("Для подтверждения введите: BULK_CREDIT");
-        if ((phrase || "").trim().toUpperCase() !== "BULK_CREDIT") {
-          alert("Операция отменена.");
+        const first = await openUxDialog({
+          title: "Массовое начисление",
+          message: `Всем пользователям будет зачислено ${amt} USDT каждому (ledger DEPOSIT). Продолжить?`,
+          confirmText: "Продолжить",
+          cancelText: "Отмена",
+        });
+        if (!first.confirmed) return;
+        const phrase = await openUxDialog({
+          title: "Подтверждение",
+          message: "Введите код подтверждения: BULK_CREDIT",
+          confirmText: "Подтвердить",
+          cancelText: "Отмена",
+          inputPlaceholder: "BULK_CREDIT",
+        });
+        if (!phrase.confirmed || (phrase.value || "").trim().toUpperCase() !== "BULK_CREDIT") {
+          showToast("Операция отменена.", "info");
           return;
         }
         try {
@@ -1233,7 +1248,7 @@ async function loadSettings() {
           loadSettings();
           loadDashboard();
         } catch (e) {
-          alert(e.message || "Ошибка");
+          showToast(e.message || "Ошибка", "error");
         } finally {
           bulkCreditBtn.disabled = false;
           bulkCreditBtn.textContent = "Зачислить всем";
@@ -1244,13 +1259,22 @@ async function loadSettings() {
     const bulkResetBtn = document.getElementById("bulk-reset-btn");
     if (bulkResetBtn) {
       bulkResetBtn.onclick = async () => {
-        const first = confirm(
-          "Будет удалён только ledger у всех пользователей и баланс станет 0. Остальные данные не затрагиваются. Продолжить?"
-        );
-        if (!first) return;
-        const phrase = prompt("Для подтверждения введите: RESET_ALL_BALANCES");
-        if ((phrase || "").trim().toUpperCase() !== "RESET_ALL_BALANCES") {
-          alert("Операция отменена.");
+        const first = await openUxDialog({
+          title: "Массовое обнуление баланса",
+          message: "Будет удалён только ledger у всех пользователей и баланс станет 0. Остальные данные не затрагиваются. Продолжить?",
+          confirmText: "Обнулить всем",
+          cancelText: "Отмена",
+        });
+        if (!first.confirmed) return;
+        const phrase = await openUxDialog({
+          title: "Подтверждение",
+          message: "Введите код подтверждения: RESET_ALL_BALANCES",
+          confirmText: "Подтвердить",
+          cancelText: "Отмена",
+          inputPlaceholder: "RESET_ALL_BALANCES",
+        });
+        if (!phrase.confirmed || (phrase.value || "").trim().toUpperCase() !== "RESET_ALL_BALANCES") {
+          showToast("Операция отменена.", "info");
           return;
         }
         try {
@@ -1266,7 +1290,7 @@ async function loadSettings() {
           loadSettings();
           loadDashboard();
         } catch (e) {
-          alert(e.message || "Ошибка обнуления баланса");
+          showToast(e.message || "Ошибка обнуления баланса", "error");
         } finally {
           bulkResetBtn.disabled = false;
           bulkResetBtn.textContent = "Обнулить баланс всем";
@@ -1277,14 +1301,23 @@ async function loadSettings() {
     const resetBtn = document.getElementById("db-reset-btn");
     if (resetBtn) {
       resetBtn.onclick = async () => {
-        const firstConfirm = confirm(
-          "Это удалит ВСЕ тестовые данные (пользователи, сделки, платежи, леджер, выводы). Продолжить?"
-        );
-        if (!firstConfirm) return;
+        const firstConfirm = await openUxDialog({
+          title: "Очистка базы",
+          message: "Это удалит ВСЕ тестовые данные (пользователи, сделки, платежи, леджер, выводы). Продолжить?",
+          confirmText: "Очистить",
+          cancelText: "Отмена",
+        });
+        if (!firstConfirm.confirmed) return;
 
-        const phrase = prompt('Для подтверждения введите слово RESET');
-        if ((phrase || "").trim().toUpperCase() !== "RESET") {
-          alert("Очистка отменена: подтверждение не пройдено.");
+        const phrase = await openUxDialog({
+          title: "Подтверждение",
+          message: "Для подтверждения введите слово RESET",
+          confirmText: "Подтвердить",
+          cancelText: "Отмена",
+          inputPlaceholder: "RESET",
+        });
+        if (!phrase.confirmed || (phrase.value || "").trim().toUpperCase() !== "RESET") {
+          showToast("Очистка отменена: подтверждение не пройдено.", "info");
           return;
         }
 
@@ -1303,7 +1336,7 @@ async function loadSettings() {
           if (location.hash === "#withdrawals") loadWithdrawals();
           if (location.hash === "#logs") loadLogs();
         } catch (e) {
-          alert(e.message || "Ошибка очистки базы");
+          showToast(e.message || "Ошибка очистки базы", "error");
         } finally {
           resetBtn.disabled = false;
           resetBtn.innerHTML = '<span class="btn-label">Очистить базу данных</span>';
@@ -1315,15 +1348,16 @@ async function loadSettings() {
   }
 }
 
-function showToast(message) {
+function showToast(message, type = "success") {
   const existing = document.querySelector(".toast");
   if (existing) {
     existing.remove();
   }
+  const icon = type === "error" ? "⚠️" : type === "info" ? "ℹ️" : "✅";
   const el = document.createElement("div");
   el.className = "toast";
   el.innerHTML = `
-    <span class="toast-icon">✅</span>
+    <span class="toast-icon">${icon}</span>
     <span class="toast-message">${message}</span>
   `;
   document.body.appendChild(el);
@@ -1332,6 +1366,84 @@ function showToast(message) {
     el.style.opacity = "0";
     setTimeout(() => el.remove(), 300);
   }, 2500);
+}
+
+function ensureUxDialogStyles() {
+  if (document.getElementById("ux-dialog-styles")) return;
+  const style = document.createElement("style");
+  style.id = "ux-dialog-styles";
+  style.textContent = `
+    .ux-dialog-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.5); display:flex; align-items:center; justify-content:center; z-index: 9999; }
+    .ux-dialog { width: min(92vw, 460px); background: #12131a; color: #eaeaf2; border: 1px solid #2a2d3a; border-radius: 14px; box-shadow: 0 14px 50px rgba(0,0,0,.45); padding: 18px; }
+    .ux-dialog-title { margin: 0 0 8px 0; font-size: 18px; font-weight: 700; }
+    .ux-dialog-message { margin: 0 0 14px 0; white-space: pre-wrap; line-height: 1.4; color: #d4d7e5; }
+    .ux-dialog-input { width: 100%; box-sizing: border-box; margin-bottom: 14px; border:1px solid #3a3f52; background:#0f1118; color:#f0f2ff; border-radius:10px; padding:10px 12px; }
+    .ux-dialog-actions { display:flex; justify-content:flex-end; gap:10px; }
+    .ux-btn { border: 1px solid #3a3f52; background: #1a1e2b; color: #f0f2ff; border-radius: 10px; padding: 9px 14px; cursor: pointer; }
+    .ux-btn-primary { background: #8a4b18; border-color: #a35b1f; }
+  `;
+  document.head.appendChild(style);
+}
+
+function openUxDialog({ title, message, confirmText = "OK", cancelText = null, inputPlaceholder = "" }) {
+  ensureUxDialogStyles();
+  return new Promise((resolve) => {
+    const backdrop = document.createElement("div");
+    backdrop.className = "ux-dialog-backdrop";
+
+    const dialog = document.createElement("div");
+    dialog.className = "ux-dialog";
+    dialog.innerHTML = `
+      <h3 class="ux-dialog-title"></h3>
+      <p class="ux-dialog-message"></p>
+      ${inputPlaceholder ? '<input class="ux-dialog-input" type="text" />' : ""}
+      <div class="ux-dialog-actions"></div>
+    `;
+
+    const titleEl = dialog.querySelector(".ux-dialog-title");
+    const msgEl = dialog.querySelector(".ux-dialog-message");
+    titleEl.textContent = title || "Подтверждение";
+    msgEl.textContent = message || "";
+
+    const actions = dialog.querySelector(".ux-dialog-actions");
+    const input = dialog.querySelector(".ux-dialog-input");
+    if (input) input.placeholder = inputPlaceholder;
+
+    const close = (confirmed) => {
+      const value = input ? input.value : "";
+      backdrop.remove();
+      resolve({ confirmed, value });
+    };
+
+    if (cancelText) {
+      const cancelBtn = document.createElement("button");
+      cancelBtn.className = "ux-btn";
+      cancelBtn.type = "button";
+      cancelBtn.textContent = cancelText;
+      cancelBtn.onclick = () => close(false);
+      actions.appendChild(cancelBtn);
+    }
+
+    const okBtn = document.createElement("button");
+    okBtn.className = "ux-btn ux-btn-primary";
+    okBtn.type = "button";
+    okBtn.textContent = confirmText;
+    okBtn.onclick = () => close(true);
+    actions.appendChild(okBtn);
+
+    backdrop.addEventListener("click", (e) => {
+      if (e.target === backdrop && cancelText) close(false);
+    });
+    dialog.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") close(true);
+      if (e.key === "Escape" && cancelText) close(false);
+    });
+
+    backdrop.appendChild(dialog);
+    document.body.appendChild(backdrop);
+    if (input) input.focus();
+    else okBtn.focus();
+  });
 }
 
 async function loadLogs() {
