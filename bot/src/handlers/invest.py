@@ -100,7 +100,25 @@ async def invest_participate(callback: CallbackQuery, state: FSMContext):
     """Пользователь нажал «Участвовать» — просим ввести сумму с подсказкой минимума."""
     telegram_id = callback.from_user.id
     try:
+        active = await api.get_active_deal()
         settings = await api.get_system_settings()
+        if not active.get("active"):
+            await state.clear()
+            await callback.message.edit_text(
+                "⏳ Сбор на сделку уже закрыт.\n\nОжидайте следующего открытия.",
+                reply_markup=_invest_deal_kb(with_participate=False),
+            )
+            await callback.answer()
+            return
+        if settings.get("allow_investments") is False:
+            await state.clear()
+            await callback.message.edit_text(
+                "⚠️ Участие в сделках временно недоступно по техническим причинам.\n\nПопробуйте позже.",
+                reply_markup=_invest_deal_kb(with_participate=False),
+            )
+            await callback.answer()
+            return
+
         min_invest = settings.get("min_invest_usdt")
     except Exception:
         min_invest = None
