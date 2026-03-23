@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
 
@@ -23,7 +23,7 @@ class BroadcastDelivery(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     broadcast_id: Mapped[int] = mapped_column(ForeignKey("broadcast_messages.id"), index=True, nullable=False)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True, nullable=False)
-    telegram_id: Mapped[int] = mapped_column(index=True, nullable=False)
+    telegram_id: Mapped[int] = mapped_column(BigInteger, index=True, nullable=False)
 
     status: Mapped[str] = mapped_column(String(24), nullable=False, default=DELIVERY_STATUS_PENDING, index=True)
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
