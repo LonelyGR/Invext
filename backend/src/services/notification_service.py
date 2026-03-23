@@ -66,6 +66,31 @@ def format_time_chisinau(when: dt.datetime) -> str:
     return f"{weekday}, {time_part}{suffix}"
 
 
+def format_remaining_until(when: dt.datetime, now: Optional[dt.datetime] = None) -> str:
+    """
+    Формат «N дн M ч K мин» / «M ч K мин» до целевого времени в Europe/Chisinau.
+    """
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=dt.timezone.utc)
+    target_local = when.astimezone(DISPLAY_TZ)
+
+    base = now or dt.datetime.now(dt.timezone.utc)
+    if base.tzinfo is None:
+        base = base.replace(tzinfo=dt.timezone.utc)
+    base_local = base.astimezone(DISPLAY_TZ)
+
+    delta = target_local - base_local
+    total_seconds = max(0, int(delta.total_seconds()))
+
+    days, rem = divmod(total_seconds, 86400)
+    hours, rem = divmod(rem, 3600)
+    minutes = rem // 60
+
+    if days > 0:
+        return f"{days} дн {hours} ч {minutes} мин"
+    return f"{hours} ч {minutes} мин"
+
+
 async def send_telegram_message(
     chat_id: int,
     text: str,
@@ -166,6 +191,7 @@ async def broadcast_deal_closed(
         return
 
     next_open_human = format_time_chisinau(next_open_at) if next_open_at else "—"
+    next_open_in_human = format_remaining_until(next_open_at) if next_open_at else "—"
 
     sent = 0
     for tid in telegram_ids:
@@ -184,7 +210,8 @@ async def broadcast_deal_closed(
             lines.append(f"\nУпущенная прибыль с рефералов: {ref_missed:.2f} USDT.\n")
             lines.append("⚠️ Вы не участвовали в сборе, поэтому не получили реферальное вознаграждение.\n")
 
-        lines.append(f"\nСледующий сбор откроется:\n⏰ {next_open_human}\n\n")
+        lines.append(f"\nСледующий сбор откроется:\n⏰ {next_open_human}\n")
+        lines.append(f"До открытия следующей сделки: {next_open_in_human}.\n\n")
         lines.append("Для участия используйте нашего Telegram бота.")
 
         text = "".join(lines)

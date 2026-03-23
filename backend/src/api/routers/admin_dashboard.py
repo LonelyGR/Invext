@@ -66,6 +66,7 @@ from src.services.ledger_service import (
     LEDGER_TYPE_PROFIT,
     LEDGER_TYPE_WITHDRAW,
     LEDGER_TYPE_REFERRAL_BONUS,
+    clear_user_ledger_entries,
     get_balance_usdt,
 )
 from src.services.deal_service import (
@@ -1191,6 +1192,84 @@ async def user_ledger_adjust(
 
     # Для совместимости с фронтом возвращаем новое поле, но баланс пока не меняем.
     return LedgerAdjustResponse(user_id=user_id, new_balance_usdt=user.balance_usdt)
+
+
+@router.post("/users/{user_id}/ledger-reset")
+async def reset_user_balance_only(
+    request: Request,
+    user_id: int,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Сбросить только баланс пользователя (очистка ledger_transactions для user_id).
+    Остальные сущности пользователя не затрагиваются.
+    Требует confirm="RESET_BALANCE".
+    """
+    admin_token_id, _ = await get_admin_context(request)
+
+    confirm = str(body.get("confirm", "")).strip().upper()
+    if confirm != "RESET_BALANCE":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail='Подтвердите операцию: передайте confirm="RESET_BALANCE"',
+        )
+
+    async with db.begin():
+        user_result = await db.execute(
+            select(User).where(User.id == user_id).with_for_update()
+        )
+        user = user_result.scalar_one_or_none()
+        if not user:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+        # Защита финансовой целостности: не сбрасываем ledger при незавершённых участиях.
+        active_participation = await db.execute(
+            select(DealParticipation.id)
+            .where(
+                DealParticipation.user_id == user_id,
+                DealParticipation.status.in_(("active", "in_progress_payout")),
+            )
+            .limit(1)
+        )
+        if active_participation.scalar_one_or_none() is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Нельзя сбросить баланс: у пользователя есть активные/незавершённые участия в сделках",
+            )
+
+        active_legacy_investment = await db.execute(
+            select(DealInvestment.id)
+            .where(
+                DealInvestment.user_id == user_id,
+                DealInvestment.status == "active",
+            )
+            .limit(1)
+        )
+        if active_legacy_investment.scalar_one_or_none() is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Нельзя сбросить баланс: у пользователя есть активные инвестиции",
+            )
+
+        deleted_rows = await clear_user_ledger_entries(db, user_id=user_id)
+        user.balance_usdt = Decimal("0")
+        await db.flush()
+
+        await log_admin_action(
+            db=db,
+            admin_token_id=admin_token_id,
+            action_type="LEDGER_RESET_BALANCE_ONLY",
+            entity_type="USER",
+            entity_id=user_id,
+        )
+
+    return {
+        "ok": True,
+        "user_id": user_id,
+        "deleted_ledger_rows": deleted_rows,
+        "new_balance_usdt": "0",
+    }
 
 
 @router.post("/withdrawals/{withdraw_id}/approve")

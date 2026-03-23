@@ -877,6 +877,7 @@ async function loadUserDetail(userId) {
               </label>
               <button type="button" id="balance-adjust-apply-btn">Начислить / списать</button>
             </div>
+            <button type="button" id="balance-reset-btn" class="btn-reject">Обнулить только баланс</button>
             <button id="ledger-export-btn">Экспорт CSV</button>
           </div>
         </div>
@@ -966,6 +967,40 @@ async function loadUserDetail(userId) {
           loadUserDetail(userId);
         } catch (e) {
           alert(e.message || "Ошибка корректировки баланса");
+        }
+      };
+    }
+
+    const resetBtn = document.getElementById("balance-reset-btn");
+    if (resetBtn) {
+      resetBtn.onclick = async () => {
+        const first = confirm(
+          "Будут удалены только ledger-записи, которые формируют баланс пользователя. Профиль, рефералы, настройки и другие данные не затрагиваются. Продолжить?"
+        );
+        if (!first) return;
+        const phrase = prompt("Для подтверждения введите: RESET_BALANCE");
+        if ((phrase || "").trim().toUpperCase() !== "RESET_BALANCE") {
+          alert("Операция отменена.");
+          return;
+        }
+        try {
+          resetBtn.disabled = true;
+          resetBtn.textContent = "Сброс…";
+          const res = await apiRequest(`/users/${userId}/ledger-reset`, {
+            method: "POST",
+            body: JSON.stringify({ confirm: "RESET_BALANCE" }),
+          });
+          showToast(
+            `Баланс обнулён. Удалено ledger-записей: ${res.deleted_ledger_rows}`
+          );
+          loadUserDetail(userId);
+          loadUsers();
+          loadDashboard();
+        } catch (e) {
+          alert(e.message || "Ошибка обнуления баланса");
+        } finally {
+          resetBtn.disabled = false;
+          resetBtn.textContent = "Обнулить только баланс";
         }
       };
     }

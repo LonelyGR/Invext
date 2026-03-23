@@ -9,7 +9,7 @@ import logging
 from decimal import Decimal
 from typing import Optional
 
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.ledger_transaction import LedgerTransaction
@@ -64,3 +64,14 @@ async def get_balance_usdt(db: AsyncSession, user_id: int) -> Decimal:
     credits = credit.scalar() or Decimal("0")
     debits = debit.scalar() or Decimal("0")
     return credits - debits
+
+
+async def clear_user_ledger_entries(db: AsyncSession, user_id: int) -> int:
+    """
+    Полностью очистить ledger-записи пользователя (только таблица ledger_transactions).
+    Возвращает число удалённых строк.
+    """
+    result = await db.execute(
+        delete(LedgerTransaction).where(LedgerTransaction.user_id == user_id)
+    )
+    return int(result.rowcount or 0)

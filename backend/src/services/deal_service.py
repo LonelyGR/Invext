@@ -96,6 +96,28 @@ def scheduled_collection_window_1300_chisinau(
     )
 
 
+def next_scheduled_open_1300_chisinau(after_utc: Optional[dt.datetime] = None) -> dt.datetime:
+    """
+    Следующее фиксированное открытие сбора: 13:00 Europe/Chisinau в рабочий день.
+    Расчёт идёт по календарному слоту, а не от фактического момента прошлой сделки.
+    """
+    base_utc = after_utc or dt.datetime.now(dt.timezone.utc)
+    if base_utc.tzinfo is None:
+        base_utc = base_utc.replace(tzinfo=dt.timezone.utc)
+    else:
+        base_utc = base_utc.astimezone(dt.timezone.utc)
+
+    local_now = base_utc.astimezone(SCHEDULE_TZ)
+    candidate = local_now.replace(hour=13, minute=0, second=0, microsecond=0)
+    if candidate <= local_now:
+        candidate = candidate + dt.timedelta(days=1)
+
+    while candidate.weekday() in (5, 6):  # Saturday/Sunday
+        candidate = candidate + dt.timedelta(days=1)
+
+    return candidate.astimezone(dt.timezone.utc)
+
+
 def calculate_payout_at_for_investment(now_utc: Optional[dt.datetime] = None) -> dt.datetime:
     """
     Фиксированный график выплаты (Europe/Chisinau):
@@ -362,7 +384,7 @@ async def close_deal_flow(db: AsyncSession, deal: Deal) -> None:
                     referral_missed_by_telegram[tid] = referral_missed_by_telegram.get(tid, 0.0) + float(amount)
 
         profit_pct = float(deal.profit_percent) if deal.profit_percent is not None else None
-        next_open_at = (deal.end_at + dt.timedelta(hours=1)) if deal.end_at else None
+        next_open_at = next_scheduled_open_1300_chisinau(now)
         await broadcast_deal_closed(
             telegram_ids,
             deal.number,
