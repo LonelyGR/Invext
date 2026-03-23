@@ -31,11 +31,14 @@ class InvestStates(StatesGroup):
     entering_amount = State()
 
 
-def _invest_deal_kb(with_participate: bool) -> InlineKeyboardMarkup:
+def _invest_deal_kb(with_participate: bool, fixed_amount: Decimal | None = None) -> InlineKeyboardMarkup:
     """Клавиатура раздела Сделка: при открытой сделке — Участвовать + Назад, иначе только Назад."""
     rows = []
     if with_participate:
-        rows.append([InlineKeyboardButton(text="✅ Участвовать", callback_data="invest_participate")])
+        btn_text = "✅ Участвовать"
+        if fixed_amount is not None:
+            btn_text = f"✅ Участвовать ({fixed_amount} USD)"
+        rows.append([InlineKeyboardButton(text=btn_text, callback_data="invest_participate")])
     rows.append([InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -63,6 +66,21 @@ def _make_deal_lines(items: list[dict]) -> list[str]:
     return lines
 
 
+def _extract_invest_mode(settings: dict) -> tuple[str, Decimal, Decimal]:
+    """
+    Возвращает:
+    - mode: "fixed" | "range"
+    - min_value
+    - max_value
+    """
+    min_raw = settings.get("min_invest_usdt", "0")
+    max_raw = settings.get("max_invest_usdt", "0")
+    min_value = Decimal(str(min_raw).replace(",", "."))
+    max_value = Decimal(str(max_raw).replace(",", "."))
+    mode = "fixed" if min_value == max_value else "range"
+    return mode, min_value, max_value
+
+
 @router.message(F.text == "📈 Сделка")
 async def invest_section(message: Message, state: FSMContext):
     telegram_id = message.from_user.id
@@ -70,6 +88,7 @@ async def invest_section(message: Message, state: FSMContext):
         balances = await api.get_balances(telegram_id)
         active = await api.get_active_deal()
         my_deals = await api.get_my_deals(telegram_id)
+        settings = await api.get_system_settings()
     except Exception as e:
         await message.answer(f"Ошибка: {e}")
         return
@@ -79,12 +98,21 @@ async def invest_section(message: Message, state: FSMContext):
 
     if active.get("active") and active.get("deal_number"):
         deal_number = active["deal_number"]
-        text = make_invest_main_text_with_deal(deal_number, available_usdt)
+        mode, min_invest, max_invest = _extract_invest_mode(settings)
+        if mode == "fixed":
+            amount_hint = f"💵 <b>Сбор в размере:</b> {min_invest} USD"
+            action_hint = "После нажатия «Участвовать» сумма спишется автоматически."
+            participate_amount = min_invest
+        else:
+            amount_hint = f"💵 <b>Сумма участия:</b> от {min_invest} до {max_invest} USD"
+            action_hint = "Минимальная сумма будет показана при вводе."
+            participate_amount = None
+        text = make_invest_main_text_with_deal(deal_number, available_usdt, amount_hint, action_hint)
         text += make_invest_deals_split_text(
             _make_deal_lines(my_deals.get("active_deals", [])),
             _make_deal_lines(my_deals.get("completed_deals", [])),
         )
-        await message.answer(text, reply_markup=_invest_deal_kb(with_participate=True))
+        await message.answer(text, reply_markup=_invest_deal_kb(with_participate=True, fixed_amount=participate_amount))
     else:
         text = make_invest_main_text_no_deal()
         text += make_invest_deals_split_text(
@@ -119,9 +147,49 @@ async def invest_participate(callback: CallbackQuery, state: FSMContext):
             await callback.answer()
             return
 
-        min_invest = settings.get("min_invest_usdt")
+        mode, min_invest, max_invest = _extract_invest_mode(settings)
     except Exception:
-        min_invest = None
+        mode, min_invest, max_invest = "range", None, None
+
+    if mode == "fixed" and min_invest is not None:
+        if not await with_double_click_protection(callback, "invest"):
+            return
+        try:
+            try:
+                result = await api.invest(telegram_id, min_invest)
+            except Exception as e:
+                err = str(e)
+                if hasattr(e, "response") and getattr(e, "response", None) is not None:
+                    try:
+                        body = e.response.json()
+                        if isinstance(body, dict) and "detail" in body:
+                            err = body["detail"] if isinstance(body["detail"], str) else str(body["detail"])
+                    except Exception:
+                        pass
+                await callback.message.edit_text(
+                    f"Ошибка инвестирования: {err}",
+                    reply_markup=_invest_deal_kb(with_participate=False),
+                )
+                await state.clear()
+                await callback.answer()
+                return
+
+            new_balance = result.get("balance_usdt")
+            invested = result.get("invested_amount_usdt")
+            payout_hint = _format_payout_at(result.get("payout_at"))
+            success_text = make_invest_success_text(invested, new_balance, payout_hint=payout_hint)
+            await send_effect_message(
+                callback.message.bot,
+                callback.message.chat.id,
+                success_text,
+                effect_id=EFFECT_CELEBRATION,
+                reply_markup=_invest_deal_kb(with_participate=False),
+            )
+            await state.clear()
+            await callback.answer()
+            return
+        finally:
+            await release_double_click_lock(telegram_id, "invest")
 
     await state.set_state(InvestStates.entering_amount)
 
@@ -147,6 +215,7 @@ async def open_invest_from_reminder(callback: CallbackQuery, state: FSMContext):
         balances = await api.get_balances(telegram_id)
         active = await api.get_active_deal()
         my_deals = await api.get_my_deals(telegram_id)
+        settings = await api.get_system_settings()
     except Exception as e:
         await callback.answer(f"Ошибка: {e}", show_alert=True)
         return
@@ -156,12 +225,24 @@ async def open_invest_from_reminder(callback: CallbackQuery, state: FSMContext):
 
     if active.get("active") and active.get("deal_number"):
         deal_number = active["deal_number"]
-        text = make_invest_main_text_with_deal(deal_number, available_usdt)
+        mode, min_invest, max_invest = _extract_invest_mode(settings)
+        if mode == "fixed":
+            amount_hint = f"💵 <b>Сбор в размере:</b> {min_invest} USD"
+            action_hint = "После нажатия «Участвовать» сумма спишется автоматически."
+            participate_amount = min_invest
+        else:
+            amount_hint = f"💵 <b>Сумма участия:</b> от {min_invest} до {max_invest} USD"
+            action_hint = "Минимальная сумма будет показана при вводе."
+            participate_amount = None
+        text = make_invest_main_text_with_deal(deal_number, available_usdt, amount_hint, action_hint)
         text += make_invest_deals_split_text(
             _make_deal_lines(my_deals.get("active_deals", [])),
             _make_deal_lines(my_deals.get("completed_deals", [])),
         )
-        await callback.message.answer(text, reply_markup=_invest_deal_kb(with_participate=True))
+        await callback.message.answer(
+            text,
+            reply_markup=_invest_deal_kb(with_participate=True, fixed_amount=participate_amount),
+        )
     else:
         text = make_invest_main_text_no_deal()
         text += make_invest_deals_split_text(

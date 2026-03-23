@@ -195,15 +195,22 @@ def make_withdraw_success_text(req_id: Any) -> str:
 
 # === Инвестиции (раздел «Сделка») ===
 
-def make_invest_main_text_with_deal(deal_number: Any, available_usdt: str) -> str:
+def make_invest_main_text_with_deal(
+    deal_number: Any,
+    available_usdt: str,
+    deal_amount_hint: str | None = None,
+    action_hint: str | None = None,
+) -> str:
+    amount_line = f"{deal_amount_hint}\n\n" if deal_amount_hint else ""
+    action_line = action_hint or "Минимальная сумма будет показана при вводе"
     return (
         f"🚀 <b>Открыт сбор на сделку №{deal_number}</b>\n\n"
         
         "💰 <b>Доступный баланс</b>\n"
         f"USDT: {available_usdt}\n\n"
-        
+        f"{amount_line}"
         "📌 Нажмите «Участвовать», чтобы вложить средства\n"
-        "Минимальная сумма будет показана при вводе"
+        f"{action_line}"
     )
 
 

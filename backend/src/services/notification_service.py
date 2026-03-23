@@ -9,6 +9,7 @@ from __future__ import annotations
 import datetime as dt
 import logging
 from pathlib import Path
+from decimal import Decimal
 from typing import List, Optional
 from zoneinfo import ZoneInfo
 
@@ -274,17 +275,38 @@ async def notify_payout_complete(
     amount: "Decimal",
     profit: "Decimal",
     total: "Decimal",
+    profit_percent: "Decimal | None" = None,
+    referral_income: "Decimal | None" = None,
 ) -> bool:
     """
     Персональное уведомление о начислении прибыли по завершённой сделке.
     Вызывается при обработке отложенных выплат (process_pending_payouts).
     """
-    text = (
-        f"💰 Сделка #{deal_number} завершена\n\n"
-        f"Инвестировано: {amount} USDT\n"
-        f"Прибыль: +{profit} USDT\n"
-        f"Итого зачислено: {total} USDT"
+    def _fmt_decimal(v: "Decimal | int | float | str") -> str:
+        d = Decimal(str(v))
+        s = format(d.normalize(), "f")
+        if "." in s:
+            s = s.rstrip("0").rstrip(".")
+        return s or "0"
+
+    profit_line = f"📈 Основная прибыль: +{_fmt_decimal(profit)} USDT"
+    if profit_percent is not None:
+        profit_line += f" (+{_fmt_decimal(profit_percent)}%)"
+
+    lines = [
+        f"💰 Сделка #{deal_number} завершена",
+        "",
+        profit_line,
+    ]
+    if referral_income is not None and Decimal(str(referral_income)) > 0:
+        lines.append(f"👥 Реферальный доход: +{_fmt_decimal(referral_income)} USDT")
+    lines.extend(
+        [
+            "",
+            f"Итого зачислено: {_fmt_decimal(total)} USDT",
+        ]
     )
+    text = "\n".join(lines)
     return await send_telegram_message(
         telegram_id,
         text,

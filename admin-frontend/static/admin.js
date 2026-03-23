@@ -1203,77 +1203,125 @@ async function loadSettings() {
   section.innerHTML = "<h1>Настройки</h1><p>Загрузка...</p>";
   try {
     const s = await apiRequest("/system-settings");
+    const initialModes = {
+      deposit:
+        Number(s.min_deposit_usdt) === Number(s.max_deposit_usdt) ? "fixed" : "range",
+      withdraw:
+        Number(s.min_withdraw_usdt) === Number(s.max_withdraw_usdt) ? "fixed" : "range",
+      invest:
+        Number(s.min_invest_usdt) === Number(s.max_invest_usdt) ? "fixed" : "range",
+    };
     section.innerHTML = `
       <h1>Финансовые настройки</h1>
-      <p class="section-desc">Глобальные лимиты депозитов, выводов и инвестиций. Мин. и макс. могут быть <b>одинаковыми</b> (например 50 и 50 — фиксированная сумма).</p>
+      <p class="section-desc">Настройка режимов лимитов отдельно для депозитов, выводов и инвестиций. В режиме «Фиксированная сумма» будет сохранено как min = max.</p>
       <div class="settings-card">
         <div class="settings-header">
           <h2>Лимиты операций</h2>
-          <p>Изменения применяются глобально для всех пользователей и бота.</p>
+          <p>Выберите режим для каждой операции: фиксированная сумма или диапазон.</p>
         </div>
         <form id="settings-form" class="settings-form">
-          <div class="settings-grid">
-            <div class="settings-field">
-              <div>
-                <div class="settings-label">Мин. депозит (USDT)</div>
-                <div class="settings-hint">Минимальная сумма пополнения</div>
+          <div class="settings-limit-grid">
+            <div class="settings-limit-card" data-entity="deposit">
+              <div class="settings-limit-card-head">
+                <div>
+                  <div class="settings-label">Лимиты депозита</div>
+                  <div class="settings-hint">Настройка минимальной/максимальной суммы пополнения</div>
+                </div>
+                <label class="switch settings-inline-switch">
+                  <input type="checkbox" id="allow_deposits" ${s.allow_deposits ? "checked" : ""} />
+                  <span class="switch-slider"></span>
+                </label>
               </div>
-              <input type="number" step="0.01" min="0" id="min_deposit_usdt" class="settings-input" value="${s.min_deposit_usdt}" />
+              <div class="settings-inline-hint">Разрешить пополнения</div>
+              <div class="limit-mode-segment" id="mode_segment_deposit">
+                <button type="button" class="limit-mode-btn" data-entity="deposit" data-mode="fixed">Фиксированная сумма</button>
+                <button type="button" class="limit-mode-btn" data-entity="deposit" data-mode="range">Диапазон</button>
+              </div>
+              <input type="hidden" id="mode_deposit" value="${initialModes.deposit}" />
+              <div id="deposit_fixed_panel" class="limit-fields ${initialModes.deposit === "fixed" ? "" : "hidden"}">
+                <div class="settings-field">
+                  <div class="settings-label">Сумма депозита (USDT)</div>
+                  <input type="number" step="0.01" min="0" id="fixed_deposit_usdt" class="settings-input" value="${s.min_deposit_usdt}" />
+                </div>
+              </div>
+              <div id="deposit_range_panel" class="limit-fields ${initialModes.deposit === "range" ? "" : "hidden"}">
+                <div class="settings-field">
+                  <div class="settings-label">Мин. депозит (USDT)</div>
+                  <input type="number" step="0.01" min="0" id="min_deposit_usdt" class="settings-input" value="${s.min_deposit_usdt}" />
+                </div>
+                <div class="settings-field">
+                  <div class="settings-label">Макс. депозит (USDT)</div>
+                  <input type="number" step="0.01" min="0" id="max_deposit_usdt" class="settings-input" value="${s.max_deposit_usdt}" />
+                </div>
+              </div>
+              <div class="limit-summary" id="summary_deposit"></div>
             </div>
-            <div class="settings-field">
-              <div>
-                <div class="settings-label">Макс. депозит (USDT)</div>
-                <div class="settings-hint">Максимальная сумма пополнения</div>
+
+            <div class="settings-limit-card" data-entity="withdraw">
+              <div class="settings-limit-card-head">
+                <div>
+                  <div class="settings-label">Лимиты вывода</div>
+                  <div class="settings-hint">Настройка минимальной/максимальной суммы вывода</div>
+                </div>
               </div>
-              <input type="number" step="0.01" min="0" id="max_deposit_usdt" class="settings-input" value="${s.max_deposit_usdt}" />
+              <div class="limit-mode-segment" id="mode_segment_withdraw">
+                <button type="button" class="limit-mode-btn" data-entity="withdraw" data-mode="fixed">Фиксированная сумма</button>
+                <button type="button" class="limit-mode-btn" data-entity="withdraw" data-mode="range">Диапазон</button>
+              </div>
+              <input type="hidden" id="mode_withdraw" value="${initialModes.withdraw}" />
+              <div id="withdraw_fixed_panel" class="limit-fields ${initialModes.withdraw === "fixed" ? "" : "hidden"}">
+                <div class="settings-field">
+                  <div class="settings-label">Сумма вывода (USDT)</div>
+                  <input type="number" step="0.01" min="0" id="fixed_withdraw_usdt" class="settings-input" value="${s.min_withdraw_usdt}" />
+                </div>
+              </div>
+              <div id="withdraw_range_panel" class="limit-fields ${initialModes.withdraw === "range" ? "" : "hidden"}">
+                <div class="settings-field">
+                  <div class="settings-label">Мин. вывод (USDT)</div>
+                  <input type="number" step="0.01" min="0" id="min_withdraw_usdt" class="settings-input" value="${s.min_withdraw_usdt}" />
+                </div>
+                <div class="settings-field">
+                  <div class="settings-label">Макс. вывод (USDT)</div>
+                  <input type="number" step="0.01" min="0" id="max_withdraw_usdt" class="settings-input" value="${s.max_withdraw_usdt}" />
+                </div>
+              </div>
+              <div class="limit-summary" id="summary_withdraw"></div>
             </div>
-            <div class="settings-field">
-              <div>
-                <div class="settings-label">Мин. вывод (USDT)</div>
-                <div class="settings-hint">Минимальная сумма вывода</div>
+
+            <div class="settings-limit-card" data-entity="invest">
+              <div class="settings-limit-card-head">
+                <div>
+                  <div class="settings-label">Лимиты инвестиций</div>
+                  <div class="settings-hint">Настройка суммы участия в сделке</div>
+                </div>
+                <label class="switch settings-inline-switch">
+                  <input type="checkbox" id="allow_investments" ${s.allow_investments !== false ? "checked" : ""} />
+                  <span class="switch-slider"></span>
+                </label>
               </div>
-              <input type="number" step="0.01" min="0" id="min_withdraw_usdt" class="settings-input" value="${s.min_withdraw_usdt}" />
-            </div>
-            <div class="settings-field">
-              <div>
-                <div class="settings-label">Макс. вывод (USDT)</div>
-                <div class="settings-hint">Максимальная сумма вывода</div>
+              <div class="settings-inline-hint">Разрешить участие в сделках</div>
+              <div class="limit-mode-segment" id="mode_segment_invest">
+                <button type="button" class="limit-mode-btn" data-entity="invest" data-mode="fixed">Фиксированная сумма</button>
+                <button type="button" class="limit-mode-btn" data-entity="invest" data-mode="range">Диапазон</button>
               </div>
-              <input type="number" step="0.01" min="0" id="max_withdraw_usdt" class="settings-input" value="${s.max_withdraw_usdt}" />
-            </div>
-            <div class="settings-field">
-              <div>
-                <div class="settings-label">Мин. инвестиция (USDT)</div>
-                <div class="settings-hint">Минимальная сумма участия</div>
+              <input type="hidden" id="mode_invest" value="${initialModes.invest}" />
+              <div id="invest_fixed_panel" class="limit-fields ${initialModes.invest === "fixed" ? "" : "hidden"}">
+                <div class="settings-field">
+                  <div class="settings-label">Сумма инвестиции (USDT)</div>
+                  <input type="number" step="0.01" min="0" id="fixed_invest_usdt" class="settings-input" value="${s.min_invest_usdt}" />
+                </div>
               </div>
-              <input type="number" step="0.01" min="0" id="min_invest_usdt" class="settings-input" value="${s.min_invest_usdt}" />
-            </div>
-            <div class="settings-field">
-              <div>
-                <div class="settings-label">Макс. инвестиция (USDT)</div>
-                <div class="settings-hint">Максимальная сумма участия</div>
+              <div id="invest_range_panel" class="limit-fields ${initialModes.invest === "range" ? "" : "hidden"}">
+                <div class="settings-field">
+                  <div class="settings-label">Мин. инвестиция (USDT)</div>
+                  <input type="number" step="0.01" min="0" id="min_invest_usdt" class="settings-input" value="${s.min_invest_usdt}" />
+                </div>
+                <div class="settings-field">
+                  <div class="settings-label">Макс. инвестиция (USDT)</div>
+                  <input type="number" step="0.01" min="0" id="max_invest_usdt" class="settings-input" value="${s.max_invest_usdt}" />
+                </div>
               </div>
-              <input type="number" step="0.01" min="0" id="max_invest_usdt" class="settings-input" value="${s.max_invest_usdt}" />
-            </div>
-            <div class="settings-field">
-              <div>
-                <div class="settings-label">Пополнения</div>
-                <div class="settings-hint">Разрешить создание новых инвойсов пополнения</div>
-              </div>
-              <label class="switch">
-                <input type="checkbox" id="allow_deposits" ${s.allow_deposits ? "checked" : ""} />
-                <span class="switch-slider"></span>
-              </label>
-            </div>
-            <div class="settings-field">
-              <div>
-                <div class="settings-label">Участие в сделках</div>
-                <div class="settings-hint">Технический запрет/разрешение новых инвестиций</div>
-              </div>
-              <label class="switch">
-                <input type="checkbox" id="allow_investments" ${s.allow_investments !== false ? "checked" : ""} />
-                <span class="switch-slider"></span>
-              </label>
+              <div class="limit-summary" id="summary_invest"></div>
             </div>
           </div>
           <div class="settings-footer">
@@ -1321,45 +1369,143 @@ async function loadSettings() {
     `;
 
     const form = document.getElementById("settings-form");
+    const formatAmount = (num) => {
+      const n = Number(num);
+      if (!Number.isFinite(n)) return "—";
+      return `${n.toLocaleString("ru-RU", { maximumFractionDigits: 2 })} USDT`;
+    };
+    const setMode = (entity, mode) => {
+      const modeInput = document.getElementById(`mode_${entity}`);
+      if (modeInput) modeInput.value = mode;
+      const fixedPanel = document.getElementById(`${entity}_fixed_panel`);
+      const rangePanel = document.getElementById(`${entity}_range_panel`);
+      if (fixedPanel) fixedPanel.classList.toggle("hidden", mode !== "fixed");
+      if (rangePanel) rangePanel.classList.toggle("hidden", mode !== "range");
+      section
+        .querySelectorAll(`.limit-mode-btn[data-entity="${entity}"]`)
+        .forEach((btn) => btn.classList.toggle("active", btn.getAttribute("data-mode") === mode));
+      updateSummaries();
+    };
+    const getParsedValue = (id, label) => {
+      const input = document.getElementById(id);
+      const raw = (input?.value || "").trim().replace(",", ".");
+      const num = parseFloat(raw);
+      if (Number.isNaN(num) || num <= 0) {
+        throw new Error(`Поле "${label}" должно быть числом больше 0`);
+      }
+      return num;
+    };
+    const updateSummaries = () => {
+      const entities = [
+        {
+          key: "deposit",
+          title: "депозита",
+          minId: "min_deposit_usdt",
+          maxId: "max_deposit_usdt",
+          fixedId: "fixed_deposit_usdt",
+        },
+        {
+          key: "withdraw",
+          title: "вывода",
+          minId: "min_withdraw_usdt",
+          maxId: "max_withdraw_usdt",
+          fixedId: "fixed_withdraw_usdt",
+        },
+        {
+          key: "invest",
+          title: "инвестиций",
+          minId: "min_invest_usdt",
+          maxId: "max_invest_usdt",
+          fixedId: "fixed_invest_usdt",
+        },
+      ];
+      for (const e of entities) {
+        const mode = document.getElementById(`mode_${e.key}`)?.value || "range";
+        const summaryEl = document.getElementById(`summary_${e.key}`);
+        if (!summaryEl) continue;
+        if (mode === "fixed") {
+          const val = parseFloat((document.getElementById(e.fixedId)?.value || "").replace(",", "."));
+          summaryEl.textContent = `Текущий режим: фиксированная сумма ${formatAmount(val)}.`;
+        } else {
+          const minVal = parseFloat((document.getElementById(e.minId)?.value || "").replace(",", "."));
+          const maxVal = parseFloat((document.getElementById(e.maxId)?.value || "").replace(",", "."));
+          summaryEl.textContent = `Текущий режим: диапазон от ${formatAmount(minVal)} до ${formatAmount(maxVal)}.`;
+        }
+      }
+    };
+
+    section.querySelectorAll(".limit-mode-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const entity = btn.getAttribute("data-entity");
+        const mode = btn.getAttribute("data-mode");
+        if (!entity || !mode) return;
+        setMode(entity, mode);
+      });
+    });
+    [
+      "fixed_deposit_usdt",
+      "min_deposit_usdt",
+      "max_deposit_usdt",
+      "fixed_withdraw_usdt",
+      "min_withdraw_usdt",
+      "max_withdraw_usdt",
+      "fixed_invest_usdt",
+      "min_invest_usdt",
+      "max_invest_usdt",
+    ].forEach((id) => {
+      document.getElementById(id)?.addEventListener("input", updateSummaries);
+    });
+    setMode("deposit", initialModes.deposit);
+    setMode("withdraw", initialModes.withdraw);
+    setMode("invest", initialModes.invest);
+    updateSummaries();
+
     if (form) {
       form.onsubmit = async (e) => {
         e.preventDefault();
-        const fields = [
-          "min_deposit_usdt",
-          "max_deposit_usdt",
-          "min_withdraw_usdt",
-          "max_withdraw_usdt",
-          "min_invest_usdt",
-          "max_invest_usdt",
-        ];
         const saveBtn = document.getElementById("settings-save-btn");
         const originalText = saveBtn ? saveBtn.innerHTML : "";
         try {
-          // Frontend-валидация: числа, > 0, min <= max (равенство разрешено).
-          const values = {};
-          for (const field of fields) {
-            const input = document.getElementById(field);
-            if (!input) continue;
-            const raw = input.value.trim().replace(",", ".");
-            const num = parseFloat(raw);
-            if (Number.isNaN(num) || num <= 0) {
-              showToast(`Поле "${field}" должно быть числом больше 0`, "error");
-              return;
-            }
-            values[field] = num;
-          }
+          const payloadValues = {};
+          const entities = [
+            {
+              key: "deposit",
+              minField: "min_deposit_usdt",
+              maxField: "max_deposit_usdt",
+              fixedField: "fixed_deposit_usdt",
+              title: "депозит",
+            },
+            {
+              key: "withdraw",
+              minField: "min_withdraw_usdt",
+              maxField: "max_withdraw_usdt",
+              fixedField: "fixed_withdraw_usdt",
+              title: "вывод",
+            },
+            {
+              key: "invest",
+              minField: "min_invest_usdt",
+              maxField: "max_invest_usdt",
+              fixedField: "fixed_invest_usdt",
+              title: "инвестиция",
+            },
+          ];
 
-          if (values.min_deposit_usdt > values.max_deposit_usdt) {
-            showToast("Мин. депозит не может быть больше макс. депозита", "error");
-            return;
-          }
-          if (values.min_withdraw_usdt > values.max_withdraw_usdt) {
-            showToast("Мин. вывод не может быть больше макс. вывода", "error");
-            return;
-          }
-          if (values.min_invest_usdt > values.max_invest_usdt) {
-            showToast("Мин. инвестиция не может быть больше макс. инвестиции", "error");
-            return;
+          for (const item of entities) {
+            const mode = document.getElementById(`mode_${item.key}`)?.value || "range";
+            if (mode === "fixed") {
+              const fixed = getParsedValue(item.fixedField, `${item.title} (фикс.)`);
+              payloadValues[item.minField] = fixed;
+              payloadValues[item.maxField] = fixed;
+            } else {
+              const min = getParsedValue(item.minField, `${item.title} min`);
+              const max = getParsedValue(item.maxField, `${item.title} max`);
+              if (min > max) {
+                throw new Error(`Для "${item.title}" минимум не может быть больше максимума`);
+              }
+              payloadValues[item.minField] = min;
+              payloadValues[item.maxField] = max;
+            }
           }
 
           if (saveBtn) {
@@ -1367,10 +1513,17 @@ async function loadSettings() {
             saveBtn.innerHTML = '<span class="btn-spinner"></span><span>Сохранение…</span>';
           }
 
-          for (const field of fields) {
+          for (const field of [
+            "min_deposit_usdt",
+            "max_deposit_usdt",
+            "min_withdraw_usdt",
+            "max_withdraw_usdt",
+            "min_invest_usdt",
+            "max_invest_usdt",
+          ]) {
             await apiRequest("/system-settings", {
               method: "PATCH",
-              body: JSON.stringify({ field, value: String(values[field]) }),
+              body: JSON.stringify({ field, value: String(payloadValues[field]) }),
             });
           }
           const allowDepositsInput = document.getElementById("allow_deposits");

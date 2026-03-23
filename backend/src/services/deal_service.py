@@ -503,13 +503,31 @@ async def process_pending_payouts(db: AsyncSession) -> int:
             deal = deal_cache.get(p.deal_id)
             deal_num = deal.number if deal else 0
             profit = p.profit_amount or Decimal("0")
-            total = (p.amount + profit).quantize(Decimal("0.000001"))
+            referral_bonus_result = await db.execute(
+                select(LedgerTransaction.amount_usdt, LedgerTransaction.metadata_json).where(
+                    LedgerTransaction.user_id == p.user_id,
+                    LedgerTransaction.type == LEDGER_TYPE_REFERRAL_BONUS,
+                )
+            )
+            referral_income = Decimal("0")
+            for bonus_amount, bonus_meta in referral_bonus_result.all():
+                if not isinstance(bonus_meta, dict):
+                    continue
+                if bonus_meta.get("source") != "investment":
+                    continue
+                if str(bonus_meta.get("deal_id")) != str(p.deal_id):
+                    continue
+                referral_income += bonus_amount or Decimal("0")
+            total = (p.amount + profit + referral_income).quantize(Decimal("0.000001"))
+            profit_percent = deal.profit_percent if deal and deal.profit_percent is not None else None
             await notify_payout_complete(
                 telegram_id=tid,
                 deal_number=deal_num,
                 amount=p.amount,
                 profit=profit,
                 total=total,
+                profit_percent=profit_percent,
+                referral_income=referral_income,
             )
         except Exception:
             logger.exception("notify_payout_complete failed for user_id=%s participation=%s", p.user_id, p.id)
