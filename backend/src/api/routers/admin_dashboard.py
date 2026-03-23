@@ -3,11 +3,14 @@ from __future__ import annotations
 import csv
 import datetime as dt
 import io
+import re
+import uuid
 from decimal import Decimal
+from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status, Query
-from fastapi.responses import PlainTextResponse
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status, Query, UploadFile, File, Form
+from fastapi.responses import PlainTextResponse, FileResponse
 from sqlalchemy import and_, desc, func, or_, select, String, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -35,6 +38,7 @@ from src.models import (
     PaymentInvoice,
     PaymentWebhookEvent,
     SystemSettings,
+    BroadcastMessage,
 )
 from src.schemas.admin_dashboard import (
     AdminLogItem,
@@ -50,6 +54,7 @@ from src.schemas.admin_dashboard import (
     LedgerList,
     LoginRequest,
     PaginatedAdminLogs,
+    PaginatedBroadcasts,
     PaginatedDeposits,
     PaginatedUsers,
     SendDealNotificationsResponse,
@@ -57,6 +62,7 @@ from src.schemas.admin_dashboard import (
     UserInvestment,
     UserRow,
     UserWithdrawRequest,
+    BroadcastRow,
 )
 from src.services.ledger_service import (
     LEDGER_TYPE_DEPOSIT,
@@ -79,9 +85,44 @@ from src.services.deal_service import (
 from src.services.notification_service import broadcast_deal_opened, send_telegram_message
 from src.core.config import get_settings
 from src.services.settings_service import invalidate_system_settings_cache
+from src.services.broadcast_service import enqueue_broadcast
+from src.models.broadcast_message import BROADCAST_STATUS_IN_PROGRESS
+
+
+BROADCAST_IMAGES_DIR = Path(__file__).resolve().parents[4] / "storage" / "broadcast_images"
+ALLOWED_BROADCAST_TAGS = ("b", "strong", "i", "em", "u", "s", "code", "pre", "a", "br")
 
 
 router = APIRouter(prefix="/database/api", tags=["admin-dashboard"])
+
+
+def _sanitize_broadcast_html(text: str) -> str:
+    cleaned = (text or "").strip()
+    if not cleaned:
+        raise HTTPException(status_code=400, detail="Текст сообщения не может быть пустым")
+    # Быстрая валидация: допускаем только безопасный набор Telegram HTML-тегов.
+    tags = re.findall(r"</?([a-zA-Z0-9]+)(?:\s+[^>]*)?>", cleaned)
+    for tag in tags:
+        if tag.lower() not in ALLOWED_BROADCAST_TAGS:
+            raise HTTPException(status_code=400, detail=f"Неподдерживаемый HTML-тег: {tag}")
+    return cleaned
+
+
+def _broadcast_row_to_schema(row: BroadcastMessage) -> BroadcastRow:
+    image_url = f"/database/api/broadcasts/{row.id}/image" if row.image_path else None
+    return BroadcastRow(
+        id=row.id,
+        text_html=row.text_html,
+        image_url=image_url,
+        status=row.status,
+        total_recipients=row.total_recipients,
+        sent_count=row.sent_count,
+        failed_count=row.failed_count,
+        created_at=row.created_at,
+        started_at=row.started_at,
+        finished_at=row.finished_at,
+        last_error=row.last_error,
+    )
 
 
 @router.post("/login")
@@ -1582,6 +1623,121 @@ async def update_system_settings_admin(
 
     invalidate_system_settings_cache()
     return {"ok": True}
+
+
+@router.get("/broadcasts", response_model=PaginatedBroadcasts)
+async def list_broadcasts(
+    request: Request,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    admin_token_id, _ = await get_admin_context(request)
+    total_result = await db.execute(select(func.count(BroadcastMessage.id)))
+    total = int(total_result.scalar() or 0)
+    result = await db.execute(
+        select(BroadcastMessage)
+        .order_by(desc(BroadcastMessage.created_at))
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+    rows = list(result.scalars().all())
+
+    await log_admin_action(
+        db=db,
+        admin_token_id=admin_token_id,
+        action_type="VIEW_BROADCASTS",
+        entity_type="BROADCAST",
+        entity_id=0,
+    )
+    return PaginatedBroadcasts(
+        items=[_broadcast_row_to_schema(r) for r in rows],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.get("/broadcasts/{broadcast_id}", response_model=BroadcastRow)
+async def get_broadcast_detail(
+    request: Request,
+    broadcast_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    admin_token_id, _ = await get_admin_context(request)
+    row = await db.get(BroadcastMessage, broadcast_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Broadcast not found")
+    await log_admin_action(
+        db=db,
+        admin_token_id=admin_token_id,
+        action_type="VIEW_BROADCAST",
+        entity_type="BROADCAST",
+        entity_id=broadcast_id,
+    )
+    return _broadcast_row_to_schema(row)
+
+
+@router.get("/broadcasts/{broadcast_id}/image")
+async def get_broadcast_image(
+    request: Request,
+    broadcast_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    await get_admin_context(request)
+    row = await db.get(BroadcastMessage, broadcast_id)
+    if not row or not row.image_path:
+        raise HTTPException(status_code=404, detail="Image not found")
+    image_path = Path(row.image_path)
+    if not image_path.exists():
+        raise HTTPException(status_code=404, detail="Image file not found")
+    return FileResponse(path=str(image_path))
+
+
+@router.post("/broadcasts", response_model=BroadcastRow)
+async def create_broadcast(
+    request: Request,
+    text_html: str = Form(...),
+    image: UploadFile | None = File(default=None),
+    db: AsyncSession = Depends(get_db),
+):
+    admin_token_id, _ = await get_admin_context(request)
+    text_value = _sanitize_broadcast_html(text_html)
+    # Telegram caption limit, если отправляем картинку.
+    if image is not None and len(text_value) > 1024:
+        raise HTTPException(status_code=400, detail="Для сообщения с изображением текст должен быть не длиннее 1024 символов")
+
+    image_path: str | None = None
+    if image is not None:
+        BROADCAST_IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+        suffix = Path(image.filename or "").suffix.lower()
+        if suffix not in {".jpg", ".jpeg", ".png", ".webp"}:
+            raise HTTPException(status_code=400, detail="Поддерживаются изображения: jpg, jpeg, png, webp")
+        file_name = f"{uuid.uuid4().hex}{suffix}"
+        target = BROADCAST_IMAGES_DIR / file_name
+        content = await image.read()
+        if len(content) > 10 * 1024 * 1024:
+            raise HTTPException(status_code=400, detail="Размер изображения не должен превышать 10MB")
+        target.write_bytes(content)
+        image_path = str(target)
+
+    # Защита от повторного запуска: пока есть IN_PROGRESS, не создаём новую кампанию.
+    in_progress = await db.execute(
+        select(BroadcastMessage.id).where(BroadcastMessage.status == BROADCAST_STATUS_IN_PROGRESS).limit(1)
+    )
+    if in_progress.scalar_one_or_none() is not None:
+        raise HTTPException(status_code=400, detail="Уже есть активная рассылка в процессе")
+
+    row = await enqueue_broadcast(db, text_html=text_value, image_path=image_path)
+    await log_admin_action(
+        db=db,
+        admin_token_id=admin_token_id,
+        action_type="CREATE_BROADCAST",
+        entity_type="BROADCAST",
+        entity_id=row.id,
+    )
+    await db.flush()
+    return _broadcast_row_to_schema(row)
 
 
 @router.post("/maintenance/reset-data")

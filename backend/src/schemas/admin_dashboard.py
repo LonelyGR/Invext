@@ -191,3 +191,24 @@ class PaginatedDeposits(BaseModel):
     page: int
     page_size: int
 
+
+class BroadcastRow(BaseModel):
+    id: int
+    text_html: str
+    image_url: Optional[str] = None
+    status: str
+    total_recipients: int
+    sent_count: int
+    failed_count: int
+    created_at: datetime
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
+    last_error: Optional[str] = None
+
+
+class PaginatedBroadcasts(BaseModel):
+    items: List[BroadcastRow]
+    total: int
+    page: int
+    page_size: int
+

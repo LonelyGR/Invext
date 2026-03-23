@@ -13,6 +13,8 @@ from src.models.referral_reward import ReferralReward
 from src.models.admin_token import AdminToken
 from src.models.admin_log import AdminLog
 from src.models.system_settings import SystemSettings
+from src.models.broadcast_message import BroadcastMessage
+from src.models.broadcast_delivery import BroadcastDelivery
 
 __all__ = [
     "User",
@@ -30,4 +32,6 @@ __all__ = [
     "AdminToken",
     "AdminLog",
     "SystemSettings",
+    "BroadcastMessage",
+    "BroadcastDelivery",
 ]

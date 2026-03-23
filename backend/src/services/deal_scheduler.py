@@ -19,6 +19,7 @@ from src.services.deal_service import (
     scheduled_collection_window_1300_chisinau,
     send_referral_bonus_reminders_for_active_deal,
 )
+from src.services.broadcast_service import process_pending_broadcasts
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +116,17 @@ def init_deal_scheduler(scheduler: AsyncIOScheduler, db_factory) -> None:
                 await db.rollback()
                 logger.exception("process_pending_payouts job failed: %s", e)
 
+    async def _job_process_broadcasts():
+        logger.info("process_broadcasts job started")
+        async with db_factory() as db:
+            try:
+                count = await process_pending_broadcasts(db)
+                await db.commit()
+                logger.info("process_broadcasts job finished, processed=%s", count)
+            except Exception as e:
+                await db.rollback()
+                logger.exception("process_broadcasts job failed: %s", e)
+
     scheduler.add_job(
         _job_process_due_deals,
         IntervalTrigger(minutes=1),
@@ -125,6 +137,11 @@ def init_deal_scheduler(scheduler: AsyncIOScheduler, db_factory) -> None:
         _job_process_pending_payouts,
         IntervalTrigger(minutes=10),
         name="process_pending_payouts",
+    )
+    scheduler.add_job(
+        _job_process_broadcasts,
+        IntervalTrigger(seconds=20),
+        name="process_broadcasts",
     )
 
     # Ежедневные задачи по времени Кишинёва:

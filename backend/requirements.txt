@@ -9,6 +9,7 @@ asyncpg>=0.29.0
 alembic>=1.13.0
 
 httpx>=0.26.0
+python-multipart>=0.0.9
 
 # Scheduler for deals (UTC+1)
 APScheduler>=3.10.4

@@ -13,11 +13,15 @@ function escapeHtmlAttr(s) {
 }
 
 async function apiRequest(path, options = {}) {
+  const isFormData = options.body instanceof FormData;
+  const headers = isFormData
+    ? {}
+    : {
+        "Content-Type": "application/json",
+      };
   const resp = await fetch(API_BASE + path, {
     credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-    },
+    headers,
     ...options,
   });
   if (resp.status === 401) {
@@ -302,7 +306,7 @@ async function loadUsers() {
 }
 
 function switchSection(hash) {
-  const sections = ["dashboard", "users", "deals", "deposits", "withdrawals", "logs", "settings", "user"];
+  const sections = ["dashboard", "users", "deals", "messages", "deposits", "withdrawals", "logs", "settings", "user"];
   const sidebarLinks = document.querySelectorAll(".sidebar nav a");
   sections.forEach((name) => {
     const el = document.getElementById(`${name}-section`);
@@ -333,6 +337,8 @@ function switchSection(hash) {
     loadDashboard();
   } else if (hash === "#deals") {
     loadDeals();
+  } else if (hash === "#messages") {
+    loadMessages();
   } else if (hash === "#deposits") {
     loadDeposits();
   } else if (hash.startsWith("#user-")) {
@@ -497,6 +503,167 @@ async function loadDeals() {
     });
   } catch (e) {
     section.innerHTML = `<h1>Сделки</h1><div class="error">${e.message}</div>`;
+  }
+}
+
+function wrapSelectionWithTag(textarea, openTag, closeTag) {
+  const start = textarea.selectionStart || 0;
+  const end = textarea.selectionEnd || 0;
+  const value = textarea.value || "";
+  const selected = value.slice(start, end);
+  if (!selected) return;
+  const next = value.slice(0, start) + openTag + selected + closeTag + value.slice(end);
+  textarea.value = next;
+  const pos = end + openTag.length + closeTag.length;
+  textarea.focus();
+  textarea.setSelectionRange(pos, pos);
+}
+
+function stripHtmlTags(html) {
+  return (html || "").replace(/<[^>]*>/g, "");
+}
+
+async function loadMessages(page = 1) {
+  const section = document.getElementById("messages-section");
+  section.innerHTML = "<h1>Сообщения</h1><p>Загрузка...</p>";
+  try {
+    const data = await apiRequest(`/broadcasts?page=${page}&page_size=20`);
+    const rows = data.items || [];
+    const historyHtml = rows.length
+      ? rows
+          .map((r) => {
+            const statusClass =
+              r.status === "SENT"
+                ? "status-badge status-paid"
+                : r.status === "IN_PROGRESS"
+                ? "status-badge status-pending"
+                : "status-badge status-expired";
+            const imageHtml = r.image_url
+              ? `<img class="broadcast-image-preview" src="${r.image_url}" alt="broadcast image" />`
+              : "";
+            return `
+              <div class="broadcast-item">
+                <div class="broadcast-item-meta">
+                  <span>#${r.id}</span>
+                  <span class="${statusClass}">${r.status}</span>
+                  <span>${new Date(r.created_at).toLocaleString()}</span>
+                  <span>Отправлено: ${r.sent_count}/${r.total_recipients}</span>
+                  <span>Ошибок: ${r.failed_count}</span>
+                </div>
+                <p class="broadcast-preview">${escapeHtmlAttr(stripHtmlTags(r.text_html)).slice(0, 200) || "—"}</p>
+                ${imageHtml}
+                <div class="toolbar" style="margin:8px 0 0;">
+                  <button type="button" class="btn-secondary-small broadcast-detail-btn" data-id="${r.id}">Подробнее</button>
+                </div>
+              </div>
+            `;
+          })
+          .join("")
+      : `<div class="broadcast-item"><p class="broadcast-preview">Рассылок пока нет.</p></div>`;
+
+    section.innerHTML = `
+      <h1>Сообщения</h1>
+      <p class="section-desc">Массовые рассылки всем пользователям через Telegram-бота.</p>
+      <div class="messages-layout">
+        <div class="panel-card">
+          <h2>Новая рассылка</h2>
+          <p class="section-desc">Поддерживаются Telegram HTML-теги: &lt;b&gt;, &lt;i&gt;, &lt;u&gt;, &lt;s&gt;, &lt;code&gt;, &lt;pre&gt;, &lt;a&gt;, &lt;br&gt;. Enter создаёт перенос строки автоматически.</p>
+          <div class="editor-toolbar">
+            <button type="button" class="editor-btn" data-tag="b"><b>B</b></button>
+            <button type="button" class="editor-btn" data-tag="i"><i>I</i></button>
+            <button type="button" class="editor-btn" data-tag="u"><u>U</u></button>
+            <button type="button" class="editor-btn" data-tag="code">Code</button>
+          </div>
+          <textarea id="broadcast-text" class="message-editor" placeholder="Введите текст рассылки..."></textarea>
+          <div class="toolbar" style="margin-top:10px;">
+            <input type="file" id="broadcast-image" accept=".jpg,.jpeg,.png,.webp" />
+          </div>
+          <div class="toolbar">
+            <button type="button" id="broadcast-send-btn">Отправить всем</button>
+          </div>
+        </div>
+        <div class="panel-card">
+          <h2>История рассылок</h2>
+          <div class="broadcast-history-list">${historyHtml}</div>
+        </div>
+      </div>
+    `;
+
+    const textarea = document.getElementById("broadcast-text");
+    section.querySelectorAll(".editor-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const tag = btn.getAttribute("data-tag");
+        if (!textarea || !tag) return;
+        wrapSelectionWithTag(textarea, `<${tag}>`, `</${tag}>`);
+      });
+    });
+
+    const sendBtn = document.getElementById("broadcast-send-btn");
+    if (sendBtn) {
+      sendBtn.onclick = async () => {
+        const text = (textarea?.value || "").trim();
+        const imageInput = document.getElementById("broadcast-image");
+        const file = imageInput?.files?.[0];
+        if (!text) {
+          showToast("Введите текст сообщения", "error");
+          return;
+        }
+
+        const check = await openUxDialog({
+          title: "Подтверждение рассылки",
+          message: "Отправить сообщение всем пользователям?",
+          confirmText: "Отправить",
+          cancelText: "Отмена",
+        });
+        if (!check.confirmed) return;
+
+        const formData = new FormData();
+        formData.append("text_html", text);
+        if (file) formData.append("image", file);
+        try {
+          sendBtn.disabled = true;
+          sendBtn.textContent = "Запуск рассылки...";
+          await apiRequest("/broadcasts", {
+            method: "POST",
+            body: formData,
+          });
+          showToast("Рассылка создана и отправляется в фоне", "success");
+          loadMessages(1);
+        } catch (e) {
+          showToast(e.message || "Ошибка создания рассылки", "error");
+        } finally {
+          sendBtn.disabled = false;
+          sendBtn.textContent = "Отправить всем";
+        }
+      };
+    }
+
+    section.querySelectorAll(".broadcast-detail-btn").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const id = btn.getAttribute("data-id");
+        if (!id) return;
+        try {
+          const item = await apiRequest(`/broadcasts/${id}`);
+          const body = [
+            `Статус: ${item.status}`,
+            `Отправлено: ${item.sent_count}/${item.total_recipients}`,
+            `Ошибок: ${item.failed_count}`,
+            "",
+            "Текст рассылки:",
+            stripHtmlTags(item.text_html || "—"),
+          ].join("\n");
+          await openUxDialog({
+            title: `Рассылка #${item.id}`,
+            message: body,
+            confirmText: "Закрыть",
+          });
+        } catch (e) {
+          showToast(e.message || "Ошибка загрузки рассылки", "error");
+        }
+      });
+    });
+  } catch (e) {
+    section.innerHTML = `<h1>Сообщения</h1><div class="error">${e.message}</div>`;
   }
 }
 

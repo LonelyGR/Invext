@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+from pathlib import Path
 from typing import List, Optional
 from zoneinfo import ZoneInfo
 
@@ -97,6 +98,7 @@ async def send_telegram_message(
     *,
     message_effect_id: Optional[str] = None,
     reply_markup: Optional[dict] = None,
+    parse_mode: Optional[str] = None,
 ) -> bool:
     """
     Отправить одно сообщение в Telegram.
@@ -113,6 +115,8 @@ async def send_telegram_message(
         payload["message_effect_id"] = message_effect_id
     if reply_markup is not None:
         payload["reply_markup"] = reply_markup
+    if parse_mode:
+        payload["parse_mode"] = parse_mode
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             r = await client.post(url, json=payload)
@@ -133,6 +137,42 @@ async def send_telegram_message(
         return False
     except Exception as e:
         logger.warning("Failed to send Telegram message to %s: %s", chat_id, e)
+        return False
+
+
+async def send_telegram_photo(
+    chat_id: int,
+    photo_path: str,
+    *,
+    caption: Optional[str] = None,
+    parse_mode: Optional[str] = None,
+) -> bool:
+    settings = get_settings()
+    if not settings.bot_token:
+        logger.warning("BOT_TOKEN not configured, skip send_telegram_photo")
+        return False
+
+    file_path = Path(photo_path)
+    if not file_path.exists():
+        logger.warning("Photo file not found for Telegram send: %s", photo_path)
+        return False
+
+    url = f"https://api.telegram.org/bot{settings.bot_token}/sendPhoto"
+    data = {"chat_id": str(chat_id)}
+    if caption:
+        data["caption"] = caption
+    if parse_mode:
+        data["parse_mode"] = parse_mode
+
+    try:
+        with file_path.open("rb") as f:
+            files = {"photo": (file_path.name, f, "application/octet-stream")}
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                r = await client.post(url, data=data, files=files)
+                r.raise_for_status()
+        return True
+    except Exception as e:
+        logger.warning("Failed to send Telegram photo to %s: %s", chat_id, e)
         return False
 
 
@@ -248,7 +288,7 @@ async def notify_payout_complete(
     return await send_telegram_message(
         telegram_id,
         text,
-        message_effect_id=EFFECT_MONEY,
+        message_effect_id=EFFECT_CELEBRATION,
     )
 
 
