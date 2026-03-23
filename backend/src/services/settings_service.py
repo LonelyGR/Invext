@@ -21,23 +21,16 @@ class SettingsDTO:
     allow_investments: bool
 
 
-_SETTINGS_CACHE: Optional[SettingsDTO] = None
-
-
 async def get_system_settings(db: AsyncSession) -> SettingsDTO:
     """
     Получить глобальные настройки.
-
-    Значения кэшируются в памяти процесса; кэш очищается через
-    invalidate_system_settings_cache() после изменения настроек.
     """
-    global _SETTINGS_CACHE
-    if _SETTINGS_CACHE is not None:
-        return _SETTINGS_CACHE
-
+    # В распределённом окружении (несколько воркеров/контейнеров) in-memory кэш
+    # может расходиться между инстансами и давать разные лимиты пользователям.
+    # Поэтому читаем актуальные настройки напрямую из БД.
     result = await db.execute(select(SystemSettings).limit(1))
     row = result.scalar_one()
-    _SETTINGS_CACHE = SettingsDTO(
+    return SettingsDTO(
         min_deposit_usdt=Decimal(row.min_deposit_usdt),
         max_deposit_usdt=Decimal(row.max_deposit_usdt),
         min_withdraw_usdt=Decimal(row.min_withdraw_usdt),
@@ -48,10 +41,9 @@ async def get_system_settings(db: AsyncSession) -> SettingsDTO:
         allow_deposits=bool(row.allow_deposits),
         allow_investments=bool(row.allow_investments),
     )
-    return _SETTINGS_CACHE
 
 
 def invalidate_system_settings_cache() -> None:
-    global _SETTINGS_CACHE
-    _SETTINGS_CACHE = None
+    # Совместимость со старым API: кэш отключён, инвалидировать нечего.
+    return None
 

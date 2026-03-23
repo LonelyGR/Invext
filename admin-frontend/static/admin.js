@@ -57,6 +57,38 @@ function showMainView() {
   document.getElementById("main-view").classList.remove("hidden");
 }
 
+function ensureMessagesNavAndSection() {
+  const nav = document.querySelector(".sidebar nav");
+  if (nav && !nav.querySelector('a[data-section="messages"]')) {
+    const dealsLink = nav.querySelector('a[data-section="deals"]');
+    const link = document.createElement("a");
+    link.href = "#messages";
+    link.setAttribute("data-section", "messages");
+    link.innerHTML = `
+      <span class="nav-icon">📣</span>
+      <span class="nav-label">Сообщения</span>
+    `;
+    if (dealsLink && dealsLink.nextSibling) {
+      nav.insertBefore(link, dealsLink.nextSibling);
+    } else {
+      nav.appendChild(link);
+    }
+  }
+
+  const content = document.querySelector("main.content");
+  if (content && !document.getElementById("messages-section")) {
+    const section = document.createElement("section");
+    section.id = "messages-section";
+    section.className = "section hidden";
+    const dealsSection = document.getElementById("deals-section");
+    if (dealsSection && dealsSection.nextSibling) {
+      content.insertBefore(section, dealsSection.nextSibling);
+    } else {
+      content.appendChild(section);
+    }
+  }
+}
+
 async function handleLogin(event) {
   event.preventDefault();
   const token = document.getElementById("token").value.trim();
@@ -1662,6 +1694,7 @@ window.addEventListener("hashchange", () => {
 });
 
 document.addEventListener("DOMContentLoaded", () => {
+  ensureMessagesNavAndSection();
   document
     .getElementById("login-form")
     .addEventListener("submit", handleLogin);
