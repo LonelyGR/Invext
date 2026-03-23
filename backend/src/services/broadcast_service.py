@@ -168,9 +168,18 @@ async def _finalize_broadcasts(db: AsyncSession) -> None:
                 BroadcastDelivery.status == DELIVERY_STATUS_FAILED,
             )
         )
+        sent = await db.execute(
+            select(func.count(BroadcastDelivery.id)).where(
+                BroadcastDelivery.broadcast_id == broadcast_id,
+                BroadcastDelivery.status == DELIVERY_STATUS_SENT,
+            )
+        )
         b = await db.get(BroadcastMessage, broadcast_id)
         if not b:
             continue
         b.failed_count = int(failed.scalar() or 0)
-        b.status = BROADCAST_STATUS_ERROR if b.failed_count > 0 else BROADCAST_STATUS_SENT
+        # Частичные ошибки (например, блокировка бота пользователем) не должны
+        # помечать всю кампанию как ERROR, если рассылка реально доставлена другим.
+        sent_count = int(sent.scalar() or 0)
+        b.status = BROADCAST_STATUS_SENT if sent_count > 0 else BROADCAST_STATUS_ERROR
         b.finished_at = now
