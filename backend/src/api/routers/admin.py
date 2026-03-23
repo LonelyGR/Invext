@@ -79,12 +79,16 @@ async def admin_reject_withdraw(
 @router.post("/dashboard-token")
 async def admin_create_dashboard_token(
     telegram_id: int = Query(..., description="Telegram ID админа, для которого создаётся токен"),
+    role: str = Query("admin", description="Роль сессии: admin или moderator"),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Создать одноразовый токен для входа в админ-сайт /database.
     Бот вызывает от имени админа, передаёт его telegram_id. Токен действует 24 часа.
     """
+    normalized_role = (role or "admin").strip().lower()
+    if normalized_role not in {"admin", "moderator"}:
+        raise HTTPException(status_code=400, detail="role must be admin or moderator")
     now = datetime.now(timezone.utc)
     expires_at = now + timedelta(hours=24)
     token_str = uuid.uuid4().hex
@@ -93,6 +97,7 @@ async def admin_create_dashboard_token(
         expires_at=expires_at,
         is_used=False,
         created_by=telegram_id,
+        role=normalized_role,
     )
     db.add(record)
     await db.flush()
@@ -100,6 +105,7 @@ async def admin_create_dashboard_token(
     dashboard_url = settings.app_url.rstrip("/") + "/database"
     return {
         "token": token_str,
+        "role": normalized_role,
         "expires_at": expires_at.isoformat(),
         "dashboard_url": dashboard_url,
     }

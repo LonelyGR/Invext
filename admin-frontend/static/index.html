@@ -12,6 +12,8 @@
       <form id="login-form">
         <label for="token">Одноразовый токен</label>
         <input id="token" name="token" type="text" required />
+        <label for="otp-code">2FA код (если включен)</label>
+        <input id="otp-code" name="otp-code" type="text" placeholder="123456" />
         <button type="submit">Войти</button>
       </form>
       <div id="login-error" class="error"></div>
@@ -75,6 +77,14 @@
         </div>
       </aside>
       <main class="content">
+        <div id="page-chrome" class="page-chrome">
+          <div id="breadcrumbs" class="breadcrumbs">Дашборд</div>
+          <div id="page-actions" class="page-actions"></div>
+          <div class="global-search-wrap">
+            <input id="global-search-input" type="text" placeholder="Глобальный поиск: пользователи, сделки, транзакции ( / )" />
+            <div id="global-search-results" class="global-search-results hidden"></div>
+          </div>
+        </div>
         <section id="dashboard-section" class="section"></section>
         <section id="users-section" class="section hidden"></section>
         <section id="user-section" class="section hidden"></section>

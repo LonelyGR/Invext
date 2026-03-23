@@ -48,14 +48,15 @@ def create_admin_jwt(admin_token: AdminToken) -> str:
     payload = {
         "sub": str(admin_token.id),
         "created_by": admin_token.created_by,
+        "role": getattr(admin_token, "role", "admin"),
         "iat": int(now.timestamp()),
         "exp": int((now + dt.timedelta(hours=JWT_TTL_HOURS)).timestamp()),
     }
     return jwt.encode(payload, settings.admin_jwt_secret, algorithm=JWT_ALGORITHM)
 
 
-def decode_admin_jwt(token: str) -> Tuple[int, int]:
-    """Вернуть (admin_token_id, created_by_telegram_id) из JWT или 401."""
+def decode_admin_jwt(token: str) -> Tuple[int, int, str]:
+    """Вернуть (admin_token_id, created_by_telegram_id, role) из JWT или 401."""
     settings = get_settings()
     try:
         payload = jwt.decode(
@@ -70,7 +71,8 @@ def decode_admin_jwt(token: str) -> Tuple[int, int]:
         )
     admin_token_id = int(payload.get("sub"))
     created_by = int(payload.get("created_by"))
-    return admin_token_id, created_by
+    role = str(payload.get("role") or "admin")
+    return admin_token_id, created_by, role
 
 
 async def get_admin_context(
@@ -85,6 +87,19 @@ async def get_admin_context(
             detail="Not authenticated",
         )
     return int(admin_token_id), int(created_by)
+
+
+def get_admin_role(request: Request) -> str:
+    role = getattr(request.state, "admin_role", None)
+    return str(role or "admin")
+
+
+def require_admin_role(request: Request) -> None:
+    if get_admin_role(request) != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Недостаточно прав: требуется роль admin",
+        )
 
 
 async def log_admin_action(

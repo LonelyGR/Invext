@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 class LoginRequest(BaseModel):
     token: str
+    otp_code: Optional[str] = None
 
 
 class DashboardStats(BaseModel):
@@ -31,6 +32,11 @@ class DealRow(BaseModel):
     end_at: Optional[datetime] = None
     status: str
     profit_percent: Optional[Decimal] = None
+    min_participation_usdt: Optional[Decimal] = None
+    max_participation_usdt: Optional[Decimal] = None
+    max_participants: Optional[int] = None
+    risk_level: Optional[str] = None
+    risk_note: Optional[str] = None
     referral_processed: bool = False
     close_notification_sent: bool = False
     created_at: Optional[datetime] = None
@@ -48,6 +54,11 @@ class DealUpdateRequest(BaseModel):
     title: Optional[str] = None
     start_at: Optional[datetime] = None
     end_at: Optional[datetime] = None
+    min_participation_usdt: Optional[Decimal] = None
+    max_participation_usdt: Optional[Decimal] = None
+    max_participants: Optional[int] = None
+    risk_level: Optional[str] = None
+    risk_note: Optional[str] = None
 
 
 class DealStatusResponse(BaseModel):
@@ -66,6 +77,8 @@ class UserRow(BaseModel):
     balance_usdt: Decimal
     ledger_balance_usdt: Decimal
     invested_now_usdt: Decimal
+    is_blocked: bool = False
+    blocked_reason: Optional[str] = None
     created_at: datetime
 
 
@@ -121,10 +134,21 @@ class UserWithdrawRequest(BaseModel):
     decided_at: Optional[datetime]
 
 
+class UserActionItem(BaseModel):
+    ts: datetime
+    source: str
+    title: str
+    amount: Optional[Decimal] = None
+
+
 class UserDetail(BaseModel):
     user: UserRow
     investments: List[UserInvestment]
     withdrawals: List[UserWithdrawRequest]
+    referrer: Optional[UserRow] = None
+    referrals_count: int = 0
+    referrals_preview: List[UserRow] = []
+    recent_actions: List[UserActionItem] = []
 
 
 class AdminLogItem(BaseModel):
@@ -182,6 +206,9 @@ class DepositDetail(BaseModel):
     paid_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     balance_credited: bool
+    expected_amount: Optional[Decimal] = None
+    actually_paid_amount: Optional[Decimal] = None
+    estimated_fee_amount: Optional[Decimal] = None
     raw_webhook_payloads: Optional[List[dict]] = None
 
 
@@ -197,10 +224,12 @@ class BroadcastRow(BaseModel):
     text_html: str
     image_url: Optional[str] = None
     status: str
+    audience_segment: str = "all"
     total_recipients: int
     sent_count: int
     failed_count: int
     created_at: datetime
+    scheduled_at: Optional[datetime] = None
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
     last_error: Optional[str] = None

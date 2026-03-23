@@ -6,7 +6,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, List, Optional
 
-from sqlalchemy import DateTime, ForeignKey, String, BigInteger, Text, Numeric
+from sqlalchemy import DateTime, ForeignKey, String, BigInteger, Text, Numeric, Boolean
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -40,6 +40,8 @@ class User(Base):
     ref_code: Mapped[str] = mapped_column(String(32), unique=True, nullable=False, default=_short_ref_code)
     referrer_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     balance_usdt: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False, default=0)
+    is_blocked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
+    blocked_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     # Связи

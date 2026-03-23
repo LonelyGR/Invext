@@ -3,7 +3,13 @@ from __future__ import annotations
 import csv
 import datetime as dt
 import io
+import base64
+import hashlib
+import hmac
+import json
 import re
+import secrets
+import struct
 import uuid
 from decimal import Decimal
 from pathlib import Path
@@ -18,6 +24,7 @@ from src.core.admin_auth import (
     JWT_COOKIE_NAME,
     create_admin_jwt,
     get_admin_context,
+    require_admin_role,
     log_admin_action,
     validate_admin_token,
 )
@@ -38,7 +45,9 @@ from src.models import (
     PaymentInvoice,
     PaymentWebhookEvent,
     SystemSettings,
+    SystemSettingsVersion,
     BroadcastMessage,
+    AdminLoginEvent,
 )
 from src.schemas.admin_dashboard import (
     AdminLogItem,
@@ -58,6 +67,7 @@ from src.schemas.admin_dashboard import (
     PaginatedDeposits,
     PaginatedUsers,
     SendDealNotificationsResponse,
+    UserActionItem,
     UserDetail,
     UserInvestment,
     UserRow,
@@ -82,10 +92,10 @@ from src.services.deal_service import (
     open_new_deal,
     process_pending_payouts,
 )
-from src.services.notification_service import broadcast_deal_opened, send_telegram_message
+from src.services.notification_service import broadcast_deal_opened, send_telegram_message, send_telegram_photo
 from src.core.config import get_settings
 from src.services.settings_service import invalidate_system_settings_cache
-from src.services.broadcast_service import enqueue_broadcast
+from src.services.broadcast_service import enqueue_broadcast, retry_failed_deliveries
 from src.models.broadcast_message import BROADCAST_STATUS_IN_PROGRESS
 
 
@@ -94,6 +104,53 @@ ALLOWED_BROADCAST_TAGS = ("b", "strong", "i", "em", "u", "s", "code", "pre", "a"
 
 
 router = APIRouter(prefix="/database/api", tags=["admin-dashboard"])
+SYSTEM_SETTINGS_FIELDS = (
+    "min_deposit_usdt",
+    "max_deposit_usdt",
+    "min_withdraw_usdt",
+    "max_withdraw_usdt",
+    "min_invest_usdt",
+    "max_invest_usdt",
+    "allow_deposits",
+    "allow_investments",
+)
+SYSTEM_SETTINGS_DEFAULTS = {
+    "min_deposit_usdt": "10",
+    "max_deposit_usdt": "100000",
+    "min_withdraw_usdt": "10",
+    "max_withdraw_usdt": "100000",
+    "min_invest_usdt": "50",
+    "max_invest_usdt": "100000",
+    "allow_deposits": True,
+    "allow_investments": True,
+}
+
+
+def _totp_secret() -> str:
+    return base64.b32encode(secrets.token_bytes(20)).decode("ascii").rstrip("=")
+
+
+def _verify_totp(secret_b32: str, code: str, *, window: int = 1, interval: int = 30) -> bool:
+    raw_code = (code or "").strip().replace(" ", "")
+    if not raw_code.isdigit() or len(raw_code) not in {6, 7, 8}:
+        return False
+    sec = secret_b32.strip().upper()
+    pad = "=" * ((8 - len(sec) % 8) % 8)
+    try:
+        key = base64.b32decode(sec + pad, casefold=True)
+    except Exception:
+        return False
+    now = int(dt.datetime.now(dt.timezone.utc).timestamp())
+    counter = now // interval
+    for off in range(-window, window + 1):
+        msg = struct.pack(">Q", counter + off)
+        digest = hmac.new(key, msg, hashlib.sha1).digest()
+        o = digest[-1] & 0x0F
+        val = ((digest[o] & 0x7F) << 24) | ((digest[o + 1] & 0xFF) << 16) | ((digest[o + 2] & 0xFF) << 8) | (digest[o + 3] & 0xFF)
+        otp = str(val % 10**6).zfill(6)
+        if otp == raw_code:
+            return True
+    return False
 
 
 def _sanitize_broadcast_html(text: str) -> str:
@@ -108,6 +165,56 @@ def _sanitize_broadcast_html(text: str) -> str:
     return cleaned
 
 
+def _settings_snapshot(row: SystemSettings) -> dict:
+    return {
+        "min_deposit_usdt": str(row.min_deposit_usdt),
+        "max_deposit_usdt": str(row.max_deposit_usdt),
+        "min_withdraw_usdt": str(row.min_withdraw_usdt),
+        "max_withdraw_usdt": str(row.max_withdraw_usdt),
+        "min_invest_usdt": str(row.min_invest_usdt),
+        "max_invest_usdt": str(row.max_invest_usdt),
+        "allow_deposits": bool(row.allow_deposits),
+        "allow_investments": bool(row.allow_investments),
+    }
+
+
+def _coerce_bool(value_raw: object) -> bool:
+    if isinstance(value_raw, bool):
+        return value_raw
+    value_norm = str(value_raw).strip().lower()
+    if value_norm in {"1", "true", "yes", "on"}:
+        return True
+    if value_norm in {"0", "false", "no", "off"}:
+        return False
+    raise HTTPException(status_code=400, detail="value must be boolean")
+
+
+def _validate_full_settings_payload(payload: dict) -> dict:
+    parsed: dict = {}
+    for field in SYSTEM_SETTINGS_FIELDS:
+        if field not in payload:
+            raise HTTPException(status_code=400, detail=f"Missing field: {field}")
+        if field in {"allow_deposits", "allow_investments"}:
+            parsed[field] = _coerce_bool(payload.get(field))
+            continue
+        raw = str(payload.get(field, "")).replace(",", ".").strip()
+        try:
+            value = Decimal(raw)
+        except Exception:
+            raise HTTPException(status_code=400, detail=f"{field} must be a number")
+        if value <= 0:
+            raise HTTPException(status_code=400, detail=f"{field} must be greater than 0")
+        parsed[field] = value
+
+    if parsed["min_deposit_usdt"] > parsed["max_deposit_usdt"]:
+        raise HTTPException(status_code=400, detail="Минимальный депозит не может быть больше максимального")
+    if parsed["min_withdraw_usdt"] > parsed["max_withdraw_usdt"]:
+        raise HTTPException(status_code=400, detail="Минимальный вывод не может быть больше максимального")
+    if parsed["min_invest_usdt"] > parsed["max_invest_usdt"]:
+        raise HTTPException(status_code=400, detail="Минимальная инвестиция не может быть больше максимальной")
+    return parsed
+
+
 def _broadcast_row_to_schema(row: BroadcastMessage) -> BroadcastRow:
     image_url = f"/database/api/broadcasts/{row.id}/image" if row.image_path else None
     return BroadcastRow(
@@ -115,10 +222,12 @@ def _broadcast_row_to_schema(row: BroadcastMessage) -> BroadcastRow:
         text_html=row.text_html,
         image_url=image_url,
         status=row.status,
+        audience_segment=row.audience_segment or "all",
         total_recipients=row.total_recipients,
         sent_count=row.sent_count,
         failed_count=row.failed_count,
         created_at=row.created_at,
+        scheduled_at=row.scheduled_at,
         started_at=row.started_at,
         finished_at=row.finished_at,
         last_error=row.last_error,
@@ -127,12 +236,43 @@ def _broadcast_row_to_schema(row: BroadcastMessage) -> BroadcastRow:
 
 @router.post("/login")
 async def admin_login(
+    request: Request,
     body: LoginRequest,
     response: Response,
     db: AsyncSession = Depends(get_db),
 ):
     """Логин по одноразовому токену admin_tokens.token."""
-    token = await validate_admin_token(db, body.token.strip())
+    ip_address = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+    try:
+        token = await validate_admin_token(db, body.token.strip())
+    except HTTPException as e:
+        db.add(
+            AdminLoginEvent(
+                admin_token_id=None,
+                success=False,
+                ip_address=ip_address,
+                user_agent=user_agent,
+                reason=str(e.detail),
+            )
+        )
+        await db.flush()
+        raise
+
+    settings_row = (await db.execute(select(SystemSettings).limit(1))).scalar_one_or_none()
+    if settings_row is not None and bool(getattr(settings_row, "admin_2fa_enabled", False)):
+        if not _verify_totp(str(settings_row.admin_2fa_secret or ""), body.otp_code or ""):
+            db.add(
+                AdminLoginEvent(
+                    admin_token_id=token.id,
+                    success=False,
+                    ip_address=ip_address,
+                    user_agent=user_agent,
+                    reason="Invalid OTP code",
+                )
+            )
+            await db.flush()
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid OTP code")
 
     # Можно пометить токен как использованный (по желанию).
     if not token.is_used:
@@ -159,8 +299,172 @@ async def admin_login(
         entity_type="ADMIN",
         entity_id=token.created_by,
     )
+    db.add(
+        AdminLoginEvent(
+            admin_token_id=token.id,
+            success=True,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            reason=None,
+        )
+    )
+    await db.flush()
 
     return {"ok": True}
+
+
+@router.get("/security/login-events")
+async def list_login_events(
+    request: Request,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    success: Optional[bool] = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    admin_token_id, _ = await get_admin_context(request)
+    require_admin_role(request)
+    query = select(AdminLoginEvent)
+    count_q = select(func.count(AdminLoginEvent.id))
+    if success is not None:
+        query = query.where(AdminLoginEvent.success == success)
+        count_q = count_q.where(AdminLoginEvent.success == success)
+    total = int((await db.execute(count_q)).scalar() or 0)
+    rows = (
+        await db.execute(
+            query
+            .order_by(desc(AdminLoginEvent.created_at))
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+    ).scalars().all()
+
+    await log_admin_action(
+        db=db,
+        admin_token_id=admin_token_id,
+        action_type="VIEW_LOGIN_EVENTS",
+        entity_type="SECURITY",
+        entity_id=0,
+    )
+    return {
+        "items": [
+            {
+                "id": r.id,
+                "admin_token_id": r.admin_token_id,
+                "success": bool(r.success),
+                "ip_address": r.ip_address,
+                "user_agent": r.user_agent,
+                "reason": r.reason,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in rows
+        ],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }
+
+
+@router.get("/security/2fa/status")
+async def get_admin_2fa_status(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    admin_token_id, _ = await get_admin_context(request)
+    row = (await db.execute(select(SystemSettings).limit(1))).scalar_one_or_none()
+    enabled = bool(getattr(row, "admin_2fa_enabled", False)) if row else False
+    await log_admin_action(
+        db=db,
+        admin_token_id=admin_token_id,
+        action_type="VIEW_2FA_STATUS",
+        entity_type="SECURITY",
+        entity_id=0,
+    )
+    return {"enabled": enabled}
+
+
+@router.post("/security/2fa/setup")
+async def setup_admin_2fa(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    admin_token_id, created_by = await get_admin_context(request)
+    require_admin_role(request)
+    async with db.begin():
+        row = (await db.execute(select(SystemSettings).limit(1).with_for_update())).scalar_one()
+        secret = _totp_secret()
+        row.admin_2fa_secret = secret
+        row.admin_2fa_enabled = False
+        await db.flush()
+    await log_admin_action(
+        db=db,
+        admin_token_id=admin_token_id,
+        action_type="SETUP_2FA",
+        entity_type="SECURITY",
+        entity_id=0,
+    )
+    issuer = "Invext%20Admin"
+    label = f"admin_{created_by}"
+    return {
+        "secret": secret,
+        "otpauth_url": f"otpauth://totp/{issuer}:{label}?secret={secret}&issuer={issuer}&digits=6&period=30",
+    }
+
+
+@router.post("/security/2fa/enable")
+async def enable_admin_2fa(
+    request: Request,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    admin_token_id, _ = await get_admin_context(request)
+    require_admin_role(request)
+    code = (body.get("otp_code") or "").strip()
+    async with db.begin():
+        row = (await db.execute(select(SystemSettings).limit(1).with_for_update())).scalar_one()
+        secret = str(getattr(row, "admin_2fa_secret", "") or "")
+        if not secret:
+            raise HTTPException(status_code=400, detail="2FA secret is not initialized")
+        if not _verify_totp(secret, code):
+            raise HTTPException(status_code=400, detail="Invalid OTP code")
+        row.admin_2fa_enabled = True
+        await db.flush()
+    await log_admin_action(
+        db=db,
+        admin_token_id=admin_token_id,
+        action_type="ENABLE_2FA",
+        entity_type="SECURITY",
+        entity_id=0,
+    )
+    return {"ok": True, "enabled": True}
+
+
+@router.post("/security/2fa/disable")
+async def disable_admin_2fa(
+    request: Request,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    admin_token_id, _ = await get_admin_context(request)
+    require_admin_role(request)
+    code = (body.get("otp_code") or "").strip()
+    async with db.begin():
+        row = (await db.execute(select(SystemSettings).limit(1).with_for_update())).scalar_one()
+        if not bool(getattr(row, "admin_2fa_enabled", False)):
+            return {"ok": True, "enabled": False}
+        secret = str(getattr(row, "admin_2fa_secret", "") or "")
+        if not _verify_totp(secret, code):
+            raise HTTPException(status_code=400, detail="Invalid OTP code")
+        row.admin_2fa_enabled = False
+        row.admin_2fa_secret = None
+        await db.flush()
+    await log_admin_action(
+        db=db,
+        admin_token_id=admin_token_id,
+        action_type="DISABLE_2FA",
+        entity_type="SECURITY",
+        entity_id=0,
+    )
+    return {"ok": True, "enabled": False}
 
 
 @router.get("/dashboard", response_model=DashboardStats)
@@ -169,6 +473,7 @@ async def get_dashboard_stats(
     db: AsyncSession = Depends(get_db),
 ):
     admin_token_id, _ = await get_admin_context(request)
+    require_admin_role(request)
 
     # Кол-во пользователей.
     users_count_result = await db.execute(select(func.count(User.id)))
@@ -242,31 +547,332 @@ async def get_dashboard_stats(
     )
 
 
+@router.get("/dashboard/extended")
+async def get_dashboard_extended(
+    request: Request,
+    period_days: int = Query(7, ge=1, le=30),
+    db: AsyncSession = Depends(get_db),
+):
+    """Расширенные метрики для дашборда админки без изменения базового контракта /dashboard."""
+    admin_token_id, _ = await get_admin_context(request)
+    since = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=period_days)
+
+    dep_users_subq = (
+        select(PaymentInvoice.user_id)
+        .where(
+            PaymentInvoice.created_at >= since,
+            PaymentInvoice.status.in_(("finished", "paid")),
+        )
+        .distinct()
+        .subquery()
+    )
+    inv_users_p = (
+        select(DealParticipation.user_id.label("user_id"))
+        .where(DealParticipation.created_at >= since)
+    )
+    inv_users_i = (
+        select(DealInvestment.user_id.label("user_id"))
+        .where(DealInvestment.created_at >= since)
+    )
+    inv_users_subq = inv_users_p.union(inv_users_i).subquery()
+
+    dep_users_count_result = await db.execute(select(func.count()).select_from(dep_users_subq))
+    dep_users_count = int(dep_users_count_result.scalar() or 0)
+
+    converted_count_result = await db.execute(
+        select(func.count())
+        .select_from(inv_users_subq)
+        .where(inv_users_subq.c.user_id.in_(select(dep_users_subq.c.user_id)))
+    )
+    converted_count = int(converted_count_result.scalar() or 0)
+    conversion_pct = (
+        (Decimal(converted_count) / Decimal(dep_users_count) * Decimal("100"))
+        if dep_users_count > 0
+        else Decimal("0")
+    )
+
+    avg_deposit_result = await db.execute(
+        select(func.avg(PaymentInvoice.amount)).where(
+            PaymentInvoice.created_at >= since,
+            PaymentInvoice.status.in_(("finished", "paid")),
+        )
+    )
+    avg_deposit = avg_deposit_result.scalar() or Decimal("0")
+
+    top_balances_result = await db.execute(
+        select(User.id, User.telegram_id, User.username, User.balance_usdt)
+        .order_by(desc(User.balance_usdt))
+        .limit(5)
+    )
+    top_balances = [
+        {
+            "user_id": uid,
+            "telegram_id": tg,
+            "username": username,
+            "balance_usdt": str(balance or Decimal("0")),
+        }
+        for uid, tg, username, balance in top_balances_result.all()
+    ]
+
+    ref_counts_result = await db.execute(
+        select(User.referrer_id, func.count(User.id))
+        .where(User.referrer_id.is_not(None))
+        .group_by(User.referrer_id)
+        .order_by(desc(func.count(User.id)))
+        .limit(25)
+    )
+    ref_rewards_result = await db.execute(
+        select(ReferralReward.to_user_id, func.coalesce(func.sum(ReferralReward.amount), 0))
+        .where(ReferralReward.status == "paid")
+        .group_by(ReferralReward.to_user_id)
+    )
+    rewards_map = {int(uid): Decimal(total or 0) for uid, total in ref_rewards_result.all()}
+    refs_map = {int(uid): int(cnt or 0) for uid, cnt in ref_counts_result.all() if uid is not None}
+    top_ref_ids = list(set(list(refs_map.keys()) + list(rewards_map.keys())))
+    top_referrers = []
+    if top_ref_ids:
+        ref_users_result = await db.execute(
+            select(User.id, User.telegram_id, User.username).where(User.id.in_(top_ref_ids))
+        )
+        info = {int(uid): (tg, username) for uid, tg, username in ref_users_result.all()}
+        rows = []
+        for uid in top_ref_ids:
+            tg, username = info.get(uid, (0, None))
+            rows.append(
+                {
+                    "user_id": uid,
+                    "telegram_id": tg,
+                    "username": username,
+                    "referrals_count": refs_map.get(uid, 0),
+                    "referral_income_usdt": str(rewards_map.get(uid, Decimal("0"))),
+                }
+            )
+        rows.sort(
+            key=lambda r: (
+                int(r["referrals_count"]),
+                Decimal(str(r["referral_income_usdt"])),
+            ),
+            reverse=True,
+        )
+        top_referrers = rows[:5]
+
+    # DAU (24h): уникальные пользователи с активностью по ключевым сущностям.
+    dau_since = dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=24)
+    dau_users = set()
+    dau_dep = await db.execute(
+        select(PaymentInvoice.user_id).where(PaymentInvoice.created_at >= dau_since)
+    )
+    dau_users.update(int(uid) for (uid,) in dau_dep.all() if uid is not None)
+    dau_led = await db.execute(
+        select(LedgerTransaction.user_id).where(LedgerTransaction.created_at >= dau_since)
+    )
+    dau_users.update(int(uid) for (uid,) in dau_led.all() if uid is not None)
+    dau_part = await db.execute(
+        select(DealParticipation.user_id).where(DealParticipation.created_at >= dau_since)
+    )
+    dau_users.update(int(uid) for (uid,) in dau_part.all() if uid is not None)
+    dau_inv = await db.execute(
+        select(DealInvestment.user_id).where(DealInvestment.created_at >= dau_since)
+    )
+    dau_users.update(int(uid) for (uid,) in dau_inv.all() if uid is not None)
+    dau_24h = len(dau_users)
+
+    # Аномалии (простые сигналы, без изменения бизнес-логики).
+    pending_withdrawals_result = await db.execute(
+        select(func.count(WithdrawRequest.id)).where(WithdrawRequest.status == "PENDING")
+    )
+    pending_withdrawals_count = int(pending_withdrawals_result.scalar() or 0)
+    created_deposits_result = await db.execute(
+        select(func.count(PaymentInvoice.id)).where(PaymentInvoice.created_at >= since)
+    )
+    created_deposits_count = int(created_deposits_result.scalar() or 0)
+    paid_deposits_result = await db.execute(
+        select(func.count(PaymentInvoice.id)).where(
+            PaymentInvoice.created_at >= since,
+            PaymentInvoice.status.in_(("finished", "paid")),
+        )
+    )
+    paid_deposits_count = int(paid_deposits_result.scalar() or 0)
+    failed_broadcasts_result = await db.execute(
+        select(func.count(BroadcastMessage.id)).where(
+            BroadcastMessage.created_at >= dau_since,
+            BroadcastMessage.status == "ERROR",
+        )
+    )
+    failed_broadcasts_24h = int(failed_broadcasts_result.scalar() or 0)
+
+    anomaly_alerts = []
+    if pending_withdrawals_count >= 30:
+        anomaly_alerts.append({
+            "type": "WITHDRAWAL_BACKLOG",
+            "severity": "high",
+            "message": f"Очередь выводов высокая: {pending_withdrawals_count} pending",
+        })
+    if created_deposits_count >= 20:
+        success_rate = (Decimal(paid_deposits_count) / Decimal(created_deposits_count) * Decimal("100")) if created_deposits_count > 0 else Decimal("0")
+        if success_rate < Decimal("50"):
+            anomaly_alerts.append({
+                "type": "LOW_DEPOSIT_SUCCESS",
+                "severity": "medium",
+                "message": f"Низкий процент успешных депозитов: {success_rate.quantize(Decimal('0.1'))}%",
+            })
+    if dep_users_count >= 20 and conversion_pct < Decimal("5"):
+        anomaly_alerts.append({
+            "type": "LOW_CONVERSION",
+            "severity": "medium",
+            "message": f"Низкая конверсия депозит→инвестиция: {conversion_pct.quantize(Decimal('0.1'))}%",
+        })
+    if failed_broadcasts_24h > 0:
+        anomaly_alerts.append({
+            "type": "BROADCAST_FAILURES",
+            "severity": "medium",
+            "message": f"Ошибки рассылок за 24ч: {failed_broadcasts_24h}",
+        })
+
+    await log_admin_action(
+        db=db,
+        admin_token_id=admin_token_id,
+        action_type="VIEW_DASHBOARD_EXTENDED",
+        entity_type="DASHBOARD",
+        entity_id=period_days,
+    )
+
+    return {
+        "period_days": period_days,
+        "deposit_users_count": dep_users_count,
+        "converted_users_count": converted_count,
+        "deposit_to_invest_conversion_pct": str(conversion_pct.quantize(Decimal("0.01"))),
+        "average_deposit_usdt": str(Decimal(avg_deposit).quantize(Decimal("0.01")) if avg_deposit else Decimal("0.00")),
+        "top_users_by_balance": top_balances,
+        "top_referrers": top_referrers,
+        "dau_24h": dau_24h,
+        "anomaly_alerts": anomaly_alerts,
+    }
+
+
+@router.get("/search/global")
+async def global_search(
+    request: Request,
+    q: str = Query(..., min_length=1),
+    db: AsyncSession = Depends(get_db),
+):
+    admin_token_id, _ = await get_admin_context(request)
+    needle = q.strip()
+    if not needle:
+        return {"users": [], "deals": [], "ledger": []}
+
+    like = f"%{needle}%"
+    users_result = await db.execute(
+        select(User.id, User.telegram_id, User.username)
+        .where(
+            or_(
+                User.username.ilike(like),
+                func.cast(User.telegram_id, String).ilike(like),
+            )
+        )
+        .order_by(desc(User.created_at))
+        .limit(8)
+    )
+    users = [
+        {"id": uid, "telegram_id": tg, "username": username}
+        for uid, tg, username in users_result.all()
+    ]
+
+    deals_result = await db.execute(
+        select(Deal.id, Deal.number, Deal.status)
+        .where(
+            or_(
+                func.cast(Deal.number, String).ilike(like),
+                Deal.title.ilike(like),
+            )
+        )
+        .order_by(desc(Deal.updated_at))
+        .limit(8)
+    )
+    deals = [
+        {"id": did, "number": number, "status": status}
+        for did, number, status in deals_result.all()
+    ]
+
+    ledger_result = await db.execute(
+        select(
+            LedgerTransaction.id,
+            LedgerTransaction.user_id,
+            LedgerTransaction.type,
+            LedgerTransaction.amount_usdt,
+            LedgerTransaction.created_at,
+        )
+        .where(
+            or_(
+                LedgerTransaction.type.ilike(like),
+                func.cast(LedgerTransaction.user_id, String).ilike(like),
+            )
+        )
+        .order_by(desc(LedgerTransaction.created_at))
+        .limit(8)
+    )
+    ledger = [
+        {
+            "id": tx_id,
+            "user_id": user_id,
+            "type": tx_type,
+            "amount_usdt": str(amount_usdt),
+            "created_at": created_at.isoformat() if created_at else None,
+        }
+        for tx_id, user_id, tx_type, amount_usdt, created_at in ledger_result.all()
+    ]
+
+    await log_admin_action(
+        db=db,
+        admin_token_id=admin_token_id,
+        action_type="GLOBAL_SEARCH",
+        entity_type="SEARCH",
+        entity_id=0,
+    )
+    return {"users": users, "deals": deals, "ledger": ledger}
+
+
 @router.get("/users", response_model=PaginatedUsers)
 async def list_users(
     request: Request,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     search: Optional[str] = Query(None),
+    activity_filter: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
     admin_token_id, _ = await get_admin_context(request)
 
-    query = select(User)
+    filters = []
     if search:
         s = f"%{search.strip()}%"
-        query = query.where(
+        filters.append(
             or_(
                 User.username.ilike(s),
                 func.cast(User.telegram_id, String).ilike(s),
             )
         )
+    if activity_filter == "with_balance":
+        filters.append(User.balance_usdt > 0)
+    elif activity_filter == "with_referrals":
+        filters.append(
+            User.id.in_(
+                select(User.referrer_id).where(User.referrer_id.is_not(None))
+            )
+        )
+
     total_result = await db.execute(
-        query.with_only_columns(func.count()).order_by(None)
+        select(func.count(User.id)).where(*filters)
     )
     total = int(total_result.scalar() or 0)
 
-    query = query.order_by(desc(User.created_at)).offset((page - 1) * page_size).limit(page_size)
+    query = (
+        select(User)
+        .where(*filters)
+        .order_by(desc(User.created_at))
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
     result = await db.execute(query)
     users = list(result.scalars().all())
 
@@ -302,6 +908,8 @@ async def list_users(
                 balance_usdt=u.balance_usdt,
                 ledger_balance_usdt=ledger_balance,
                 invested_now_usdt=invested_now,
+                is_blocked=bool(getattr(u, "is_blocked", False)),
+                blocked_reason=getattr(u, "blocked_reason", None),
                 created_at=u.created_at,
             )
         )
@@ -329,6 +937,7 @@ async def bulk_ledger_credit_all_users(
     Требует confirm=\"BULK_CREDIT\".
     """
     admin_token_id, _ = await get_admin_context(request)
+    require_admin_role(request)
 
     confirm = str(body.get("confirm", "")).strip().upper()
     if confirm != "BULK_CREDIT":
@@ -406,6 +1015,7 @@ async def bulk_ledger_reset_all_users(
     Требует confirm="RESET_ALL_BALANCES".
     """
     admin_token_id, _ = await get_admin_context(request)
+    require_admin_role(request)
 
     confirm = str(body.get("confirm", "")).strip().upper()
     if confirm != "RESET_ALL_BALANCES":
@@ -540,6 +1150,7 @@ async def user_ledger(
 async def export_ledger_csv(
     request: Request,
     user_id: int,
+    format: str = Query("csv", description="csv or xls"),
     db: AsyncSession = Depends(get_db),
 ):
     admin_token_id, _ = await get_admin_context(request)
@@ -556,18 +1167,24 @@ async def export_ledger_csv(
     rows = list(result.all())
 
     output = io.StringIO()
-    writer = csv.writer(output)
-    writer.writerow(["date", "type", "amount_usdt", "comment", "deal_id"])
-    for created_at, tx_type, amount_usdt in rows:
-        writer.writerow(
-            [
-                created_at.isoformat(),
-                tx_type,
-                str(amount_usdt),
-                "",
-                "",
-            ]
-        )
+    is_xls = format.lower() == "xls"
+    if is_xls:
+        output.write("date\ttype\tamount_usdt\tcomment\tdeal_id\n")
+        for created_at, tx_type, amount_usdt in rows:
+            output.write(f"{created_at.isoformat()}\t{tx_type}\t{amount_usdt}\t\t\n")
+    else:
+        writer = csv.writer(output)
+        writer.writerow(["date", "type", "amount_usdt", "comment", "deal_id"])
+        for created_at, tx_type, amount_usdt in rows:
+            writer.writerow(
+                [
+                    created_at.isoformat(),
+                    tx_type,
+                    str(amount_usdt),
+                    "",
+                    "",
+                ]
+            )
 
     await log_admin_action(
         db=db,
@@ -577,10 +1194,12 @@ async def export_ledger_csv(
         entity_id=user_id,
     )
 
+    filename_ext = "xls" if is_xls else "csv"
+    media_type = "application/vnd.ms-excel" if is_xls else "text/csv"
     return PlainTextResponse(
         content=output.getvalue(),
-        media_type="text/csv",
-        headers={"Content-Disposition": f"attachment; filename=ledger_{user_id}.csv"},
+        media_type=media_type,
+        headers={"Content-Disposition": f"attachment; filename=ledger_{user_id}.{filename_ext}"},
     )
 
 
@@ -596,6 +1215,9 @@ async def list_deposits(
     external_id_search: Optional[str] = Query(None),
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
+    amount_min: Optional[Decimal] = Query(None),
+    amount_max: Optional[Decimal] = Query(None),
+    currency_filter: Optional[str] = Query(None, description="pay_currency filter"),
     sort: str = Query("created_at_desc", description="created_at_desc, created_at_asc, amount_desc, amount_asc, status"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -637,6 +1259,16 @@ async def list_deposits(
             count_stmt = count_stmt.where(PaymentInvoice.created_at <= t_to)
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid date_to")
+    if amount_min is not None:
+        query = query.where(PaymentInvoice.price_amount >= amount_min)
+        count_stmt = count_stmt.where(PaymentInvoice.price_amount >= amount_min)
+    if amount_max is not None:
+        query = query.where(PaymentInvoice.price_amount <= amount_max)
+        count_stmt = count_stmt.where(PaymentInvoice.price_amount <= amount_max)
+    if currency_filter:
+        c = currency_filter.strip().lower()
+        query = query.where(PaymentInvoice.pay_currency == c)
+        count_stmt = count_stmt.where(PaymentInvoice.pay_currency == c)
 
     total_result = await db.execute(count_stmt)
     total = int(total_result.scalar() or 0)
@@ -715,6 +1347,13 @@ async def get_deposit_detail(
         .order_by(PaymentWebhookEvent.created_at.asc())
     )
     raw_payloads = [r[0] for r in webhook_events_result.all()]
+    estimated_fee_amount: Optional[Decimal] = None
+    if inv.actually_paid_amount is not None and inv.expected_amount is not None:
+        # Для NOWPayments обычно комиссию можно оценить как разницу между фактически
+        # полученным и ожидаемым провайдером платежом (если отличается).
+        delta = (inv.actually_paid_amount or Decimal("0")) - (inv.expected_amount or Decimal("0"))
+        if delta != 0:
+            estimated_fee_amount = delta
 
     await log_admin_action(
         db=db,
@@ -742,6 +1381,9 @@ async def get_deposit_detail(
         paid_at=inv.completed_at,
         completed_at=inv.completed_at,
         balance_credited=inv.is_balance_applied,
+        expected_amount=inv.expected_amount,
+        actually_paid_amount=inv.actually_paid_amount,
+        estimated_fee_amount=estimated_fee_amount,
         raw_webhook_payloads=raw_payloads if raw_payloads else None,
     )
 
@@ -768,6 +1410,11 @@ async def list_deals(
             end_at=d.end_at,
             status=d.status,
             profit_percent=d.profit_percent,
+            min_participation_usdt=d.min_participation_usdt,
+            max_participation_usdt=d.max_participation_usdt,
+            max_participants=d.max_participants,
+            risk_level=d.risk_level,
+            risk_note=d.risk_note,
             referral_processed=d.referral_processed,
             close_notification_sent=d.close_notification_sent,
             created_at=getattr(d, "created_at", None),
@@ -825,6 +1472,27 @@ async def update_deal_percent(
             deal.start_at = body.start_at
         if body.end_at is not None:
             deal.end_at = body.end_at
+        if body.min_participation_usdt is not None:
+            deal.min_participation_usdt = body.min_participation_usdt
+        if body.max_participation_usdt is not None:
+            deal.max_participation_usdt = body.max_participation_usdt
+        if body.max_participants is not None:
+            if body.max_participants <= 0:
+                raise HTTPException(status_code=400, detail="max_participants must be greater than 0")
+            deal.max_participants = body.max_participants
+        if body.risk_level is not None:
+            level = str(body.risk_level or "").strip().lower()
+            if level not in {"", "low", "medium", "high"}:
+                raise HTTPException(status_code=400, detail="risk_level must be low/medium/high")
+            deal.risk_level = level or None
+        if body.risk_note is not None:
+            deal.risk_note = str(body.risk_note or "").strip()[:255] or None
+        if (
+            deal.min_participation_usdt is not None
+            and deal.max_participation_usdt is not None
+            and deal.min_participation_usdt > deal.max_participation_usdt
+        ):
+            raise HTTPException(status_code=400, detail="min_participation_usdt cannot exceed max_participation_usdt")
 
         # Формируем DTO внутри транзакции, чтобы не дергать БД после её завершения
         deal_row = DealRow(
@@ -835,6 +1503,11 @@ async def update_deal_percent(
             end_at=deal.end_at,
             status=deal.status,
             profit_percent=deal.profit_percent,
+            min_participation_usdt=deal.min_participation_usdt,
+            max_participation_usdt=deal.max_participation_usdt,
+            max_participants=deal.max_participants,
+            risk_level=deal.risk_level,
+            risk_note=deal.risk_note,
             referral_processed=deal.referral_processed,
             close_notification_sent=deal.close_notification_sent,
             created_at=getattr(deal, "created_at", None),
@@ -869,6 +1542,7 @@ async def open_deal_now(
     При открытии рассылается уведомление пользователям.
     """
     admin_token_id, _ = await get_admin_context(request)
+    require_admin_role(request)
 
     # Обработать отложенные выплаты перед открытием новой сделки.
     await process_pending_payouts(db)
@@ -924,6 +1598,11 @@ async def open_deal_now(
         end_at=deal.end_at,
         status=deal.status,
         profit_percent=deal.profit_percent,
+        min_participation_usdt=deal.min_participation_usdt,
+        max_participation_usdt=deal.max_participation_usdt,
+        max_participants=deal.max_participants,
+        risk_level=deal.risk_level,
+        risk_note=deal.risk_note,
         referral_processed=deal.referral_processed,
         close_notification_sent=deal.close_notification_sent,
         created_at=getattr(deal, "created_at", None),
@@ -945,6 +1624,7 @@ async def force_close_deal(
     Фактическое закрытие выполняется после подтверждения админом в Telegram-боте.
     """
     admin_token_id, _ = await get_admin_context(request)
+    require_admin_role(request)
 
     active = await get_active_deal(db)
     if not active:
@@ -998,6 +1678,103 @@ async def force_close_deal(
     return {"requested": True}
 
 
+@router.get("/deals/{deal_id}/stats")
+async def get_deal_stats(
+    request: Request,
+    deal_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    await get_admin_context(request)
+    deal = await db.get(Deal, deal_id)
+    if not deal:
+        raise HTTPException(status_code=404, detail="Deal not found")
+    agg = await db.execute(
+        select(
+            func.count(DealParticipation.id),
+            func.coalesce(func.sum(DealParticipation.amount), 0),
+            func.coalesce(func.avg(DealParticipation.amount), 0),
+        ).where(DealParticipation.deal_id == deal_id)
+    )
+    participants_count, total_invested, avg_ticket = agg.one()
+    profit_percent = deal.profit_percent if deal.profit_percent is not None else deal.percent
+    estimated_profit = Decimal(total_invested or 0) * Decimal(profit_percent or 0) / Decimal("100")
+    risk_alerts: list[str] = []
+    if (deal.risk_level or "").lower() == "high":
+        risk_alerts.append("HIGH_RISK_LEVEL")
+    if deal.end_at is not None:
+        mins_left = (deal.end_at - dt.datetime.now(dt.timezone.utc)).total_seconds() / 60
+        if mins_left <= 60 and int(participants_count or 0) < 3:
+            risk_alerts.append("LOW_PARTICIPANTS_NEAR_CLOSE")
+    if Decimal(total_invested or 0) <= Decimal("0"):
+        risk_alerts.append("NO_PARTICIPANTS")
+    return {
+        "deal_id": deal.id,
+        "participants_count": int(participants_count or 0),
+        "total_invested_usdt": str(Decimal(total_invested or 0)),
+        "avg_ticket_usdt": str(Decimal(avg_ticket or 0)),
+        "profit_percent": str(Decimal(profit_percent or 0)),
+        "estimated_profit_usdt": str(estimated_profit),
+        "risk_alerts": risk_alerts,
+        "risk_level": deal.risk_level,
+        "risk_note": deal.risk_note,
+    }
+
+
+@router.post("/deals/{deal_id}/clone", response_model=DealRow)
+async def clone_deal(
+    request: Request,
+    deal_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    admin_token_id, _ = await get_admin_context(request)
+    require_admin_role(request)
+    src = await db.get(Deal, deal_id)
+    if not src:
+        raise HTTPException(status_code=404, detail="Deal not found")
+    async with db.begin():
+        cloned = await open_new_deal(
+            db,
+            title=f"{src.title or f'Сделка #{src.number}'} (clone)",
+            start_at=None,
+            end_at=None,
+            profit_percent=src.profit_percent if src.profit_percent is not None else src.percent,
+        )
+        cloned.min_participation_usdt = src.min_participation_usdt
+        cloned.max_participation_usdt = src.max_participation_usdt
+        cloned.max_participants = src.max_participants
+        cloned.risk_level = src.risk_level
+        cloned.risk_note = src.risk_note
+    await log_admin_action(
+        db=db,
+        admin_token_id=admin_token_id,
+        action_type="CLONE_DEAL",
+        entity_type="DEAL",
+        entity_id=cloned.id,
+    )
+    return DealRow(
+        id=cloned.id,
+        number=cloned.number,
+        title=cloned.title,
+        start_at=cloned.start_at,
+        end_at=cloned.end_at,
+        status=cloned.status,
+        profit_percent=cloned.profit_percent,
+        min_participation_usdt=cloned.min_participation_usdt,
+        max_participation_usdt=cloned.max_participation_usdt,
+        max_participants=cloned.max_participants,
+        risk_level=cloned.risk_level,
+        risk_note=cloned.risk_note,
+        referral_processed=cloned.referral_processed,
+        close_notification_sent=cloned.close_notification_sent,
+        created_at=getattr(cloned, "created_at", None),
+        updated_at=getattr(cloned, "updated_at", None),
+        percent=cloned.percent,
+        opened_at=cloned.opened_at,
+        closed_at=cloned.closed_at,
+        finished_at=cloned.finished_at,
+    )
+
+
 @router.get("/deals/status", response_model=DealStatusResponse)
 async def get_deal_status(
     request: Request,
@@ -1019,6 +1796,11 @@ async def get_deal_status(
             end_at=active.end_at,
             status=active.status,
             profit_percent=active.profit_percent,
+            min_participation_usdt=active.min_participation_usdt,
+            max_participation_usdt=active.max_participation_usdt,
+            max_participants=active.max_participants,
+            risk_level=active.risk_level,
+            risk_note=active.risk_note,
             referral_processed=active.referral_processed,
             close_notification_sent=active.close_notification_sent,
             created_at=getattr(active, "created_at", None),
@@ -1142,6 +1924,86 @@ async def get_user_detail(
         for w in withdraws
     ]
 
+    referrer_row = None
+    if u.referrer_id:
+        referrer = await db.get(User, u.referrer_id)
+        if referrer:
+            referrer_ledger = await get_balance_usdt(db, referrer.id)
+            referrer_row = UserRow(
+                id=referrer.id,
+                telegram_id=referrer.telegram_id,
+                username=referrer.username,
+                balance_usdt=referrer.balance_usdt,
+                ledger_balance_usdt=referrer_ledger,
+                invested_now_usdt=Decimal("0"),
+                is_blocked=bool(getattr(referrer, "is_blocked", False)),
+                blocked_reason=getattr(referrer, "blocked_reason", None),
+                created_at=referrer.created_at,
+            )
+
+    referrals_result = await db.execute(
+        select(User)
+        .where(User.referrer_id == u.id)
+        .order_by(desc(User.created_at))
+        .limit(5)
+    )
+    referrals_preview_users = list(referrals_result.scalars().all())
+    referrals_count_result = await db.execute(
+        select(func.count(User.id)).where(User.referrer_id == u.id)
+    )
+    referrals_count = int(referrals_count_result.scalar() or 0)
+    referrals_preview = []
+    for r in referrals_preview_users:
+        referrals_preview.append(
+            UserRow(
+                id=r.id,
+                telegram_id=r.telegram_id,
+                username=r.username,
+                balance_usdt=r.balance_usdt,
+                ledger_balance_usdt=await get_balance_usdt(db, r.id),
+                invested_now_usdt=Decimal("0"),
+                is_blocked=bool(getattr(r, "is_blocked", False)),
+                blocked_reason=getattr(r, "blocked_reason", None),
+                created_at=r.created_at,
+            )
+        )
+
+    recent_actions: list[UserActionItem] = []
+    for tx in (await db.execute(
+        select(LedgerTransaction)
+        .where(LedgerTransaction.user_id == u.id)
+        .order_by(desc(LedgerTransaction.created_at))
+        .limit(12)
+    )).scalars().all():
+        recent_actions.append(
+            UserActionItem(
+                ts=tx.created_at,
+                source="ledger",
+                title=f"{tx.type}",
+                amount=tx.amount_usdt,
+            )
+        )
+    for w in withdraws[:8]:
+        recent_actions.append(
+            UserActionItem(
+                ts=w.created_at,
+                source="withdraw",
+                title=f"WITHDRAW {w.status}",
+                amount=w.amount,
+            )
+        )
+    for i in investments[:8]:
+        recent_actions.append(
+            UserActionItem(
+                ts=i.created_at,
+                source="invest",
+                title=f"DEAL #{i.deal_number} {i.deal_status}",
+                amount=i.amount,
+            )
+        )
+    recent_actions.sort(key=lambda x: x.ts, reverse=True)
+    recent_actions = recent_actions[:20]
+
     await log_admin_action(
         db=db,
         admin_token_id=admin_token_id,
@@ -1158,10 +2020,16 @@ async def get_user_detail(
             balance_usdt=u.balance_usdt,
             ledger_balance_usdt=ledger_balance,
             invested_now_usdt=Decimal("0"),  # можно посчитать при необходимости
+            is_blocked=bool(getattr(u, "is_blocked", False)),
+            blocked_reason=getattr(u, "blocked_reason", None),
             created_at=u.created_at,
         ),
         investments=investments,
         withdrawals=withdrawals,
+        referrer=referrer_row,
+        referrals_count=referrals_count,
+        referrals_preview=referrals_preview,
+        recent_actions=recent_actions,
     )
 
 
@@ -1169,6 +2037,9 @@ async def get_user_detail(
 async def list_withdrawals(
     request: Request,
     status_filter: Optional[str] = Query(None, alias="status"),
+    amount_min: Optional[Decimal] = Query(None),
+    amount_max: Optional[Decimal] = Query(None),
+    currency_filter: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
     admin_token_id, _ = await get_admin_context(request)
@@ -1176,6 +2047,12 @@ async def list_withdrawals(
     query = select(WithdrawRequest, User).join(User, WithdrawRequest.user_id == User.id)
     if status_filter:
         query = query.where(WithdrawRequest.status == status_filter)
+    if amount_min is not None:
+        query = query.where(WithdrawRequest.amount >= amount_min)
+    if amount_max is not None:
+        query = query.where(WithdrawRequest.amount <= amount_max)
+    if currency_filter:
+        query = query.where(WithdrawRequest.currency == currency_filter.upper())
     query = query.order_by(desc(WithdrawRequest.created_at))
     result = await db.execute(query)
     rows = result.all()
@@ -1206,6 +2083,44 @@ async def list_withdrawals(
     return {"items": items}
 
 
+@router.get("/withdrawals/{withdrawal_id}")
+async def get_withdrawal_detail(
+    request: Request,
+    withdrawal_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    admin_token_id, _ = await get_admin_context(request)
+    result = await db.execute(
+        select(WithdrawRequest, User)
+        .join(User, WithdrawRequest.user_id == User.id)
+        .where(WithdrawRequest.id == withdrawal_id)
+    )
+    row = result.one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="Withdrawal not found")
+    req, user = row
+
+    await log_admin_action(
+        db=db,
+        admin_token_id=admin_token_id,
+        action_type="VIEW_WITHDRAWAL",
+        entity_type="WITHDRAW",
+        entity_id=withdrawal_id,
+    )
+    return {
+        "id": req.id,
+        "user_id": req.user_id,
+        "telegram_id": user.telegram_id,
+        "username": user.username,
+        "amount": str(req.amount),
+        "currency": req.currency,
+        "address": req.address,
+        "status": req.status,
+        "created_at": req.created_at.isoformat() if req.created_at else None,
+        "decided_at": req.decided_at.isoformat() if req.decided_at else None,
+    }
+
+
 @router.post("/users/{user_id}/ledger-adjust", response_model=LedgerAdjustResponse)
 async def user_ledger_adjust(
     request: Request,
@@ -1221,6 +2136,7 @@ async def user_ledger_adjust(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Amount must be non-zero")
 
     admin_token_id, admin_telegram_id = await get_admin_context(request)
+    require_admin_role(request)
 
     user = await db.get(User, user_id)
     if not user:
@@ -1279,6 +2195,40 @@ async def user_ledger_adjust(
 
     # Для совместимости с фронтом возвращаем новое поле, но баланс пока не меняем.
     return LedgerAdjustResponse(user_id=user_id, new_balance_usdt=user.balance_usdt)
+
+
+@router.post("/users/{user_id}/block")
+async def set_user_block_state(
+    request: Request,
+    user_id: int,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    admin_token_id, _ = await get_admin_context(request)
+    require_admin_role(request)
+    user = await db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    is_blocked = bool(body.get("is_blocked", True))
+    reason = (body.get("reason") or "").strip() or None
+    user.is_blocked = is_blocked
+    user.blocked_reason = reason if is_blocked else None
+    await db.flush()
+
+    await log_admin_action(
+        db=db,
+        admin_token_id=admin_token_id,
+        action_type="BLOCK_USER" if is_blocked else "UNBLOCK_USER",
+        entity_type="USER",
+        entity_id=user_id,
+    )
+    return {
+        "ok": True,
+        "user_id": user_id,
+        "is_blocked": bool(user.is_blocked),
+        "blocked_reason": user.blocked_reason,
+    }
 
 
 @router.post("/users/{user_id}/ledger-reset")
@@ -1530,16 +2480,58 @@ async def get_system_settings_admin(
         entity_id=0,
     )
 
+    snapshot = _settings_snapshot(row)
+    snapshot["updated_at"] = row.updated_at.isoformat() if row.updated_at else None
+    return snapshot
+
+
+@router.get("/system-settings/defaults")
+async def get_system_settings_defaults(
+    request: Request,
+):
+    await get_admin_context(request)
+    return SYSTEM_SETTINGS_DEFAULTS
+
+
+@router.get("/system-settings/history")
+async def get_system_settings_history(
+    request: Request,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    admin_token_id, _ = await get_admin_context(request)
+    query = (
+        select(SystemSettingsVersion)
+        .order_by(desc(SystemSettingsVersion.created_at), desc(SystemSettingsVersion.id))
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+    total_q = select(func.count(SystemSettingsVersion.id))
+    rows = list((await db.execute(query)).scalars().all())
+    total = int((await db.execute(total_q)).scalar() or 0)
+    await log_admin_action(
+        db=db,
+        admin_token_id=admin_token_id,
+        action_type="VIEW_SYSTEM_SETTINGS_HISTORY",
+        entity_type="SYSTEM_SETTINGS",
+        entity_id=0,
+    )
     return {
-        "min_deposit_usdt": str(row.min_deposit_usdt),
-        "max_deposit_usdt": str(row.max_deposit_usdt),
-        "min_withdraw_usdt": str(row.min_withdraw_usdt),
-        "max_withdraw_usdt": str(row.max_withdraw_usdt),
-        "min_invest_usdt": str(row.min_invest_usdt),
-        "max_invest_usdt": str(row.max_invest_usdt),
-        "allow_deposits": bool(row.allow_deposits),
-        "allow_investments": bool(row.allow_investments),
-        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+        "items": [
+            {
+                "id": r.id,
+                "admin_token_id": r.admin_token_id,
+                "source": r.source,
+                "snapshot": json.loads(r.snapshot_json),
+                "changes": json.loads(r.changes_json),
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in rows
+        ],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
     }
 
 
@@ -1550,22 +2542,14 @@ async def update_system_settings_admin(
     db: AsyncSession = Depends(get_db),
 ):
     admin_token_id, _ = await get_admin_context(request)
+    require_admin_role(request)
 
     field = (str(body.get("field", "")).strip() if body.get("field") is not None else "")
     raw_value = str(body.get("value", "")).replace(",", ".").strip()
 
     if not field:
         raise HTTPException(status_code=400, detail="field is required")
-    allowed_fields = {
-        "min_deposit_usdt",
-        "max_deposit_usdt",
-        "min_withdraw_usdt",
-        "max_withdraw_usdt",
-        "min_invest_usdt",
-        "max_invest_usdt",
-        "allow_deposits",
-        "allow_investments",
-    }
+    allowed_fields = set(SYSTEM_SETTINGS_FIELDS)
     if field not in allowed_fields:
         raise HTTPException(status_code=400, detail="unknown field")
 
@@ -1573,18 +2557,9 @@ async def update_system_settings_admin(
         result = await db.execute(select(SystemSettings).limit(1).with_for_update())
         row = result.scalar_one()
 
+        before = _settings_snapshot(row)
         if field in {"allow_deposits", "allow_investments"}:
-            value_raw = body.get("value")
-            if isinstance(value_raw, bool):
-                bool_value = value_raw
-            else:
-                value_norm = str(value_raw).strip().lower()
-                if value_norm in {"1", "true", "yes", "on"}:
-                    bool_value = True
-                elif value_norm in {"0", "false", "no", "off"}:
-                    bool_value = False
-                else:
-                    raise HTTPException(status_code=400, detail="value must be boolean")
+            bool_value = _coerce_bool(body.get("value"))
             if field == "allow_deposits":
                 row.allow_deposits = bool_value
             else:
@@ -1613,6 +2588,18 @@ async def update_system_settings_admin(
 
             setattr(row, field, value)
 
+        after = _settings_snapshot(row)
+        changes = {k: {"before": before[k], "after": after[k]} for k in SYSTEM_SETTINGS_FIELDS if str(before[k]) != str(after[k])}
+        if changes:
+            db.add(
+                SystemSettingsVersion(
+                    admin_token_id=admin_token_id,
+                    source="single-field",
+                    snapshot_json=json.dumps(after, ensure_ascii=False),
+                    changes_json=json.dumps(changes, ensure_ascii=False),
+                )
+            )
+
         await log_admin_action(
             db=db,
             admin_token_id=admin_token_id,
@@ -1623,6 +2610,79 @@ async def update_system_settings_admin(
 
     invalidate_system_settings_cache()
     return {"ok": True}
+
+
+@router.put("/system-settings/bulk")
+async def update_system_settings_bulk(
+    request: Request,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    admin_token_id, _ = await get_admin_context(request)
+    require_admin_role(request)
+    parsed = _validate_full_settings_payload(body)
+    async with db.begin():
+        row = (await db.execute(select(SystemSettings).limit(1).with_for_update())).scalar_one()
+        before = _settings_snapshot(row)
+        for field in SYSTEM_SETTINGS_FIELDS:
+            setattr(row, field, parsed[field])
+        after = _settings_snapshot(row)
+        changes = {k: {"before": before[k], "after": after[k]} for k in SYSTEM_SETTINGS_FIELDS if str(before[k]) != str(after[k])}
+        if not changes:
+            return {"ok": True, "changed": False}
+        db.add(
+            SystemSettingsVersion(
+                admin_token_id=admin_token_id,
+                source="bulk",
+                snapshot_json=json.dumps(after, ensure_ascii=False),
+                changes_json=json.dumps(changes, ensure_ascii=False),
+            )
+        )
+        await log_admin_action(
+            db=db,
+            admin_token_id=admin_token_id,
+            action_type="UPDATE_SYSTEM_SETTINGS_BULK",
+            entity_type="SYSTEM_SETTINGS",
+            entity_id=row.id,
+        )
+    invalidate_system_settings_cache()
+    return {"ok": True, "changed": True}
+
+
+@router.post("/system-settings/reset-defaults")
+async def reset_system_settings_defaults(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    admin_token_id, _ = await get_admin_context(request)
+    require_admin_role(request)
+    parsed = _validate_full_settings_payload(SYSTEM_SETTINGS_DEFAULTS)
+    async with db.begin():
+        row = (await db.execute(select(SystemSettings).limit(1).with_for_update())).scalar_one()
+        before = _settings_snapshot(row)
+        for field in SYSTEM_SETTINGS_FIELDS:
+            setattr(row, field, parsed[field])
+        after = _settings_snapshot(row)
+        changes = {k: {"before": before[k], "after": after[k]} for k in SYSTEM_SETTINGS_FIELDS if str(before[k]) != str(after[k])}
+        if not changes:
+            return {"ok": True, "changed": False}
+        db.add(
+            SystemSettingsVersion(
+                admin_token_id=admin_token_id,
+                source="reset-defaults",
+                snapshot_json=json.dumps(after, ensure_ascii=False),
+                changes_json=json.dumps(changes, ensure_ascii=False),
+            )
+        )
+        await log_admin_action(
+            db=db,
+            admin_token_id=admin_token_id,
+            action_type="RESET_SYSTEM_SETTINGS_DEFAULTS",
+            entity_type="SYSTEM_SETTINGS",
+            entity_id=row.id,
+        )
+    invalidate_system_settings_cache()
+    return {"ok": True, "changed": True}
 
 
 @router.get("/broadcasts", response_model=PaginatedBroadcasts)
@@ -1698,10 +2758,13 @@ async def get_broadcast_image(
 async def create_broadcast(
     request: Request,
     text_html: str = Form(...),
+    audience_segment: str = Form("all"),
+    scheduled_at: str | None = Form(default=None),
     image: UploadFile | None = File(default=None),
     db: AsyncSession = Depends(get_db),
 ):
     admin_token_id, _ = await get_admin_context(request)
+    require_admin_role(request)
     text_value = _sanitize_broadcast_html(text_html)
     # Telegram caption limit, если отправляем картинку.
     if image is not None and len(text_value) > 1024:
@@ -1728,7 +2791,30 @@ async def create_broadcast(
     if in_progress.scalar_one_or_none() is not None:
         raise HTTPException(status_code=400, detail="Уже есть активная рассылка в процессе")
 
-    row = await enqueue_broadcast(db, text_html=text_value, image_path=image_path)
+    scheduled_at_dt: dt.datetime | None = None
+    if scheduled_at:
+        try:
+            parsed = dt.datetime.fromisoformat(scheduled_at.replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=dt.timezone.utc)
+            scheduled_at_dt = parsed.astimezone(dt.timezone.utc)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Некорректная дата scheduled_at")
+        if scheduled_at_dt <= dt.datetime.now(dt.timezone.utc):
+            raise HTTPException(status_code=400, detail="Дата отложенной отправки должна быть в будущем")
+
+    allowed_segments = {"all", "with_balance", "with_referrals", "active_24h"}
+    segment = (audience_segment or "all").strip().lower()
+    if segment not in allowed_segments:
+        raise HTTPException(status_code=400, detail="Некорректный audience_segment")
+
+    row = await enqueue_broadcast(
+        db,
+        text_html=text_value,
+        image_path=image_path,
+        scheduled_at=scheduled_at_dt,
+        audience_segment=segment,
+    )
     await log_admin_action(
         db=db,
         admin_token_id=admin_token_id,
@@ -1738,6 +2824,84 @@ async def create_broadcast(
     )
     await db.flush()
     return _broadcast_row_to_schema(row)
+
+
+@router.post("/broadcasts/test-send")
+async def test_send_broadcast(
+    request: Request,
+    telegram_id: int = Form(...),
+    text_html: str = Form(...),
+    image: UploadFile | None = File(default=None),
+    db: AsyncSession = Depends(get_db),
+):
+    admin_token_id, _ = await get_admin_context(request)
+    text_value = _sanitize_broadcast_html(text_html)
+    if image is not None and len(text_value) > 1024:
+        raise HTTPException(status_code=400, detail="Для сообщения с изображением текст должен быть не длиннее 1024 символов")
+
+    tmp_path: Path | None = None
+    ok = False
+    try:
+        if image is not None:
+            BROADCAST_IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+            suffix = Path(image.filename or "").suffix.lower()
+            if suffix not in {".jpg", ".jpeg", ".png", ".webp"}:
+                raise HTTPException(status_code=400, detail="Поддерживаются изображения: jpg, jpeg, png, webp")
+            tmp_path = BROADCAST_IMAGES_DIR / f"test_{uuid.uuid4().hex}{suffix}"
+            content = await image.read()
+            if len(content) > 10 * 1024 * 1024:
+                raise HTTPException(status_code=400, detail="Размер изображения не должен превышать 10MB")
+            tmp_path.write_bytes(content)
+            ok = await send_telegram_photo(
+                chat_id=telegram_id,
+                photo_path=str(tmp_path),
+                caption=text_value,
+                parse_mode="HTML",
+            )
+        else:
+            ok = await send_telegram_message(
+                chat_id=telegram_id,
+                text=text_value,
+                parse_mode="HTML",
+            )
+    finally:
+        if tmp_path is not None:
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+    await log_admin_action(
+        db=db,
+        admin_token_id=admin_token_id,
+        action_type="TEST_BROADCAST_SEND",
+        entity_type="BROADCAST",
+        entity_id=telegram_id,
+    )
+    if not ok:
+        raise HTTPException(status_code=400, detail="Тестовая отправка не удалась")
+    return {"ok": True}
+
+
+@router.post("/broadcasts/{broadcast_id}/retry-failed")
+async def retry_broadcast_failed(
+    request: Request,
+    broadcast_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    admin_token_id, _ = await get_admin_context(request)
+    row = await db.get(BroadcastMessage, broadcast_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Broadcast not found")
+    retried = await retry_failed_deliveries(db, broadcast_id=broadcast_id)
+    await log_admin_action(
+        db=db,
+        admin_token_id=admin_token_id,
+        action_type="RETRY_BROADCAST_FAILED",
+        entity_type="BROADCAST",
+        entity_id=broadcast_id,
+    )
+    return {"ok": True, "retried": retried}
 
 
 @router.post("/maintenance/reset-data")
@@ -1751,6 +2915,7 @@ async def reset_test_data(
     По умолчанию сохраняет system_settings.
     """
     admin_token_id, _ = await get_admin_context(request)
+    require_admin_role(request)
 
     confirm = str(body.get("confirm", "")).strip().upper()
     keep_settings = bool(body.get("keep_settings", True))

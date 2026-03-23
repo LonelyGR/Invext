@@ -2,9 +2,11 @@
 Эндпоинты: заявки на вывод.
 """
 from fastapi import APIRouter, Depends, Query, HTTPException
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.session import get_db
+from src.models import User
 from src.schemas.withdraw import WithdrawRequestIn, WithdrawRequestResponse
 from src.services.withdraw_service import create_withdraw_request, get_my_withdrawals
 
@@ -17,6 +19,10 @@ async def create_withdraw(
     db: AsyncSession = Depends(get_db),
 ):
     """Создать заявку на вывод (PENDING). Проверяется баланс."""
+    result = await db.execute(select(User).where(User.telegram_id == body.telegram_id))
+    user = result.scalar_one_or_none()
+    if user is not None and getattr(user, "is_blocked", False):
+        raise HTTPException(status_code=403, detail="Аккаунт временно заблокирован администратором.")
     try:
         req = await create_withdraw_request(
             db, body.telegram_id, body.currency, body.amount, body.address

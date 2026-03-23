@@ -46,6 +46,8 @@ async def get_active_deal_info(db: AsyncSession = Depends(get_db)):
         "active": True,
         "deal_number": deal.number,
         "end_at": deal.end_at.isoformat() if deal.end_at else (deal.closed_at.isoformat() if getattr(deal, "closed_at", None) else None),
+        "risk_level": getattr(deal, "risk_level", None),
+        "risk_note": getattr(deal, "risk_note", None),
     }
 
 
@@ -75,6 +77,11 @@ async def invest(
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+    if getattr(user, "is_blocked", False):
+        raise HTTPException(
+            status_code=403,
+            detail="Аккаунт временно заблокирован администратором.",
+        )
 
     # Проверяем баланс через ledger (до попытки инвестирования).
     current_balance = await get_balance_usdt(db, user.id)

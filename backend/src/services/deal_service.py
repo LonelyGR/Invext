@@ -222,6 +222,18 @@ async def participate_in_deal(
     if existing.scalar_one_or_none():
         raise ValueError("Вы уже участвуете в этой сделке")
 
+    if deal.min_participation_usdt is not None and amount < deal.min_participation_usdt:
+        raise ValueError(f"Минимальная сумма участия в этой сделке — {deal.min_participation_usdt} USDT")
+    if deal.max_participation_usdt is not None and amount > deal.max_participation_usdt:
+        raise ValueError(f"Максимальная сумма участия в этой сделке — {deal.max_participation_usdt} USDT")
+    if deal.max_participants is not None:
+        cnt_result = await db.execute(
+            select(func.count(DealParticipation.id)).where(DealParticipation.deal_id == deal.id)
+        )
+        current_cnt = int(cnt_result.scalar() or 0)
+        if current_cnt >= int(deal.max_participants):
+            raise ValueError("Лимит участников этой сделки уже достигнут")
+
     current_balance = await get_balance_usdt(db, user_locked.id)
     if current_balance < amount:
         raise ValueError("Недостаточно средств для участия")

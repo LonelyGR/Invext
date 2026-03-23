@@ -36,6 +36,11 @@ class Deal(Base):
     status: Mapped[str] = mapped_column(String(16), nullable=False, default=DEAL_STATUS_DRAFT, index=True)
 
     profit_percent: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2), nullable=True)
+    min_participation_usdt: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 2), nullable=True)
+    max_participation_usdt: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 2), nullable=True)
+    max_participants: Mapped[Optional[int]] = mapped_column(nullable=True)
+    risk_level: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    risk_note: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     referral_processed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     close_notification_sent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 

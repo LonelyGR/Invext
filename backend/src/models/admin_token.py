@@ -26,6 +26,7 @@ class AdminToken(Base):
     created_by: Mapped[int] = mapped_column(
         BigInteger, nullable=False
     )  # telegram_id админа, который запросил токен
+    role: Mapped[str] = mapped_column(String(16), nullable=False, default="admin", index=True)
 
     logs = relationship(
         "AdminLog",

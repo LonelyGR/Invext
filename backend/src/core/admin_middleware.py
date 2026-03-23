@@ -36,10 +36,11 @@ async def admin_jwt_middleware(request: Request, call_next: Callable[[Request], 
             )
         # Бросает 401 при ошибке/просрочке.
         try:
-            admin_token_id, created_by = decode_admin_jwt(cookie)
+            admin_token_id, created_by, role = decode_admin_jwt(cookie)
             # Сохраняем контекст для последующего использования в роутерах.
             request.state.admin_token_id = admin_token_id
             request.state.admin_created_by = created_by
+            request.state.admin_role = role
         except Exception:
             return JSONResponse(
                 status_code=401,

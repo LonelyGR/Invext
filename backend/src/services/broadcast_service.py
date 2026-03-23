@@ -8,7 +8,7 @@ from pathlib import Path
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.models import User
+from src.models import User, LedgerTransaction, PaymentInvoice, DealParticipation, DealInvestment
 from src.models.broadcast_delivery import (
     BroadcastDelivery,
     DELIVERY_STATUS_FAILED,
@@ -34,18 +34,41 @@ async def enqueue_broadcast(
     *,
     text_html: str,
     image_path: str | None,
+    scheduled_at: dt.datetime | None = None,
+    audience_segment: str = "all",
 ) -> BroadcastMessage:
     now = dt.datetime.now(dt.timezone.utc)
+    start_at = scheduled_at or now
     broadcast = BroadcastMessage(
         text_html=text_html,
         image_path=image_path,
         status=BROADCAST_STATUS_IN_PROGRESS,
-        started_at=now,
+        audience_segment=audience_segment,
+        scheduled_at=scheduled_at,
+        started_at=None if scheduled_at else now,
     )
     db.add(broadcast)
     await db.flush()
 
-    users_result = await db.execute(select(User.id, User.telegram_id).where(User.telegram_id.isnot(None)))
+    base_query = select(User.id, User.telegram_id).where(User.telegram_id.isnot(None))
+    seg = (audience_segment or "all").strip().lower()
+    if seg == "with_balance":
+        base_query = base_query.where(User.balance_usdt > 0)
+    elif seg == "with_referrals":
+        base_query = base_query.where(
+            User.id.in_(select(User.referrer_id).where(User.referrer_id.is_not(None)))
+        )
+    elif seg == "active_24h":
+        since = now - dt.timedelta(hours=24)
+        active_users = (
+            select(LedgerTransaction.user_id.label("uid")).where(LedgerTransaction.created_at >= since)
+            .union(select(PaymentInvoice.user_id.label("uid")).where(PaymentInvoice.created_at >= since))
+            .union(select(DealParticipation.user_id.label("uid")).where(DealParticipation.created_at >= since))
+            .union(select(DealInvestment.user_id.label("uid")).where(DealInvestment.created_at >= since))
+            .subquery()
+        )
+        base_query = base_query.where(User.id.in_(select(active_users.c.uid)))
+    users_result = await db.execute(base_query)
     rows = users_result.all()
 
     for user_id, telegram_id in rows:
@@ -55,7 +78,7 @@ async def enqueue_broadcast(
                 user_id=user_id,
                 telegram_id=telegram_id,
                 status=DELIVERY_STATUS_PENDING,
-                next_attempt_at=now,
+                next_attempt_at=start_at,
             )
         )
     broadcast.total_recipients = len(rows)
@@ -104,6 +127,8 @@ async def process_pending_broadcasts(db: AsyncSession) -> int:
             err_msg = str(e)
 
         if ok:
+            if broadcast.started_at is None:
+                broadcast.started_at = now
             delivery.status = DELIVERY_STATUS_SENT
             delivery.sent_at = now
             delivery.last_error = None
@@ -122,6 +147,38 @@ async def process_pending_broadcasts(db: AsyncSession) -> int:
     await _refresh_broadcast_counters(db)
     await _finalize_broadcasts(db)
     return processed
+
+
+async def retry_failed_deliveries(db: AsyncSession, broadcast_id: int) -> int:
+    """Повторно поставить FAILED-доставки в очередь отправки."""
+    now = dt.datetime.now(dt.timezone.utc)
+    result = await db.execute(
+        select(BroadcastDelivery).where(
+            BroadcastDelivery.broadcast_id == broadcast_id,
+            BroadcastDelivery.status == DELIVERY_STATUS_FAILED,
+        )
+    )
+    rows = list(result.scalars().all())
+    if not rows:
+        return 0
+
+    for d in rows:
+        d.status = DELIVERY_STATUS_PENDING
+        d.attempts = 0
+        d.last_error = None
+        d.next_attempt_at = now
+        d.sent_at = None
+
+    b = await db.get(BroadcastMessage, broadcast_id)
+    if b:
+        b.status = BROADCAST_STATUS_IN_PROGRESS
+        b.started_at = now
+        b.finished_at = None
+        # sent_count оставляем как есть, чтобы история была правдивой.
+        b.failed_count = 0
+
+    await db.flush()
+    return len(rows)
 
 
 async def _refresh_broadcast_counters(db: AsyncSession) -> None:
