@@ -1426,18 +1426,19 @@ async def update_system_settings_admin(
             if value <= 0:
                 raise HTTPException(status_code=400, detail="value must be greater than 0")
 
-            if field == "min_deposit_usdt" and value >= row.max_deposit_usdt:
-                raise HTTPException(status_code=400, detail="Минимальный депозит должен быть меньше максимального")
-            if field == "max_deposit_usdt" and value <= row.min_deposit_usdt:
-                raise HTTPException(status_code=400, detail="Максимальный депозит должен быть больше минимального")
-            if field == "min_withdraw_usdt" and value >= row.max_withdraw_usdt:
-                raise HTTPException(status_code=400, detail="Минимальный вывод должен быть меньше максимального")
-            if field == "max_withdraw_usdt" and value <= row.min_withdraw_usdt:
-                raise HTTPException(status_code=400, detail="Максимальный вывод должен быть больше минимального")
-            if field == "min_invest_usdt" and value >= row.max_invest_usdt:
-                raise HTTPException(status_code=400, detail="Минимальная инвестиция должна быть меньше максимальной")
-            if field == "max_invest_usdt" and value <= row.min_invest_usdt:
-                raise HTTPException(status_code=400, detail="Максимальная инвестиция должна быть больше минимальной")
+            # min и max могут совпадать (фиксированная сумма, напр. 50 и 50).
+            if field == "min_deposit_usdt" and value > row.max_deposit_usdt:
+                raise HTTPException(status_code=400, detail="Минимальный депозит не может быть больше максимального")
+            if field == "max_deposit_usdt" and value < row.min_deposit_usdt:
+                raise HTTPException(status_code=400, detail="Максимальный депозит не может быть меньше минимального")
+            if field == "min_withdraw_usdt" and value > row.max_withdraw_usdt:
+                raise HTTPException(status_code=400, detail="Минимальный вывод не может быть больше максимального")
+            if field == "max_withdraw_usdt" and value < row.min_withdraw_usdt:
+                raise HTTPException(status_code=400, detail="Максимальный вывод не может быть меньше минимального")
+            if field == "min_invest_usdt" and value > row.max_invest_usdt:
+                raise HTTPException(status_code=400, detail="Минимальная инвестиция не может быть больше максимальной")
+            if field == "max_invest_usdt" and value < row.min_invest_usdt:
+                raise HTTPException(status_code=400, detail="Максимальная инвестиция не может быть меньше минимальной")
 
             setattr(row, field, value)
 

@@ -1067,7 +1067,7 @@ async function loadSettings() {
     const s = await apiRequest("/system-settings");
     section.innerHTML = `
       <h1>Финансовые настройки</h1>
-      <p class="section-desc">Глобальные лимиты депозитов, выводов и инвестиций.</p>
+      <p class="section-desc">Глобальные лимиты депозитов, выводов и инвестиций. Мин. и макс. могут быть <b>одинаковыми</b> (например 50 и 50 — фиксированная сумма).</p>
       <div class="settings-card">
         <div class="settings-header">
           <h2>Лимиты операций</h2>
@@ -1173,7 +1173,7 @@ async function loadSettings() {
         const saveBtn = document.getElementById("settings-save-btn");
         const originalText = saveBtn ? saveBtn.innerHTML : "";
         try {
-          // Frontend-валидация: числа, > 0, min < max.
+          // Frontend-валидация: числа, > 0, min <= max (равенство разрешено).
           const values = {};
           for (const field of fields) {
             const input = document.getElementById(field);
@@ -1187,16 +1187,16 @@ async function loadSettings() {
             values[field] = num;
           }
 
-          if (values.min_deposit_usdt >= values.max_deposit_usdt) {
-            alert("Мин. депозит должен быть меньше макс. депозита");
+          if (values.min_deposit_usdt > values.max_deposit_usdt) {
+            alert("Мин. депозит не может быть больше макс. депозита");
             return;
           }
-          if (values.min_withdraw_usdt >= values.max_withdraw_usdt) {
-            alert("Мин. вывод должен быть меньше макс. вывода");
+          if (values.min_withdraw_usdt > values.max_withdraw_usdt) {
+            alert("Мин. вывод не может быть больше макс. вывода");
             return;
           }
-          if (values.min_invest_usdt >= values.max_invest_usdt) {
-            alert("Мин. инвестиция должна быть меньше макс. инвестиции");
+          if (values.min_invest_usdt > values.max_invest_usdt) {
+            alert("Мин. инвестиция не может быть больше макс. инвестиции");
             return;
           }
 

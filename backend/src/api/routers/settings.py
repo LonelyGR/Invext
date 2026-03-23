@@ -99,36 +99,36 @@ async def update_system_setting_field(
                     detail="value must be greater than 0",
                 )
 
-            # Валидация min/max для соответствующих пар.
-            if field == "min_deposit_usdt" and value >= row.max_deposit_usdt:
+            # min и max могут совпадать (фиксированная сумма).
+            if field == "min_deposit_usdt" and value > row.max_deposit_usdt:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Минимальный депозит должен быть меньше максимального",
+                    detail="Минимальный депозит не может быть больше максимального",
                 )
-            if field == "max_deposit_usdt" and value <= row.min_deposit_usdt:
+            if field == "max_deposit_usdt" and value < row.min_deposit_usdt:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Максимальный депозит должен быть больше минимального",
+                    detail="Максимальный депозит не может быть меньше минимального",
                 )
-            if field == "min_withdraw_usdt" and value >= row.max_withdraw_usdt:
+            if field == "min_withdraw_usdt" and value > row.max_withdraw_usdt:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Минимальный вывод должен быть меньше максимального",
+                    detail="Минимальный вывод не может быть больше максимального",
                 )
-            if field == "max_withdraw_usdt" and value <= row.min_withdraw_usdt:
+            if field == "max_withdraw_usdt" and value < row.min_withdraw_usdt:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Максимальный вывод должен быть больше минимального",
+                    detail="Максимальный вывод не может быть меньше минимального",
                 )
-            if field == "min_invest_usdt" and value >= row.max_invest_usdt:
+            if field == "min_invest_usdt" and value > row.max_invest_usdt:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Минимальная инвестиция должна быть меньше максимальной",
+                    detail="Минимальная инвестиция не может быть больше максимальной",
                 )
-            if field == "max_invest_usdt" and value <= row.min_invest_usdt:
+            if field == "max_invest_usdt" and value < row.min_invest_usdt:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Максимальная инвестиция должна быть больше минимальной",
+                    detail="Максимальная инвестиция не может быть меньше минимальной",
                 )
 
             setattr(row, field, value)
