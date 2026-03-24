@@ -2,16 +2,19 @@
 Админ-эндпоинты: список pending заявок, approve/reject, выдача токена для админ-сайта.
 Защита: X-ADMIN-KEY или Authorization: Bearer <key>.
 """
+import asyncio
 import uuid
 from datetime import datetime, timezone, timedelta
+import datetime as dt
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import select, func, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.config import get_settings
 from src.core.security import require_admin_key
 from src.db.session import get_db
-from src.models import AdminToken, User
+from src.models import AdminToken, User, Deal, WithdrawRequest, PaymentInvoice, AdminLog, BroadcastMessage, BroadcastDelivery, ReferralReward, DealParticipation, DealInvestment, PaymentWebhookEvent, Invoice
 from src.models.ledger_transaction import LedgerTransaction
 from src.services.ledger_service import (
     LEDGER_TYPE_DEPOSIT,
@@ -23,8 +26,16 @@ from src.services.withdraw_service import (
     approve_withdraw,
     reject_withdraw,
 )
+from src.services.deal_service import (
+    get_active_deal,
+    open_new_deal,
+    process_pending_payouts,
+    collection_end_local_for_start,
+)
+from src.services.notification_service import broadcast_deal_opened
 
 router = APIRouter(prefix="/v1/admin", tags=["admin"], dependencies=[Depends(require_admin_key)])
+ADMIN_MAINTENANCE_LOCK = asyncio.Lock()
 
 
 @router.get("/withdrawals/pending")
@@ -197,3 +208,139 @@ async def admin_deal_force_close(
         "deal_number": active.number,
         "decided_by_telegram_id": decided_by_telegram_id,
     }
+
+
+@router.get("/status-summary")
+async def admin_status_summary(db: AsyncSession = Depends(get_db)):
+    users_count = int((await db.execute(select(func.count(User.id)))).scalar() or 0)
+    pending_withdrawals = int(
+        (await db.execute(select(func.count(WithdrawRequest.id)).where(WithdrawRequest.status == "PENDING"))).scalar() or 0
+    )
+    deposits_count = int((await db.execute(select(func.count(PaymentInvoice.id)))).scalar() or 0)
+    active = await get_active_deal(db)
+    return {
+        "users_count": users_count,
+        "pending_withdrawals": pending_withdrawals,
+        "deposits_count": deposits_count,
+        "active_deal": {
+            "id": active.id,
+            "number": active.number,
+            "start_at": active.start_at.isoformat() if active.start_at else None,
+            "end_at": active.end_at.isoformat() if active.end_at else None,
+            "status": active.status,
+        } if active else None,
+    }
+
+
+@router.post("/deals/open-now")
+async def admin_open_deal_now(
+    decided_by_telegram_id: int = Query(..., description="Telegram ID админа"),
+    db: AsyncSession = Depends(get_db),
+):
+    active = await get_active_deal(db)
+    if active:
+        raise HTTPException(status_code=400, detail=f"Уже есть активная сделка #{active.number}")
+
+    await process_pending_payouts(db)
+    from zoneinfo import ZoneInfo
+
+    now_utc = dt.datetime.now(dt.timezone.utc)
+    now_local = now_utc.astimezone(ZoneInfo("Europe/Chisinau"))
+    if now_local.weekday() in (5, 6):
+        raise HTTPException(status_code=400, detail="В выходные открытие нового сбора отключено.")
+    start_local = now_local
+    close_local = collection_end_local_for_start(start_local)
+    start_at = start_local.astimezone(dt.timezone.utc)
+    end_at = close_local.astimezone(dt.timezone.utc)
+
+    deal = await open_new_deal(db, start_at=start_at, end_at=end_at)
+    users_result = await db.execute(select(User.telegram_id).where(User.telegram_id.isnot(None)))
+    telegram_ids = [r[0] for r in users_result.all() if r[0]]
+    await broadcast_deal_opened(telegram_ids, deal.number, close_at=deal.end_at)
+    return {
+        "status": "ok",
+        "deal_id": deal.id,
+        "deal_number": deal.number,
+        "decided_by_telegram_id": decided_by_telegram_id,
+    }
+
+
+async def _truncate_tables_safe(db: AsyncSession, table_names: list[str]) -> int:
+    total = 0
+    for name in table_names:
+        total += int((await db.execute(text(f'SELECT COUNT(*) FROM "{name}"'))).scalar() or 0)
+    table_names_sql = ", ".join(f'"{name}"' for name in table_names)
+    await db.execute(text(f"TRUNCATE TABLE {table_names_sql} RESTART IDENTITY CASCADE"))
+    await db.flush()
+    return total
+
+
+@router.post("/maintenance/clear-logs")
+async def admin_maintenance_clear_logs(
+    confirm: str = Query(..., description='Должен быть "CLEAR_LOGS"'),
+    db: AsyncSession = Depends(get_db),
+):
+    if confirm.strip().upper() != "CLEAR_LOGS":
+        raise HTTPException(status_code=400, detail='confirm must be "CLEAR_LOGS"')
+    if ADMIN_MAINTENANCE_LOCK.locked():
+        raise HTTPException(status_code=409, detail="Maintenance operation already in progress")
+    async with ADMIN_MAINTENANCE_LOCK:
+        total = await _truncate_tables_safe(db, [AdminLog.__table__.name])
+        return {"status": "ok", "cleared_rows": total}
+
+
+@router.post("/maintenance/clear-broadcasts")
+async def admin_maintenance_clear_broadcasts(
+    confirm: str = Query(..., description='Должен быть "CLEAR_BROADCASTS"'),
+    db: AsyncSession = Depends(get_db),
+):
+    if confirm.strip().upper() != "CLEAR_BROADCASTS":
+        raise HTTPException(status_code=400, detail='confirm must be "CLEAR_BROADCASTS"')
+    if ADMIN_MAINTENANCE_LOCK.locked():
+        raise HTTPException(status_code=409, detail="Maintenance operation already in progress")
+    async with ADMIN_MAINTENANCE_LOCK:
+        total = await _truncate_tables_safe(db, [BroadcastDelivery.__table__.name, BroadcastMessage.__table__.name])
+        return {"status": "ok", "cleared_rows": total}
+
+
+@router.post("/maintenance/clear-deals")
+async def admin_maintenance_clear_deals(
+    confirm: str = Query(..., description='Должен быть "CLEAR_DEALS"'),
+    db: AsyncSession = Depends(get_db),
+):
+    if confirm.strip().upper() != "CLEAR_DEALS":
+        raise HTTPException(status_code=400, detail='confirm must be "CLEAR_DEALS"')
+    if ADMIN_MAINTENANCE_LOCK.locked():
+        raise HTTPException(status_code=409, detail="Maintenance operation already in progress")
+    async with ADMIN_MAINTENANCE_LOCK:
+        total = await _truncate_tables_safe(
+            db,
+            [
+                ReferralReward.__table__.name,
+                DealParticipation.__table__.name,
+                DealInvestment.__table__.name,
+                Deal.__table__.name,
+            ],
+        )
+        return {"status": "ok", "cleared_rows": total}
+
+
+@router.post("/maintenance/clear-payments")
+async def admin_maintenance_clear_payments(
+    confirm: str = Query(..., description='Должен быть "CLEAR_PAYMENTS"'),
+    db: AsyncSession = Depends(get_db),
+):
+    if confirm.strip().upper() != "CLEAR_PAYMENTS":
+        raise HTTPException(status_code=400, detail='confirm must be "CLEAR_PAYMENTS"')
+    if ADMIN_MAINTENANCE_LOCK.locked():
+        raise HTTPException(status_code=409, detail="Maintenance operation already in progress")
+    async with ADMIN_MAINTENANCE_LOCK:
+        total = await _truncate_tables_safe(
+            db,
+            [
+                PaymentWebhookEvent.__table__.name,
+                PaymentInvoice.__table__.name,
+                Invoice.__table__.name,
+            ],
+        )
+        return {"status": "ok", "cleared_rows": total}

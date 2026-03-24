@@ -323,6 +323,65 @@ class BackendClient:
             r.raise_for_status()
             return r.json()
 
+    async def admin_status_summary(self) -> Dict[str, Any]:
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            r = await client.get(
+                self._url("/v1/admin/status-summary"),
+                headers=self._admin_headers,
+            )
+            r.raise_for_status()
+            return r.json()
+
+    async def admin_open_deal_now(self, decided_by_telegram_id: int) -> Dict[str, Any]:
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            r = await client.post(
+                self._url("/v1/admin/deals/open-now"),
+                params={"decided_by_telegram_id": decided_by_telegram_id},
+                headers=self._admin_headers,
+            )
+            r.raise_for_status()
+            return r.json()
+
+    async def admin_maintenance_clear_logs(self) -> Dict[str, Any]:
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            r = await client.post(
+                self._url("/v1/admin/maintenance/clear-logs"),
+                params={"confirm": "CLEAR_LOGS"},
+                headers=self._admin_headers,
+            )
+            r.raise_for_status()
+            return r.json()
+
+    async def admin_maintenance_clear_broadcasts(self) -> Dict[str, Any]:
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            r = await client.post(
+                self._url("/v1/admin/maintenance/clear-broadcasts"),
+                params={"confirm": "CLEAR_BROADCASTS"},
+                headers=self._admin_headers,
+            )
+            r.raise_for_status()
+            return r.json()
+
+    async def admin_maintenance_clear_deals(self) -> Dict[str, Any]:
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            r = await client.post(
+                self._url("/v1/admin/maintenance/clear-deals"),
+                params={"confirm": "CLEAR_DEALS"},
+                headers=self._admin_headers,
+            )
+            r.raise_for_status()
+            return r.json()
+
+    async def admin_maintenance_clear_payments(self) -> Dict[str, Any]:
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            r = await client.post(
+                self._url("/v1/admin/maintenance/clear-payments"),
+                params={"confirm": "CLEAR_PAYMENTS"},
+                headers=self._admin_headers,
+            )
+            r.raise_for_status()
+            return r.json()
+
 
 # Синглтон для использования в хендлерах
 api = BackendClient()

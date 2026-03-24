@@ -79,9 +79,12 @@ def admin_menu_kb() -> InlineKeyboardMarkup:
     """Админка: заявки на вывод; токен для админ-сайта; финансовые настройки."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
+            [InlineKeyboardButton(text="📊 Статус системы", callback_data="admin_status")],
+            [InlineKeyboardButton(text="📈 Сделки", callback_data="admin_deals")],
             [InlineKeyboardButton(text="📤 Заявки на вывод", callback_data="admin_withdrawals")],
             [InlineKeyboardButton(text="🔐 Токен для админ-сайта", callback_data="admin_dashboard_token")],
             [InlineKeyboardButton(text="⚙️ Финансовые настройки", callback_data="admin_fin_settings")],
+            [InlineKeyboardButton(text="🧹 Быстрая очистка", callback_data="admin_maintenance")],
             [InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_menu")],
         ]
     )
@@ -187,5 +190,28 @@ def withdraw_actions_kb(withdraw_id: int) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="✅ Approve", callback_data=f"admin_w_approve_{withdraw_id}"),
                 InlineKeyboardButton(text="❌ Reject", callback_data=f"admin_w_reject_{withdraw_id}"),
             ],
+        ]
+    )
+
+
+def admin_deals_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="📍 Активная сделка", callback_data="admin_deal_active")],
+            [InlineKeyboardButton(text="🟢 Открыть новую сделку", callback_data="admin_deal_open_now")],
+            [InlineKeyboardButton(text="⛔ Закрыть активную сделку", callback_data="admin_deal_force_close_now")],
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_back_panel")],
+        ]
+    )
+
+
+def admin_maintenance_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🧾 Очистить только логи", callback_data="admin_clear_logs")],
+            [InlineKeyboardButton(text="📣 Очистить только рассылки", callback_data="admin_clear_broadcasts")],
+            [InlineKeyboardButton(text="📈 Очистить только сделки", callback_data="admin_clear_deals")],
+            [InlineKeyboardButton(text="💳 Очистить только платежи", callback_data="admin_clear_payments")],
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_back_panel")],
         ]
     )

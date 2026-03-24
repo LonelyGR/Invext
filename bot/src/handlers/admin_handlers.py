@@ -10,7 +10,14 @@ from aiogram.fsm.state import State, StatesGroup
 
 from src.config.settings import ADMIN_TELEGRAM_IDS
 from src.api_client.client import api
-from src.keyboards.menus import admin_menu_kb, withdraw_actions_kb, fin_settings_kb
+from src.keyboards.menus import (
+    admin_menu_kb,
+    withdraw_actions_kb,
+    fin_settings_kb,
+    admin_deals_kb,
+    admin_maintenance_kb,
+)
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from src.texts import (
     make_admin_access_denied_text,
     make_admin_panel_text,
@@ -49,6 +56,17 @@ class FinSettingsStates(StatesGroup):
     field = State()
 
 
+def confirm_kb(confirm_cb: str, cancel_cb: str = "admin_back_panel") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Подтвердить", callback_data=confirm_cb),
+                InlineKeyboardButton(text="❌ Отмена", callback_data=cancel_cb),
+            ]
+        ]
+    )
+
+
 @router.message(F.text == "🔧 Админка")
 async def admin_button(message: Message):
     if not is_admin(message.from_user.id):
@@ -64,6 +82,188 @@ async def admin_cmd(message: Message):
         await message.answer(make_admin_access_denied_text())
         return
     await message.answer(make_admin_panel_text(), reply_markup=admin_menu_kb())
+
+
+@router.callback_query(F.data == "admin_back_panel")
+async def admin_back_panel(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer(make_admin_access_denied_text())
+        return
+    await callback.message.edit_text(make_admin_panel_text(), reply_markup=admin_menu_kb())
+    await callback.answer()
+
+
+@router.callback_query(F.data == "admin_status")
+async def admin_status(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer(make_admin_access_denied_text())
+        return
+    try:
+        data = await api.admin_status_summary()
+        active = data.get("active_deal")
+        active_line = (
+            f"#{active.get('number')} · {active.get('status')} · до {active.get('end_at')}"
+            if active
+            else "нет"
+        )
+        text = (
+            "📊 <b>Статус системы</b>\n\n"
+            f"Пользователи: <b>{data.get('users_count', 0)}</b>\n"
+            f"Pending выводов: <b>{data.get('pending_withdrawals', 0)}</b>\n"
+            f"Платежей: <b>{data.get('deposits_count', 0)}</b>\n"
+            f"Активная сделка: <b>{active_line}</b>"
+        )
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=admin_menu_kb())
+    except Exception as e:
+        await callback.message.edit_text(make_admin_error_text(e), reply_markup=admin_menu_kb())
+    await callback.answer()
+
+
+@router.callback_query(F.data == "admin_deals")
+async def admin_deals(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer(make_admin_access_denied_text())
+        return
+    await callback.message.edit_text("📈 <b>Управление сделками</b>", parse_mode="HTML", reply_markup=admin_deals_kb())
+    await callback.answer()
+
+
+@router.callback_query(F.data == "admin_deal_active")
+async def admin_deal_active(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer(make_admin_access_denied_text())
+        return
+    try:
+        data = await api.admin_status_summary()
+        active = data.get("active_deal")
+        if not active:
+            text = "📍 Активной сделки нет."
+        else:
+            text = (
+                "📍 <b>Активная сделка</b>\n\n"
+                f"ID: {active.get('id')}\n"
+                f"Номер: #{active.get('number')}\n"
+                f"Статус: {active.get('status')}\n"
+                f"Старт: {active.get('start_at')}\n"
+                f"Конец: {active.get('end_at')}"
+            )
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=admin_deals_kb())
+    except Exception as e:
+        await callback.message.edit_text(make_admin_error_text(e), reply_markup=admin_deals_kb())
+    await callback.answer()
+
+
+@router.callback_query(F.data == "admin_deal_open_now")
+async def admin_deal_open_now(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer(make_admin_access_denied_text())
+        return
+    await callback.message.edit_text(
+        "🟢 Открыть новую сделку прямо сейчас?\n\nЭто отправит уведомление пользователям.",
+        reply_markup=confirm_kb("admin_deal_open_now_confirm", "admin_deals"),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "admin_deal_open_now_confirm")
+async def admin_deal_open_now_confirm(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer(make_admin_access_denied_text())
+        return
+    try:
+        res = await api.admin_open_deal_now(decided_by_telegram_id=callback.from_user.id)
+        await callback.message.edit_text(
+            f"✅ Сделка открыта: #{res.get('deal_number')}",
+            reply_markup=admin_deals_kb(),
+        )
+    except Exception as e:
+        await callback.message.edit_text(make_admin_error_text(e), reply_markup=admin_deals_kb())
+    await callback.answer()
+
+
+@router.callback_query(F.data == "admin_deal_force_close_now")
+async def admin_deal_force_close_now(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer(make_admin_access_denied_text())
+        return
+    await callback.message.edit_text(
+        "⛔ Досрочно закрыть активную сделку?\n\nДействие необратимо.",
+        reply_markup=confirm_kb("admin_deal_force_close_now_confirm", "admin_deals"),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "admin_deal_force_close_now_confirm")
+async def admin_deal_force_close_now_confirm(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer(make_admin_access_denied_text())
+        return
+    try:
+        res = await api.admin_deal_force_close(decided_by_telegram_id=callback.from_user.id)
+        await callback.message.edit_text(
+            f"✅ Сделка #{res.get('deal_number')} закрыта досрочно.",
+            reply_markup=admin_deals_kb(),
+        )
+    except Exception as e:
+        await callback.message.edit_text(make_admin_error_text(e), reply_markup=admin_deals_kb())
+    await callback.answer()
+
+
+@router.callback_query(F.data == "admin_maintenance")
+async def admin_maintenance(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer(make_admin_access_denied_text())
+        return
+    await callback.message.edit_text(
+        "🧹 <b>Быстрая очистка</b>\n\nТолько частичные сценарии, без полного reset.",
+        parse_mode="HTML",
+        reply_markup=admin_maintenance_kb(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.in_({"admin_clear_logs", "admin_clear_broadcasts", "admin_clear_deals", "admin_clear_payments"}))
+async def admin_maintenance_confirm(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer(make_admin_access_denied_text())
+        return
+    labels = {
+        "admin_clear_logs": "Очистить только логи",
+        "admin_clear_broadcasts": "Очистить только рассылки",
+        "admin_clear_deals": "Очистить только сделки",
+        "admin_clear_payments": "Очистить только платежи",
+    }
+    action = callback.data
+    await callback.message.edit_text(
+        f"⚠️ {labels.get(action)}?\n\nПодтвердите действие.",
+        reply_markup=confirm_kb(f"{action}_confirm", "admin_maintenance"),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.in_({"admin_clear_logs_confirm", "admin_clear_broadcasts_confirm", "admin_clear_deals_confirm", "admin_clear_payments_confirm"}))
+async def admin_maintenance_execute(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer(make_admin_access_denied_text())
+        return
+    action = callback.data
+    try:
+        if action == "admin_clear_logs_confirm":
+            res = await api.admin_maintenance_clear_logs()
+            txt = f"✅ Логи очищены. Удалено строк: {res.get('cleared_rows', 0)}"
+        elif action == "admin_clear_broadcasts_confirm":
+            res = await api.admin_maintenance_clear_broadcasts()
+            txt = f"✅ Рассылки очищены. Удалено строк: {res.get('cleared_rows', 0)}"
+        elif action == "admin_clear_deals_confirm":
+            res = await api.admin_maintenance_clear_deals()
+            txt = f"✅ Сделки очищены. Удалено строк: {res.get('cleared_rows', 0)}"
+        else:
+            res = await api.admin_maintenance_clear_payments()
+            txt = f"✅ Платежи очищены. Удалено строк: {res.get('cleared_rows', 0)}"
+        await callback.message.edit_text(txt, reply_markup=admin_maintenance_kb())
+    except Exception as e:
+        await callback.message.edit_text(make_admin_error_text(e), reply_markup=admin_maintenance_kb())
+    await callback.answer()
 
 
 @router.callback_query(F.data == "admin_dashboard_token")
