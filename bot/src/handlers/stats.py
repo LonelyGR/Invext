@@ -24,7 +24,7 @@ async def stats(message: Message):
         return
 
     if not me:
-        await message.answer("Пользователь не найден. Отправьте /start.")
+        await message.answer("Пользователь временно недоступен. Попробуйте ещё раз через пару секунд.")
         return
 
     text = make_stats_text(me)

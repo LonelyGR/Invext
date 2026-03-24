@@ -13,6 +13,7 @@ from aiogram.enums import ParseMode
 from src.config.settings import BOT_TOKEN
 from src.logging_config import setup_bot_logging
 from src.middlewares.anti_abuse import AntiAbuseMiddleware
+from src.middlewares.user_sync import UserSyncMiddleware
 from src.handlers import (
     start,
     profile,
@@ -63,6 +64,11 @@ async def main() -> None:
     )
     storage = MemoryStorage()
     dp = Dispatcher(storage=storage)
+
+    # Глобальная синхронизация профиля пользователя (idempotent), чтобы не зависеть от /start.
+    user_sync = UserSyncMiddleware()
+    dp.message.middleware(user_sync)
+    dp.callback_query.middleware(user_sync)
 
     # Глобальная защита от спама/частых кликов.
     anti_abuse = AntiAbuseMiddleware()

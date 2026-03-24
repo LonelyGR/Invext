@@ -12,6 +12,7 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 
 from src.api_client.client import api
 from src.keyboards.menus import back_kb
+from src.services.fresh_data import get_invest_dashboard
 from src.utils.effects import send_effect_message, EFFECT_CELEBRATION
 from src.utils.locks import with_double_click_protection, release_double_click_lock
 from src.texts import (
@@ -85,10 +86,11 @@ def _extract_invest_mode(settings: dict) -> tuple[str, Decimal, Decimal]:
 async def invest_section(message: Message, state: FSMContext):
     telegram_id = message.from_user.id
     try:
-        balances = await api.get_balances(telegram_id)
-        active = await api.get_active_deal()
-        my_deals = await api.get_my_deals(telegram_id)
-        settings = await api.get_system_settings()
+        dash = await get_invest_dashboard(telegram_id)
+        balances = dash["balances"]
+        active = dash["active"]
+        my_deals = dash["my_deals"]
+        settings = dash["settings"]
     except Exception as e:
         await message.answer(f"Ошибка: {e}")
         return
@@ -212,10 +214,11 @@ async def open_invest_from_reminder(callback: CallbackQuery, state: FSMContext):
     """
     telegram_id = callback.from_user.id
     try:
-        balances = await api.get_balances(telegram_id)
-        active = await api.get_active_deal()
-        my_deals = await api.get_my_deals(telegram_id)
-        settings = await api.get_system_settings()
+        dash = await get_invest_dashboard(telegram_id)
+        balances = dash["balances"]
+        active = dash["active"]
+        my_deals = dash["my_deals"]
+        settings = dash["settings"]
     except Exception as e:
         await callback.answer(f"Ошибка: {e}", show_alert=True)
         return

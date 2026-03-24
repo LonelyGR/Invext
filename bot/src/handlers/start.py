@@ -9,6 +9,7 @@ from aiogram.utils.deep_linking import create_start_link
 from src.api_client.client import api
 from src.keyboards.menus import main_menu_kb
 from src.config.settings import ADMIN_TELEGRAM_IDS
+from src.services.fresh_data import get_user_data
 from src.texts import (
     WELCOME_ABOUT,
     format_personal_data,
@@ -24,19 +25,13 @@ async def _send_welcome_flow(message: Message, telegram_id: int):
     await message.answer(WELCOME_ABOUT)
 
     try:
-        me = await api.get_me(telegram_id)
-        balances = await api.get_balances(telegram_id)
+        me, balances = await get_user_data(telegram_id)
     except Exception as e:
         await message.answer(
             make_start_load_error_text(e),
             reply_markup=main_menu_kb(telegram_id in ADMIN_TELEGRAM_IDS),
         )
         return
-
-    if not me:
-        me = {}
-    if not balances:
-        balances = {"USDT": 0, "USDC": 0}
 
     ref_code = me.get("ref_code", "")
     ref_link = None

@@ -28,7 +28,7 @@ async def profile(message: Message):
         await message.answer(f"Ошибка: {e}")
         return
     if not me:
-        await message.answer("Пользователь не найден. Отправьте /start.")
+        await message.answer("Пользователь временно недоступен. Попробуйте ещё раз через пару секунд.")
         return
 
     ref_code = me.get("ref_code", "")

@@ -25,7 +25,7 @@ async def _send_turnover_main(chat_id: int, bot, edit_message=None):
             await bot.send_message(chat_id, f"Ошибка: {e}")
         return
     if not me:
-        text = "Пользователь не найден. Отправьте /start."
+        text = "Пользователь временно недоступен. Попробуйте ещё раз через пару секунд."
         if edit_message:
             await edit_message.edit_text(text)
         else:
@@ -50,7 +50,7 @@ async def team_turnover(message: Message):
         await message.answer(f"Ошибка: {e}")
         return
     if not me:
-        await message.answer("Пользователь не найден. Отправьте /start.")
+        await message.answer("Пользователь временно недоступен. Попробуйте ещё раз через пару секунд.")
         return
     text = make_team_turnover_main_text(me)
     await message.answer(text, reply_markup=turnover_main_kb())
