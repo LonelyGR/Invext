@@ -153,6 +153,17 @@ MAINTENANCE_BROADCAST_TABLES = [
     ("Рассылки", BroadcastMessage.__table__.name),
     ("Доставки рассылок", BroadcastDelivery.__table__.name),
 ]
+MAINTENANCE_DEAL_TABLES = [
+    ("Реферальные начисления", ReferralReward.__table__.name),
+    ("Участия в сделках", DealParticipation.__table__.name),
+    ("Инвестиции (legacy)", DealInvestment.__table__.name),
+    ("Сделки", Deal.__table__.name),
+]
+MAINTENANCE_PAYMENT_TABLES = [
+    ("Вебхуки платежей", PaymentWebhookEvent.__table__.name),
+    ("Платежи", PaymentInvoice.__table__.name),
+    ("Счета (legacy)", Invoice.__table__.name),
+]
 
 
 def _totp_secret() -> str:
@@ -3222,6 +3233,80 @@ async def maintenance_clear_logs(
             db=db,
             admin_token_id=admin_token_id,
             action_type="MAINTENANCE_CLEAR_LOGS",
+            entity_type="DATABASE",
+            entity_id=0,
+        )
+        return {
+            "ok": True,
+            "cleared": counts,
+            "total_rows_cleared": total,
+        }
+
+
+@router.post("/maintenance/clear-deals")
+async def maintenance_clear_deals(
+    request: Request,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    admin_token_id, _ = await get_admin_context(request)
+    require_admin_role(request)
+    confirm = str(body.get("confirm", "")).strip().upper()
+    if confirm != "CLEAR_DEALS":
+        raise HTTPException(status_code=400, detail='Подтверждение не пройдено. Передайте confirm="CLEAR_DEALS"')
+    if MAINTENANCE_RESET_LOCK.locked():
+        raise HTTPException(status_code=409, detail="Сейчас выполняется другая maintenance-операция. Повторите позже.")
+    async with MAINTENANCE_RESET_LOCK:
+        counts = {}
+        total = 0
+        for title, table_name in MAINTENANCE_DEAL_TABLES:
+            cnt = int((await db.execute(text(f'SELECT COUNT(*) FROM "{table_name}"'))).scalar() or 0)
+            counts[title] = cnt
+            total += cnt
+        table_names_sql = ", ".join(f'"{name}"' for _, name in MAINTENANCE_DEAL_TABLES)
+        await db.execute(text(f"TRUNCATE TABLE {table_names_sql} RESTART IDENTITY CASCADE"))
+        await db.flush()
+        await log_admin_action(
+            db=db,
+            admin_token_id=admin_token_id,
+            action_type="MAINTENANCE_CLEAR_DEALS",
+            entity_type="DATABASE",
+            entity_id=0,
+        )
+        return {
+            "ok": True,
+            "cleared": counts,
+            "total_rows_cleared": total,
+        }
+
+
+@router.post("/maintenance/clear-payments")
+async def maintenance_clear_payments(
+    request: Request,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    admin_token_id, _ = await get_admin_context(request)
+    require_admin_role(request)
+    confirm = str(body.get("confirm", "")).strip().upper()
+    if confirm != "CLEAR_PAYMENTS":
+        raise HTTPException(status_code=400, detail='Подтверждение не пройдено. Передайте confirm="CLEAR_PAYMENTS"')
+    if MAINTENANCE_RESET_LOCK.locked():
+        raise HTTPException(status_code=409, detail="Сейчас выполняется другая maintenance-операция. Повторите позже.")
+    async with MAINTENANCE_RESET_LOCK:
+        counts = {}
+        total = 0
+        for title, table_name in MAINTENANCE_PAYMENT_TABLES:
+            cnt = int((await db.execute(text(f'SELECT COUNT(*) FROM "{table_name}"'))).scalar() or 0)
+            counts[title] = cnt
+            total += cnt
+        table_names_sql = ", ".join(f'"{name}"' for _, name in MAINTENANCE_PAYMENT_TABLES)
+        await db.execute(text(f"TRUNCATE TABLE {table_names_sql} RESTART IDENTITY CASCADE"))
+        await db.flush()
+        await log_admin_action(
+            db=db,
+            admin_token_id=admin_token_id,
+            action_type="MAINTENANCE_CLEAR_PAYMENTS",
             entity_type="DATABASE",
             entity_id=0,
         )

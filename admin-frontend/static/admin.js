@@ -2998,6 +2998,8 @@ async function loadSettings() {
           <button type="button" id="db-backup-btn" class="btn-secondary-small">Сделать backup</button>
           <button type="button" id="db-clear-logs-btn" class="btn-secondary-small">Очистить только логи</button>
           <button type="button" id="db-clear-broadcasts-btn" class="btn-secondary-small">Очистить только рассылки</button>
+          <button type="button" id="db-clear-deals-btn" class="btn-secondary-small">Очистить только сделки</button>
+          <button type="button" id="db-clear-payments-btn" class="btn-secondary-small">Очистить только платежи</button>
         </div>
         <div class="danger-confirm">
           <label><input type="checkbox" id="dz-check-irrev" /> Я понимаю, что действие необратимо</label>
@@ -3507,6 +3509,8 @@ async function loadSettings() {
     const backupBtn = document.getElementById("db-backup-btn");
     const clearLogsBtn = document.getElementById("db-clear-logs-btn");
     const clearBroadcastsBtn = document.getElementById("db-clear-broadcasts-btn");
+    const clearDealsBtn = document.getElementById("db-clear-deals-btn");
+    const clearPaymentsBtn = document.getElementById("db-clear-payments-btn");
     const dzCheckIrrev = document.getElementById("dz-check-irrev");
     const dzCheckEnv = document.getElementById("dz-check-env");
     const dzConfirmInput = document.getElementById("dz-confirm-input");
@@ -3654,6 +3658,82 @@ async function loadSettings() {
         } finally {
           clearBroadcastsBtn.disabled = false;
           clearBroadcastsBtn.textContent = "Очистить только рассылки";
+        }
+      };
+    }
+    if (clearDealsBtn) {
+      clearDealsBtn.onclick = async () => {
+        const first = await openUxDialog({
+          title: "Очистить только сделки",
+          message: "Будут удалены сделки, участия и реферальные начисления по сделкам. Пользователи, платежи и леджер не затрагиваются.",
+          confirmText: "Продолжить",
+          cancelText: "Отмена",
+        });
+        if (!first.confirmed) return;
+        const phrase = await openUxDialog({
+          title: "Подтверждение",
+          message: "Введите код подтверждения: CLEAR_DEALS",
+          confirmText: "Очистить сделки",
+          cancelText: "Отмена",
+          inputPlaceholder: "CLEAR_DEALS",
+        });
+        if (!phrase.confirmed || (phrase.value || "").trim().toUpperCase() !== "CLEAR_DEALS") {
+          showToast("Очистка сделок отменена.", "info");
+          return;
+        }
+        try {
+          clearDealsBtn.disabled = true;
+          clearDealsBtn.textContent = "Очистка…";
+          const res = await apiRequest("/maintenance/clear-deals", {
+            method: "POST",
+            body: JSON.stringify({ confirm: "CLEAR_DEALS" }),
+          });
+          showToast(`Сделки очищены: ${res.total_rows_cleared} записей`, "success");
+          if (location.hash === "#deals") loadDeals();
+          if (location.hash === "#dashboard") loadDashboard();
+        } catch (e) {
+          showToast(e.message || "Ошибка очистки сделок", "error");
+        } finally {
+          clearDealsBtn.disabled = false;
+          clearDealsBtn.textContent = "Очистить только сделки";
+        }
+      };
+    }
+    if (clearPaymentsBtn) {
+      clearPaymentsBtn.onclick = async () => {
+        const first = await openUxDialog({
+          title: "Очистить только платежи",
+          message: "Будут удалены платежи и связанные вебхуки. Пользователи, сделки и леджер не затрагиваются.",
+          confirmText: "Продолжить",
+          cancelText: "Отмена",
+        });
+        if (!first.confirmed) return;
+        const phrase = await openUxDialog({
+          title: "Подтверждение",
+          message: "Введите код подтверждения: CLEAR_PAYMENTS",
+          confirmText: "Очистить платежи",
+          cancelText: "Отмена",
+          inputPlaceholder: "CLEAR_PAYMENTS",
+        });
+        if (!phrase.confirmed || (phrase.value || "").trim().toUpperCase() !== "CLEAR_PAYMENTS") {
+          showToast("Очистка платежей отменена.", "info");
+          return;
+        }
+        try {
+          clearPaymentsBtn.disabled = true;
+          clearPaymentsBtn.textContent = "Очистка…";
+          const res = await apiRequest("/maintenance/clear-payments", {
+            method: "POST",
+            body: JSON.stringify({ confirm: "CLEAR_PAYMENTS" }),
+          });
+          showToast(`Платежи очищены: ${res.total_rows_cleared} записей`, "success");
+          if (location.hash === "#deposits") loadDeposits();
+          if (location.hash === "#dashboard") loadDashboard();
+        } catch (e) {
+          showToast(e.message || "Ошибка очистки платежей", "error");
+        } finally {
+          clearPaymentsBtn.disabled = false;
+          clearPaymentsBtn.textContent = "Очистить только платежи";
         }
       };
     }
