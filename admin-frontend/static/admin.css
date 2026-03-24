@@ -1705,6 +1705,92 @@ tbody tr:hover .row-actions {
   line-height: 1.5;
 }
 
+.danger-zone-env {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.env-label {
+  color: #9fb1cc;
+  font-size: 12px;
+}
+
+.env-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  border: 1px solid;
+}
+
+.env-badge.safe {
+  color: #bbf7d0;
+  border-color: rgba(34, 197, 94, 0.5);
+  background: rgba(20, 83, 45, 0.45);
+}
+
+.env-badge.prod {
+  color: #fecaca;
+  border-color: rgba(239, 68, 68, 0.65);
+  background: rgba(127, 29, 29, 0.55);
+}
+
+.env-db {
+  color: #cbd5e1;
+  font-size: 12px;
+}
+
+.danger-list {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
+.danger-list li {
+  margin: 2px 0;
+}
+
+.danger-total {
+  margin-top: 8px;
+  color: #fecaca;
+  font-weight: 600;
+}
+
+.danger-backup-state {
+  margin-top: 6px;
+  color: #fca5a5;
+  font-size: 12px;
+}
+
+.danger-zone-actions {
+  margin-top: 10px;
+}
+
+.danger-confirm {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(127, 29, 29, 0.45);
+  background: rgba(2, 6, 23, 0.75);
+}
+
+.danger-confirm label {
+  margin: 0;
+  color: #e2e8f0;
+  font-size: 13px;
+}
+
+.danger-confirm code {
+  color: #fecaca;
+}
+
 .danger-zone-toolbar {
   margin-top: 12px;
   margin-bottom: 0;

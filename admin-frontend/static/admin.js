@@ -14,6 +14,30 @@ const DASHBOARD_LIVE_KEY = "invext_admin_dashboard_live";
 const BROADCAST_TEMPLATES_KEY = "invext_admin_broadcast_templates";
 
 let dashboardAutoRefreshTimer = null;
+let authRedirectInProgress = false;
+
+class UnauthorizedError extends Error {
+  constructor(message = "Unauthorized") {
+    super(message);
+    this.name = "UnauthorizedError";
+  }
+}
+
+function isUnauthorizedError(err) {
+  return err instanceof UnauthorizedError || err?.name === "UnauthorizedError";
+}
+
+function getUnauthorizedMemeMessage() {
+  const memes = [
+    "401: ты не пройдешь! (с) Гэндальф. Войди заново.",
+    "Доступ denied. 401 украл твою сессию, как котлету со стола.",
+    "401 Unauthorized: куки закончились, печеньки кончились, авторизация тоже.",
+    "Сессия испарилась быстрее зарплаты в день релиза. Логин снова.",
+    "401: сервер сделал вид, что тебя не знает. Представься еще раз.",
+    "Тут охранник 401. Говорит: «бейджик покажи» (то есть залогинься).",
+  ];
+  return memes[Math.floor(Math.random() * memes.length)];
+}
 
 function loadSavedState(key, fallback) {
   try {
@@ -138,9 +162,17 @@ async function apiRequest(path, options = {}) {
     ...options,
   });
   if (resp.status === 401) {
-    // Сессия истекла — показываем логин.
-    showLoginView();
-    throw new Error("Unauthorized");
+    // Сессия истекла — централизованно уводим на логин.
+    if (!authRedirectInProgress) {
+      authRedirectInProgress = true;
+      showLoginView();
+      const errorEl = document.getElementById("login-error");
+      if (errorEl) errorEl.textContent = getUnauthorizedMemeMessage();
+      setTimeout(() => {
+        authRedirectInProgress = false;
+      }, 250);
+    }
+    throw new UnauthorizedError();
   }
   const text = await resp.text();
   if (!resp.ok) {
@@ -729,6 +761,7 @@ async function loadDashboard() {
       }, 30000);
     }
   } catch (e) {
+    if (isUnauthorizedError(e)) throw e;
     section.innerHTML = `<h1>Дашборд</h1><div class="error">${e.message}</div>`;
   }
 }
@@ -2758,10 +2791,11 @@ async function loadSettings() {
   const section = document.getElementById("settings-section");
   section.innerHTML = `<h1>Настройки</h1><div class="panel-card"><div class="skeleton-line" style="width:68%;"></div><div class="skeleton-line" style="width:92%; margin-top:12px;"></div></div>`;
   try {
-    const [s, defaults, history] = await Promise.all([
+    const [s, defaults, history, dangerSummary] = await Promise.all([
       apiRequest("/system-settings"),
       apiRequest("/system-settings/defaults").catch(() => null),
       apiRequest("/system-settings/history?page=1&page_size=8").catch(() => ({ items: [] })),
+      apiRequest("/maintenance/reset-data/summary?keep_settings=true").catch(() => null),
     ]);
     const initialModes = {
       deposit:
@@ -2926,16 +2960,55 @@ async function loadSettings() {
           <div class="danger-zone-icon">⚠️</div>
           <div>
             <h2>Опасная зона</h2>
-            <p class="section-desc">Необратимые действия с тестовой БД перед запуском в прод.</p>
+            <p class="section-desc">Необратимые действия. Перед запуском внимательно проверьте среду и последствия.</p>
           </div>
         </div>
+        <div class="danger-zone-env">
+          <span class="env-label">Среда:</span>
+          <span class="env-badge ${(dangerSummary?.environment || "TEST") === "PRODUCTION" ? "prod" : "safe"}">${escapeHtmlAttr(dangerSummary?.environment || "TEST")}</span>
+          <span class="env-db">БД: <strong>${escapeHtmlAttr(dangerSummary?.database || "unknown-db")}</strong></span>
+        </div>
         <div class="danger-zone-note">
-          Будут удалены: пользователи, сделки, платежи, выводы, леджер, логи.
-          <br />Структура БД и финансовые настройки сохраняются.
+          <div><strong>Будут удалены:</strong></div>
+          <ul class="danger-list">
+            ${
+              (dangerSummary?.items || [])
+                .map((x) => `<li>${escapeHtmlAttr(x.title)} — <strong>${Number(x.rows || 0).toLocaleString("ru-RU")}</strong></li>`)
+                .join("") || "<li>Нет данных preview</li>"
+            }
+          </ul>
+          <div style="margin-top:8px;"><strong>Сохранятся:</strong></div>
+          <ul class="danger-list">
+            ${(dangerSummary?.will_keep || ["Схема БД", "Финансовые настройки", "Системные конфиги"])
+              .filter((x) => x && x !== "—")
+              .map((x) => `<li>${escapeHtmlAttr(x)}</li>`)
+              .join("")}
+          </ul>
+          <div class="danger-total">Итого к удалению: ${Number(dangerSummary?.total_rows || 0).toLocaleString("ru-RU")} записей</div>
+          <div class="danger-backup-state">
+            Backup: ${
+              dangerSummary?.backup_available
+                ? `доступен · последний: ${dangerSummary?.last_backup_at ? new Date(dangerSummary.last_backup_at).toLocaleString() : "—"}`
+                : "недоступен в UI (используйте pg_dump)"
+            }
+          </div>
+        </div>
+        <div class="toolbar danger-zone-toolbar danger-zone-actions">
+          <button type="button" id="db-dry-run-btn" class="btn-secondary-small">Предпросмотр очистки</button>
+          <button type="button" id="db-backup-btn" class="btn-secondary-small">Сделать backup</button>
+          <button type="button" id="db-clear-logs-btn" class="btn-secondary-small">Очистить только логи</button>
+          <button type="button" id="db-clear-broadcasts-btn" class="btn-secondary-small">Очистить только рассылки</button>
+        </div>
+        <div class="danger-confirm">
+          <label><input type="checkbox" id="dz-check-irrev" /> Я понимаю, что действие необратимо</label>
+          <label><input type="checkbox" id="dz-check-env" /> Я проверил, что это не production</label>
+          <label>Введите подтверждение: <code>${escapeHtmlAttr(dangerSummary?.environment || "TEST")}</code>
+            <input type="text" id="dz-confirm-input" class="settings-input" placeholder="${escapeHtmlAttr(dangerSummary?.environment || "TEST")}" />
+          </label>
         </div>
         <div class="toolbar danger-zone-toolbar">
-          <button type="button" id="db-reset-btn" class="btn-danger-wide">
-            <span class="btn-label">Очистить базу данных</span>
+          <button type="button" id="db-reset-btn" class="btn-danger-wide" disabled>
+            <span class="btn-label">Безвозвратно удалить данные</span>
           </button>
         </div>
       </div>
@@ -3430,12 +3503,166 @@ async function loadSettings() {
     }
 
     const resetBtn = document.getElementById("db-reset-btn");
+    const dryRunBtn = document.getElementById("db-dry-run-btn");
+    const backupBtn = document.getElementById("db-backup-btn");
+    const clearLogsBtn = document.getElementById("db-clear-logs-btn");
+    const clearBroadcastsBtn = document.getElementById("db-clear-broadcasts-btn");
+    const dzCheckIrrev = document.getElementById("dz-check-irrev");
+    const dzCheckEnv = document.getElementById("dz-check-env");
+    const dzConfirmInput = document.getElementById("dz-confirm-input");
+    const expectedConfirm = String(dangerSummary?.environment || "TEST").trim().toUpperCase();
+    const updateDangerState = () => {
+      if (!resetBtn) return;
+      const okPhrase = ((dzConfirmInput?.value || "").trim().toUpperCase() === expectedConfirm);
+      const okChecks = Boolean(dzCheckIrrev?.checked) && Boolean(dzCheckEnv?.checked);
+      resetBtn.disabled = !(okPhrase && okChecks);
+    };
+    [dzCheckIrrev, dzCheckEnv, dzConfirmInput].forEach((el) => {
+      el?.addEventListener("change", updateDangerState);
+      el?.addEventListener("input", updateDangerState);
+    });
+    updateDangerState();
+    if (dryRunBtn) {
+      dryRunBtn.onclick = async () => {
+        try {
+          dryRunBtn.disabled = true;
+          dryRunBtn.textContent = "Расчёт…";
+          const res = await apiRequest("/maintenance/reset-data", {
+            method: "POST",
+            body: JSON.stringify({ confirm: "RESET", keep_settings: true, dry_run: true }),
+          });
+          const top = (res.items || [])
+            .slice(0, 8)
+            .map((x) => `${x.title}: ${x.rows}`)
+            .join("\n");
+          await openUxDialog({
+            title: "Dry-run: предпросмотр очистки",
+            message: `Будут очищены таблицы: ${(res.tables_cleared || []).length}\nИтого записей: ${res.total_rows}\n\n${top}`,
+            confirmText: "ОК",
+          });
+        } catch (e) {
+          showToast(e.message || "Ошибка dry-run", "error");
+        } finally {
+          dryRunBtn.disabled = false;
+          dryRunBtn.textContent = "Предпросмотр очистки";
+        }
+      };
+    }
+    if (backupBtn) {
+      backupBtn.onclick = async () => {
+        try {
+          backupBtn.disabled = true;
+          backupBtn.textContent = "Экспорт…";
+          const resp = await fetch(`${API_BASE}/maintenance/backup`, {
+            method: "POST",
+            credentials: "include",
+          });
+          if (!resp.ok) {
+            const txt = await resp.text();
+            throw new Error(txt || "Ошибка backup");
+          }
+          const blob = await resp.blob();
+          const cd = resp.headers.get("content-disposition") || "";
+          const m = cd.match(/filename="([^"]+)"/i);
+          const fileName = m?.[1] || `invext_backup_${Date.now()}.json`;
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = fileName;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          URL.revokeObjectURL(url);
+          showToast("Backup экспортирован", "success");
+          loadSettings();
+        } catch (e) {
+          showToast(e.message || "Ошибка backup", "error");
+        } finally {
+          backupBtn.disabled = false;
+          backupBtn.textContent = "Сделать backup";
+        }
+      };
+    }
+    if (clearLogsBtn) {
+      clearLogsBtn.onclick = async () => {
+        const first = await openUxDialog({
+          title: "Очистить только логи",
+          message: "Будут удалены только логи админки и лог входов. Финансовые и пользовательские данные не затрагиваются.",
+          confirmText: "Продолжить",
+          cancelText: "Отмена",
+        });
+        if (!first.confirmed) return;
+        const phrase = await openUxDialog({
+          title: "Подтверждение",
+          message: "Введите код подтверждения: CLEAR_LOGS",
+          confirmText: "Очистить логи",
+          cancelText: "Отмена",
+          inputPlaceholder: "CLEAR_LOGS",
+        });
+        if (!phrase.confirmed || (phrase.value || "").trim().toUpperCase() !== "CLEAR_LOGS") {
+          showToast("Очистка логов отменена.", "info");
+          return;
+        }
+        try {
+          clearLogsBtn.disabled = true;
+          clearLogsBtn.textContent = "Очистка…";
+          const res = await apiRequest("/maintenance/clear-logs", {
+            method: "POST",
+            body: JSON.stringify({ confirm: "CLEAR_LOGS" }),
+          });
+          showToast(`Логи очищены: ${res.total_rows_cleared} записей`, "success");
+          if (location.hash === "#logs") loadLogs();
+        } catch (e) {
+          showToast(e.message || "Ошибка очистки логов", "error");
+        } finally {
+          clearLogsBtn.disabled = false;
+          clearLogsBtn.textContent = "Очистить только логи";
+        }
+      };
+    }
+    if (clearBroadcastsBtn) {
+      clearBroadcastsBtn.onclick = async () => {
+        const first = await openUxDialog({
+          title: "Очистить только рассылки",
+          message: "Будут удалены истории рассылок и доставки. Пользователи и финансы не затрагиваются.",
+          confirmText: "Продолжить",
+          cancelText: "Отмена",
+        });
+        if (!first.confirmed) return;
+        const phrase = await openUxDialog({
+          title: "Подтверждение",
+          message: "Введите код подтверждения: CLEAR_BROADCASTS",
+          confirmText: "Очистить рассылки",
+          cancelText: "Отмена",
+          inputPlaceholder: "CLEAR_BROADCASTS",
+        });
+        if (!phrase.confirmed || (phrase.value || "").trim().toUpperCase() !== "CLEAR_BROADCASTS") {
+          showToast("Очистка рассылок отменена.", "info");
+          return;
+        }
+        try {
+          clearBroadcastsBtn.disabled = true;
+          clearBroadcastsBtn.textContent = "Очистка…";
+          const res = await apiRequest("/maintenance/clear-broadcasts", {
+            method: "POST",
+            body: JSON.stringify({ confirm: "CLEAR_BROADCASTS" }),
+          });
+          showToast(`Рассылки очищены: ${res.total_rows_cleared} записей`, "success");
+          if (location.hash === "#messages") loadMessages();
+        } catch (e) {
+          showToast(e.message || "Ошибка очистки рассылок", "error");
+        } finally {
+          clearBroadcastsBtn.disabled = false;
+          clearBroadcastsBtn.textContent = "Очистить только рассылки";
+        }
+      };
+    }
     if (resetBtn) {
       resetBtn.onclick = async () => {
         const firstConfirm = await openUxDialog({
-          title: "Очистка базы",
-          message: "Это удалит ВСЕ тестовые данные (пользователи, сделки, платежи, леджер, выводы). Продолжить?",
-          confirmText: "Очистить",
+          title: "Финальное подтверждение удаления",
+          message: `Будут удалены тестовые данные. Среда: ${expectedConfirm}. Это действие безвозвратно.`,
+          confirmText: "Безвозвратно удалить данные",
           cancelText: "Отмена",
         });
         if (!firstConfirm.confirmed) return;
@@ -3469,8 +3696,8 @@ async function loadSettings() {
         } catch (e) {
           showToast(e.message || "Ошибка очистки базы", "error");
         } finally {
-          resetBtn.disabled = false;
-          resetBtn.innerHTML = '<span class="btn-label">Очистить базу данных</span>';
+          updateDangerState();
+          resetBtn.innerHTML = '<span class="btn-label">Безвозвратно удалить данные</span>';
         }
       };
     }
@@ -3829,11 +4056,13 @@ document.addEventListener("DOMContentLoaded", () => {
     .addEventListener("submit", handleLogin);
 
   // Пытаемся сразу загрузить дашборд (если уже есть cookie).
-  showMainView();
-  loadDashboard().catch(() => {
+  loadDashboard()
+    .then(() => {
+      showMainView();
+      switchSection(location.hash || "#dashboard");
+    })
+    .catch(() => {
     showLoginView();
   });
-
-  switchSection(location.hash || "#dashboard");
 });
 

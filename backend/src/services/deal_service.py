@@ -20,7 +20,7 @@ from src.models.deal_participation import (
     PARTICIPATION_STATUS_COMPLETED,
     PARTICIPATION_STATUS_IN_PROGRESS,
 )
-from src.models.referral_reward import STATUS_PAID, STATUS_MISSED
+from src.models.referral_reward import STATUS_PAID, STATUS_MISSED, STATUS_PENDING
 from src.services.ledger_service import (
     LEDGER_TYPE_INVEST,
     LEDGER_TYPE_INVEST_RETURN,
@@ -328,8 +328,7 @@ async def close_deal_flow(db: AsyncSession, deal: Deal) -> None:
     if participations:
         await db.flush()
 
-    # Реферальная линия: 0.5% с уровня от фактической прибыли участника по этой сделке
-    # (profit_amount), а не от суммы инвестиции.
+    # Реферальная линия: рассчитываем на закрытии сделки, но зачисляем вместе с payout через 24 часа.
     for p in participations:
         inv_user = await db.get(User, p.user_id)
         if not inv_user:
@@ -368,22 +367,6 @@ async def close_deal_flow(db: AsyncSession, deal: Deal) -> None:
         referral_profit_by_telegram: dict[int, float] = {}
         referral_missed_by_telegram: dict[int, float] = {}
 
-        lt_result = await db.execute(
-            select(
-                LedgerTransaction.user_id,
-                LedgerTransaction.amount_usdt,
-                LedgerTransaction.metadata_json,
-            ).where(LedgerTransaction.type == LEDGER_TYPE_REFERRAL_BONUS)
-        )
-        for uid, amount, meta in lt_result.all():
-            if not meta or meta.get("source") != "investment":
-                continue
-            if int(meta.get("deal_id", 0)) != deal.id:
-                continue
-            for tid, user_id in user_id_by_tid.items():
-                if user_id == uid:
-                    referral_profit_by_telegram[tid] = referral_profit_by_telegram.get(tid, 0.0) + float(amount)
-
         rr_result = await db.execute(
             select(ReferralReward.to_user_id, ReferralReward.amount).where(
                 ReferralReward.deal_id == deal.id,
@@ -421,9 +404,9 @@ async def process_pending_payouts(db: AsyncSession) -> int:
     Вызывается перед открытием новой сделки.
     Возвращает кол-во обработанных записей.
     """
-    # Не выплачиваем сразу после закрытия: «средства в работе», payout — не раньше чем через 1 час.
+    # Выплата строго через 24 часа после закрытия сделки.
     now = dt.datetime.now(dt.timezone.utc)
-    eligible_before = now - dt.timedelta(hours=1)
+    eligible_before = now - dt.timedelta(hours=24)
 
     # Важно для идемпотентности при нескольких воркерах:
     # лочим строки и пропускаем уже залоченные (чтобы не выплатить дважды).
@@ -445,6 +428,7 @@ async def process_pending_payouts(db: AsyncSession) -> int:
 
     deal_cache: dict[int, Deal] = {}
     affected_user_ids: set[int] = set()
+    notify_payload_by_participation_id: dict[int, dict] = {}
 
     for p in participations:
         try:
@@ -479,10 +463,47 @@ async def process_pending_payouts(db: AsyncSession) -> int:
                 )
                 db.add(tx_profit)
 
+            referral_income = Decimal("0")
+            rewards_result = await db.execute(
+                select(ReferralReward).where(
+                    ReferralReward.deal_id == p.deal_id,
+                    ReferralReward.to_user_id == p.user_id,
+                    ReferralReward.status == STATUS_PENDING,
+                )
+            )
+            pending_rewards = list(rewards_result.scalars().all())
+            if pending_rewards:
+                referral_income = sum((rw.amount or Decimal("0") for rw in pending_rewards), Decimal("0"))
+                if referral_income > 0:
+                    tx_ref = LedgerTransaction(
+                        user_id=p.user_id,
+                        type=LEDGER_TYPE_REFERRAL_BONUS,
+                        amount_usdt=referral_income,
+                        metadata_json={
+                            **meta_base,
+                            "source": "investment_payout",
+                            "pending_rewards_count": len(pending_rewards),
+                        },
+                    )
+                    db.add(tx_ref)
+                for rw in pending_rewards:
+                    rw.status = STATUS_PAID
+
             p.status = PARTICIPATION_STATUS_COMPLETED
             p.payout_at = now
             affected_user_ids.add(p.user_id)
             processed += 1
+
+            total = (p.amount + profit + referral_income).quantize(Decimal("0.000001"))
+            profit_percent = deal.profit_percent if deal and deal.profit_percent is not None else None
+            # Отложим отправку до момента, когда соберем user_tids после flush.
+            notify_payload_by_participation_id[p.id] = {
+                "deal_num": deal.number if deal else 0,
+                "profit": profit,
+                "total": total,
+                "profit_percent": profit_percent,
+                "referral_income": referral_income,
+            }
         except Exception:
             logger.exception("process_pending_payouts: failed to process participation %s", p.id)
 
@@ -512,34 +533,15 @@ async def process_pending_payouts(db: AsyncSession) -> int:
         if not tid or p.status != PARTICIPATION_STATUS_COMPLETED:
             continue
         try:
-            deal = deal_cache.get(p.deal_id)
-            deal_num = deal.number if deal else 0
-            profit = p.profit_amount or Decimal("0")
-            referral_bonus_result = await db.execute(
-                select(LedgerTransaction.amount_usdt, LedgerTransaction.metadata_json).where(
-                    LedgerTransaction.user_id == p.user_id,
-                    LedgerTransaction.type == LEDGER_TYPE_REFERRAL_BONUS,
-                )
-            )
-            referral_income = Decimal("0")
-            for bonus_amount, bonus_meta in referral_bonus_result.all():
-                if not isinstance(bonus_meta, dict):
-                    continue
-                if bonus_meta.get("source") != "investment":
-                    continue
-                if str(bonus_meta.get("deal_id")) != str(p.deal_id):
-                    continue
-                referral_income += bonus_amount or Decimal("0")
-            total = (p.amount + profit + referral_income).quantize(Decimal("0.000001"))
-            profit_percent = deal.profit_percent if deal and deal.profit_percent is not None else None
+            payload = notify_payload_by_participation_id.get(p.id, {})
             await notify_payout_complete(
                 telegram_id=tid,
-                deal_number=deal_num,
+                deal_number=payload.get("deal_num", 0),
                 amount=p.amount,
-                profit=profit,
-                total=total,
-                profit_percent=profit_percent,
-                referral_income=referral_income,
+                profit=payload.get("profit", p.profit_amount or Decimal("0")),
+                total=payload.get("total", p.amount + (p.profit_amount or Decimal("0"))),
+                profit_percent=payload.get("profit_percent"),
+                referral_income=payload.get("referral_income", Decimal("0")),
             )
         except Exception:
             logger.exception("notify_payout_complete failed for user_id=%s participation=%s", p.user_id, p.id)

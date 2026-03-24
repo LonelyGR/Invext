@@ -225,8 +225,7 @@ async def broadcast_deal_closed(
 ) -> None:
     """
     Рассылка о закрытии этапа сбора.
-    Прибыль НЕ начисляется сразу — участникам показываем «средства в работе».
-    Реферальная прибыль / упущенная прибыль включаются как прежде.
+    Прибыль и реферальный бонус начисляются только через 24 часа.
     """
     if not telegram_ids:
         return
@@ -236,26 +235,31 @@ async def broadcast_deal_closed(
 
     sent = 0
     for tid in telegram_ids:
-        lines: list[str] = ["⏳ Сбор закрыт\nСредства ушли в работу\n"]
+        lines: list[str] = [f"⏳ Сбор на сделку #{deal_number} закрыт", ""]
 
         if tid in participant_telegram_ids:
-            lines.append("⏳ Средства отправлены в работу.\n")
-            lines.append("Начисление прибыли произойдёт в течение 24 часов.\n")
+            lines.append("Средства отправлены в работу.")
+            lines.append("Начисление прибыли произойдёт в течение 24 часов.")
+            lines.append("")
 
         ref_profit = referral_profit_by_telegram.get(tid)
         if ref_profit and ref_profit > 0:
-            lines.append(f"\nРеферальная прибыль: {ref_profit:.2f} USDT.\n")
+            lines.append(f"Реферальная прибыль: {ref_profit:.2f} USDT.")
 
         ref_missed = referral_missed_by_telegram.get(tid)
         if ref_missed and ref_missed > 0:
-            lines.append(f"\nУпущенная прибыль с рефералов: {ref_missed:.2f} USDT.\n")
-            lines.append("⚠️ Вы не участвовали в сборе, поэтому не получили реферальное вознаграждение.\n")
+            lines.append("")
+            lines.append(f"Упущенная прибыль с рефералов: {ref_missed:.2f} USDT.")
+            lines.append("⚠️ Вы не участвовали в сборе, поэтому не получили реферальное вознаграждение.")
 
-        lines.append(f"\nСледующий сбор откроется:\n⏰ {next_open_human}\n")
-        lines.append(f"До открытия следующей сделки: {next_open_in_human}.\n\n")
+        lines.append("")
+        lines.append("Следующий сбор:")
+        lines.append(f"⏰ {next_open_human}")
+        lines.append(f"До открытия: {next_open_in_human}.")
+        lines.append("")
         lines.append("Для участия используйте нашего Telegram бота.")
 
-        text = "".join(lines)
+        text = "\n".join(lines)
         effect_id = None
         if await send_telegram_message(tid, text, message_effect_id=effect_id):
             sent += 1
@@ -289,21 +293,22 @@ async def notify_payout_complete(
             s = s.rstrip("0").rstrip(".")
         return s or "0"
 
-    profit_line = f"📈 Основная прибыль: +{_fmt_decimal(profit)} USDT"
+    profit_line = f"📈 Прибыль: +{_fmt_decimal(profit)} USDT"
     if profit_percent is not None:
         profit_line += f" (+{_fmt_decimal(profit_percent)}%)"
 
     lines = [
-        f"💰 Сделка #{deal_number} завершена",
+        f"💰 Выплата по сделке #{deal_number}",
         "",
+        f"📥 Инвестиция: {_fmt_decimal(amount)} USDT",
         profit_line,
     ]
     if referral_income is not None and Decimal(str(referral_income)) > 0:
-        lines.append(f"👥 Реферальный доход: +{_fmt_decimal(referral_income)} USDT")
+        lines.append(f"👥 Реферальный бонус: +{_fmt_decimal(referral_income)} USDT")
     lines.extend(
         [
             "",
-            f"Итого зачислено: {_fmt_decimal(total)} USDT",
+            f"💵 Итого зачислено: {_fmt_decimal(total)} USDT",
         ]
     )
     text = "\n".join(lines)

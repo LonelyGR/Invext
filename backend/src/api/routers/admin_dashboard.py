@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import asyncio
 import datetime as dt
 import io
 import base64
@@ -11,6 +12,7 @@ import re
 import secrets
 import struct
 import uuid
+from urllib.parse import urlparse
 from decimal import Decimal
 from pathlib import Path
 from typing import Optional
@@ -47,6 +49,7 @@ from src.models import (
     SystemSettings,
     SystemSettingsVersion,
     BroadcastMessage,
+    BroadcastDelivery,
     AdminLoginEvent,
 )
 from src.schemas.admin_dashboard import (
@@ -124,6 +127,32 @@ SYSTEM_SETTINGS_DEFAULTS = {
     "allow_deposits": True,
     "allow_investments": True,
 }
+MAINTENANCE_RESET_LOCK = asyncio.Lock()
+MAINTENANCE_TABLES = [
+    ("Пользователи", User.__table__.name),
+    ("Сделки", Deal.__table__.name),
+    ("Инвестиции (legacy)", DealInvestment.__table__.name),
+    ("Участия в сделках", DealParticipation.__table__.name),
+    ("Реферальные начисления", ReferralReward.__table__.name),
+    ("Платежи", PaymentInvoice.__table__.name),
+    ("Вебхуки платежей", PaymentWebhookEvent.__table__.name),
+    ("Счета (legacy)", Invoice.__table__.name),
+    ("Выводы", WithdrawRequest.__table__.name),
+    ("Ledger", LedgerTransaction.__table__.name),
+    ("Кошельки", UserWallet.__table__.name),
+    ("Wallet tx (legacy)", WalletTransaction.__table__.name),
+    ("Логи админов", AdminLog.__table__.name),
+    ("Рассылки", BroadcastMessage.__table__.name),
+    ("Доставки рассылок", BroadcastDelivery.__table__.name),
+]
+MAINTENANCE_LOG_TABLES = [
+    ("Логи админов", AdminLog.__table__.name),
+    ("Лог входов", AdminLoginEvent.__table__.name),
+]
+MAINTENANCE_BROADCAST_TABLES = [
+    ("Рассылки", BroadcastMessage.__table__.name),
+    ("Доставки рассылок", BroadcastDelivery.__table__.name),
+]
 
 
 def _totp_secret() -> str:
@@ -163,6 +192,79 @@ def _sanitize_broadcast_html(text: str) -> str:
         if tag.lower() not in ALLOWED_BROADCAST_TAGS:
             raise HTTPException(status_code=400, detail=f"Неподдерживаемый HTML-тег: {tag}")
     return cleaned
+
+
+def _detect_environment(settings) -> str:
+    env_raw = str(getattr(settings, "app_env", "") or "").strip().upper()
+    if env_raw:
+        return env_raw
+    db_url = str(getattr(settings, "database_url", "") or "").lower()
+    if "prod" in db_url or "production" in db_url:
+        return "PRODUCTION"
+    if "stage" in db_url or "staging" in db_url:
+        return "STAGING"
+    return "TEST"
+
+
+def _database_host_name(database_url: str) -> str:
+    try:
+        parsed = urlparse(database_url)
+        host = parsed.hostname or "unknown-host"
+        db_name = (parsed.path or "/").lstrip("/") or "unknown-db"
+        return f"{host}/{db_name}"
+    except Exception:
+        return "unknown-db"
+
+
+async def _maintenance_preview(db: AsyncSession, keep_settings: bool) -> dict:
+    items = []
+    total_rows = 0
+    for title, table_name in MAINTENANCE_TABLES:
+        count_q = await db.execute(text(f'SELECT COUNT(*) FROM "{table_name}"'))
+        rows_count = int(count_q.scalar() or 0)
+        items.append({"title": title, "table": table_name, "rows": rows_count})
+        total_rows += rows_count
+    cleared_tables = [name for _, name in MAINTENANCE_TABLES]
+    if not keep_settings:
+        cleared_tables.append(SystemSettings.__table__.name)
+    return {
+        "items": items,
+        "total_rows": total_rows,
+        "tables_cleared": cleared_tables,
+        "will_keep": [
+            "Схема БД",
+            "Системные конфиги",
+            "Финансовые настройки" if keep_settings else "—",
+        ],
+    }
+
+
+async def _collect_referral_tree_ids(db: AsyncSession, root_user_id: int, max_levels: int = 10) -> tuple[list[int], dict[int, int]]:
+    """
+    Собирает всю реферальную ветку до max_levels уровней:
+    - all_ids: все уникальные id потомков (уровни 1..N)
+    - levels: карта user_id -> уровень в дереве
+    """
+    visited: set[int] = {root_user_id}
+    current_level_ids: list[int] = [root_user_id]
+    all_ids: list[int] = []
+    levels: dict[int, int] = {}
+    for level in range(1, max_levels + 1):
+        if not current_level_ids:
+            break
+        rows = await db.execute(select(User.id).where(User.referrer_id.in_(current_level_ids)))
+        raw_ids = [int(r[0]) for r in rows.all()]
+        dedup_ids = list(dict.fromkeys(raw_ids))
+        level_ids = [uid for uid in dedup_ids if uid not in visited]
+        if not level_ids:
+            current_level_ids = []
+            continue
+        for uid in level_ids:
+            levels[uid] = level
+        all_ids.extend(level_ids)
+        visited.update(level_ids)
+        current_level_ids = level_ids
+    return all_ids, levels
 
 
 def _settings_snapshot(row: SystemSettings) -> dict:
@@ -1941,17 +2043,17 @@ async def get_user_detail(
                 created_at=referrer.created_at,
             )
 
-    referrals_result = await db.execute(
-        select(User)
-        .where(User.referrer_id == u.id)
-        .order_by(desc(User.created_at))
-        .limit(5)
-    )
-    referrals_preview_users = list(referrals_result.scalars().all())
-    referrals_count_result = await db.execute(
-        select(func.count(User.id)).where(User.referrer_id == u.id)
-    )
-    referrals_count = int(referrals_count_result.scalar() or 0)
+    referral_tree_ids, _ = await _collect_referral_tree_ids(db, u.id, max_levels=10)
+    referrals_count = len(referral_tree_ids)
+    referrals_preview_users: list[User] = []
+    if referral_tree_ids:
+        referrals_result = await db.execute(
+            select(User)
+            .where(User.id.in_(referral_tree_ids))
+            .order_by(desc(User.created_at))
+            .limit(5)
+        )
+        referrals_preview_users = list(referrals_result.scalars().all())
     referrals_preview = []
     for r in referrals_preview_users:
         referrals_preview.append(
@@ -2919,44 +3021,213 @@ async def reset_test_data(
 
     confirm = str(body.get("confirm", "")).strip().upper()
     keep_settings = bool(body.get("keep_settings", True))
+    dry_run = bool(body.get("dry_run", False))
     if confirm != "RESET":
         raise HTTPException(status_code=400, detail="Подтверждение не пройдено. Передайте confirm=RESET")
+    if MAINTENANCE_RESET_LOCK.locked():
+        raise HTTPException(status_code=409, detail="Операция очистки уже выполняется. Повторите позже.")
+    async with MAINTENANCE_RESET_LOCK:
+        preview = await _maintenance_preview(db, keep_settings=keep_settings)
+        if dry_run:
+            await log_admin_action(
+                db=db,
+                admin_token_id=admin_token_id,
+                action_type="MAINTENANCE_RESET_DRY_RUN",
+                entity_type="DATABASE",
+                entity_id=0,
+            )
+            return {
+                "ok": True,
+                "dry_run": True,
+                **preview,
+                "keep_settings": keep_settings,
+            }
 
-    # Полная очистка данных, кроме system_settings (по умолчанию).
-    table_names = [
-        ReferralReward.__table__.name,
-        DealParticipation.__table__.name,
-        DealInvestment.__table__.name,
-        Deal.__table__.name,
-        WithdrawRequest.__table__.name,
-        WalletTransaction.__table__.name,
-        UserWallet.__table__.name,
-        LedgerTransaction.__table__.name,
-        PaymentWebhookEvent.__table__.name,
-        PaymentInvoice.__table__.name,
-        Invoice.__table__.name,
-        User.__table__.name,
-        AdminLog.__table__.name,
-    ]
-    if not keep_settings:
-        table_names.append(SystemSettings.__table__.name)
+        table_names = list(preview["tables_cleared"])
+        table_names_sql = ", ".join(f'"{name}"' for name in table_names)
+        await db.execute(text(f"TRUNCATE TABLE {table_names_sql} RESTART IDENTITY CASCADE"))
+        await db.flush()
 
-    table_names_sql = ", ".join(f'"{name}"' for name in table_names)
-    await db.execute(text(f"TRUNCATE TABLE {table_names_sql} RESTART IDENTITY CASCADE"))
-    await db.flush()
+        # После очистки оставляем один служебный лог о выполнении операции.
+        await log_admin_action(
+            db=db,
+            admin_token_id=admin_token_id,
+            action_type="MAINTENANCE_RESET_DATA",
+            entity_type="DATABASE",
+            entity_id=0,
+        )
 
-    # После очистки оставляем один служебный лог о выполнении операции.
+        return {
+            "ok": True,
+            "dry_run": False,
+            "tables_cleared": table_names,
+            "keep_settings": keep_settings,
+            "preview_before_reset": preview,
+        }
+
+
+@router.get("/maintenance/reset-data/summary")
+async def get_reset_data_summary(
+    request: Request,
+    keep_settings: bool = Query(True),
+    db: AsyncSession = Depends(get_db),
+):
+    admin_token_id, _ = await get_admin_context(request)
+    require_admin_role(request)
+    settings = get_settings()
+    env_name = _detect_environment(settings)
+    preview = await _maintenance_preview(db, keep_settings=keep_settings)
+    last_backup_q = await db.execute(
+        select(func.max(AdminLog.created_at)).where(AdminLog.action_type == "MAINTENANCE_BACKUP_CREATED")
+    )
+    last_backup_at = last_backup_q.scalar()
     await log_admin_action(
         db=db,
         admin_token_id=admin_token_id,
-        action_type="MAINTENANCE_RESET_DATA",
+        action_type="VIEW_MAINTENANCE_SUMMARY",
         entity_type="DATABASE",
         entity_id=0,
     )
-
     return {
-        "ok": True,
-        "tables_cleared": table_names,
+        "environment": env_name,
+        "database": _database_host_name(settings.database_url),
+        "backup_available": True,
+        "last_backup_at": last_backup_at.isoformat() if last_backup_at else None,
         "keep_settings": keep_settings,
+        **preview,
     }
+
+
+@router.post("/maintenance/backup")
+async def maintenance_backup_stub(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    admin_token_id, _ = await get_admin_context(request)
+    require_admin_role(request)
+    if MAINTENANCE_RESET_LOCK.locked():
+        raise HTTPException(status_code=409, detail="Сейчас выполняется другая maintenance-операция. Повторите позже.")
+
+    def _safe_value(v):
+        if isinstance(v, Decimal):
+            return str(v)
+        if isinstance(v, dt.datetime):
+            return v.isoformat()
+        return v
+
+    def _row_to_dict(row):
+        return {col.name: _safe_value(getattr(row, col.name)) for col in row.__table__.columns}
+
+    async with MAINTENANCE_RESET_LOCK:
+        snapshot_at = dt.datetime.now(dt.timezone.utc)
+        payload = {
+            "snapshot_at": snapshot_at.isoformat(),
+            "environment": _detect_environment(get_settings()),
+            "database": _database_host_name(get_settings().database_url),
+            "data": {},
+        }
+        for key, model in [
+            ("system_settings", SystemSettings),
+            ("users", User),
+            ("deals", Deal),
+            ("deal_participations", DealParticipation),
+            ("payment_invoices", PaymentInvoice),
+            ("withdraw_requests", WithdrawRequest),
+            ("ledger_transactions", LedgerTransaction),
+            ("admin_logs", AdminLog),
+            ("admin_login_events", AdminLoginEvent),
+            ("broadcast_messages", BroadcastMessage),
+            ("broadcast_deliveries", BroadcastDelivery),
+        ]:
+            rows = list((await db.execute(select(model))).scalars().all())
+            payload["data"][key] = [_row_to_dict(r) for r in rows]
+        await log_admin_action(
+            db=db,
+            admin_token_id=admin_token_id,
+            action_type="MAINTENANCE_BACKUP_CREATED",
+            entity_type="DATABASE",
+            entity_id=0,
+        )
+        file_name = f"invext_backup_{snapshot_at.strftime('%Y%m%d_%H%M%S')}.json"
+        body = json.dumps(payload, ensure_ascii=False, indent=2)
+        return PlainTextResponse(
+            content=body,
+            media_type="application/json",
+            headers={"Content-Disposition": f'attachment; filename="{file_name}"'},
+        )
+
+
+@router.post("/maintenance/clear-broadcasts")
+async def maintenance_clear_broadcasts(
+    request: Request,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    admin_token_id, _ = await get_admin_context(request)
+    require_admin_role(request)
+    confirm = str(body.get("confirm", "")).strip().upper()
+    if confirm != "CLEAR_BROADCASTS":
+        raise HTTPException(status_code=400, detail='Подтверждение не пройдено. Передайте confirm="CLEAR_BROADCASTS"')
+    if MAINTENANCE_RESET_LOCK.locked():
+        raise HTTPException(status_code=409, detail="Сейчас выполняется другая maintenance-операция. Повторите позже.")
+    async with MAINTENANCE_RESET_LOCK:
+        counts = {}
+        total = 0
+        for title, table_name in MAINTENANCE_BROADCAST_TABLES:
+            cnt = int((await db.execute(text(f'SELECT COUNT(*) FROM "{table_name}"'))).scalar() or 0)
+            counts[title] = cnt
+            total += cnt
+        table_names_sql = ", ".join(f'"{name}"' for _, name in MAINTENANCE_BROADCAST_TABLES)
+        await db.execute(text(f"TRUNCATE TABLE {table_names_sql} RESTART IDENTITY CASCADE"))
+        await db.flush()
+        await log_admin_action(
+            db=db,
+            admin_token_id=admin_token_id,
+            action_type="MAINTENANCE_CLEAR_BROADCASTS",
+            entity_type="DATABASE",
+            entity_id=0,
+        )
+        return {
+            "ok": True,
+            "cleared": counts,
+            "total_rows_cleared": total,
+        }
+
+
+@router.post("/maintenance/clear-logs")
+async def maintenance_clear_logs(
+    request: Request,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    admin_token_id, _ = await get_admin_context(request)
+    require_admin_role(request)
+    confirm = str(body.get("confirm", "")).strip().upper()
+    if confirm != "CLEAR_LOGS":
+        raise HTTPException(status_code=400, detail='Подтверждение не пройдено. Передайте confirm="CLEAR_LOGS"')
+    if MAINTENANCE_RESET_LOCK.locked():
+        raise HTTPException(status_code=409, detail="Сейчас выполняется другая maintenance-операция. Повторите позже.")
+
+    async with MAINTENANCE_RESET_LOCK:
+        counts = {}
+        total = 0
+        for title, table_name in MAINTENANCE_LOG_TABLES:
+            cnt = int((await db.execute(text(f'SELECT COUNT(*) FROM "{table_name}"'))).scalar() or 0)
+            counts[title] = cnt
+            total += cnt
+        table_names_sql = ", ".join(f'"{name}"' for _, name in MAINTENANCE_LOG_TABLES)
+        await db.execute(text(f"TRUNCATE TABLE {table_names_sql} RESTART IDENTITY CASCADE"))
+        await db.flush()
+        await log_admin_action(
+            db=db,
+            admin_token_id=admin_token_id,
+            action_type="MAINTENANCE_CLEAR_LOGS",
+            entity_type="DATABASE",
+            entity_id=0,
+        )
+        return {
+            "ok": True,
+            "cleared": counts,
+            "total_rows_cleared": total,
+        }
 

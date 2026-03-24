@@ -19,9 +19,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from src.models import Deal, DealParticipation, LedgerTransaction, ReferralReward, User
-from src.models.referral_reward import STATUS_MISSED
-from src.services.ledger_service import LEDGER_TYPE_REFERRAL_BONUS, get_balance_usdt
+from src.models import Deal, DealParticipation, ReferralReward, User
+from src.models.referral_reward import STATUS_MISSED, STATUS_PENDING
 
 # Инвестиционная линия: 10 уровней по 0.5%
 INVEST_REFERRAL_LEVEL_PERCENTS: List[Decimal] = [Decimal("0.5")] * 10
@@ -98,7 +97,8 @@ async def apply_referral_rewards_for_investment(
     Инвестиционная реферальная линия:
     - до 10 уровней, каждому уровню 0.5% от фактической прибыли инвестора по сделке
       (user_profit_usdt — то же, что profit_amount у участия после закрытия сделки);
-    - бонус начисляется только если реферер сам участвует в этой сделке;
+    - если реферер участвует в этой сделке -> создаётся PENDING бонус
+      (фактическое начисление происходит вместе с payout через 24 часа);
     - иначе фиксируется запись ReferralReward со статусом MISSED (упущенная прибыль).
 
     Вызывается из close_deal_flow после расчёта profit_amount по участию (не при вводе суммы инвестиции).
@@ -119,43 +119,23 @@ async def apply_referral_rewards_for_investment(
     participations = participations_result.scalars().all()
     participant_user_ids = {p.user_id for p in participations}
 
-    # Защита от двойного начисления:
-    # собираем уже созданные бонусы по этой сделке/инвестору и пропускаем дубли.
+    # Защита от дублей:
+    # собираем уже созданные referral_rewards по этой сделке/инвестору и пропускаем дубли.
     referrer_ids = [r.id for r in referrers]
-    existing_bonus_result = await db.execute(
-        select(LedgerTransaction.user_id, LedgerTransaction.metadata_json).where(
-            LedgerTransaction.type == LEDGER_TYPE_REFERRAL_BONUS,
-            LedgerTransaction.user_id.in_(referrer_ids),
-        )
-    )
-    existing_bonus_keys: set[tuple[int, int]] = set()
-    for to_user_id, meta in existing_bonus_result.all():
-        if not isinstance(meta, dict):
-            continue
-        if meta.get("source") != "investment":
-            continue
-        if int(meta.get("deal_id", 0) or 0) != deal.id:
-            continue
-        if int(meta.get("from_user_id", 0) or 0) != investor.id:
-            continue
-        lvl = int(meta.get("level", 0) or 0)
-        if lvl > 0:
-            existing_bonus_keys.add((int(to_user_id), lvl))
-
-    existing_missed_result = await db.execute(
+    existing_rewards_result = await db.execute(
         select(ReferralReward.to_user_id, ReferralReward.level).where(
             ReferralReward.deal_id == deal.id,
             ReferralReward.from_user_id == investor.id,
+            ReferralReward.to_user_id.in_(referrer_ids),
         )
     )
-    existing_missed_keys = {(int(r[0]), int(r[1])) for r in existing_missed_result.all()}
+    existing_reward_keys = {(int(r[0]), int(r[1])) for r in existing_rewards_result.all()}
 
     for level_index, referrer in enumerate(referrers):
         level = level_index + 1
         if level > len(INVEST_REFERRAL_LEVEL_PERCENTS):
             break
-        already_paid = (referrer.id, level) in existing_bonus_keys
-        if already_paid:
+        if (referrer.id, level) in existing_reward_keys:
             continue
 
         pct = INVEST_REFERRAL_LEVEL_PERCENTS[level_index]
@@ -165,31 +145,16 @@ async def apply_referral_rewards_for_investment(
 
         # Проверяем: сам ли реферер участвует в этой сделке.
         if referrer.id in participant_user_ids:
-            # Начисляем бонус в ledger.
-            ledger_tx = LedgerTransaction(
-                user_id=referrer.id,
-                type=LEDGER_TYPE_REFERRAL_BONUS,
-                amount_usdt=reward_amount,
-                metadata_json={
-                    "source": "investment",
-                    "from_user_id": investor.id,
-                    "level": level,
-                    "deal_id": deal.id,
-                    "user_profit_usdt": str(user_profit_usdt),
-                    "bonus_amount": str(reward_amount),
-                },
+            pending = ReferralReward(
+                deal_id=deal.id,
+                from_user_id=investor.id,
+                to_user_id=referrer.id,
+                level=level,
+                amount=reward_amount,
+                status=STATUS_PENDING,
             )
-            db.add(ledger_tx)
-            await db.flush()
-
-            referrer_user = await db.get(User, referrer.id)
-            if referrer_user:
-                new_balance = await get_balance_usdt(db, referrer_user.id)
-                referrer_user.balance_usdt = new_balance
+            db.add(pending)
         else:
-            # Фиксируем упущенную прибыль.
-            if (referrer.id, level) in existing_missed_keys:
-                continue
             missed = ReferralReward(
                 deal_id=deal.id,
                 from_user_id=investor.id,
