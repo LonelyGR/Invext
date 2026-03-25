@@ -241,6 +241,8 @@ async def admin_open_deal_now(
     if active:
         raise HTTPException(status_code=400, detail=f"Уже есть активная сделка #{active.number}")
 
+    # Важно: используем транзакцию, иначе Deal может не быть закоммичен,
+    # и бот/сайт временно будут видеть "нет активного сбора".
     await process_pending_payouts(db)
     from zoneinfo import ZoneInfo
 
@@ -253,7 +255,8 @@ async def admin_open_deal_now(
     start_at = start_local.astimezone(dt.timezone.utc)
     end_at = close_local.astimezone(dt.timezone.utc)
 
-    deal = await open_new_deal(db, start_at=start_at, end_at=end_at)
+    async with db.begin():
+        deal = await open_new_deal(db, start_at=start_at, end_at=end_at)
     users_result = await db.execute(select(User.telegram_id).where(User.telegram_id.isnot(None)))
     telegram_ids = [r[0] for r in users_result.all() if r[0]]
     await broadcast_deal_opened(telegram_ids, deal.number, close_at=deal.end_at)

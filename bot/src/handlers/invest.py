@@ -58,8 +58,19 @@ def _make_deal_lines(items: list[dict]) -> list[str]:
     lines: list[str] = []
     for item in items[:3]:
         deal_number = item.get("deal_number")
-        amount = item.get("amount_usdt")
-        status = item.get("status")
+        amount_raw = item.get("amount_usdt")
+        try:
+            amount = f"{float(amount_raw):.2f}"
+        except (TypeError, ValueError):
+            amount = str(amount_raw or "0")
+
+        status_raw = str(item.get("status") or "")
+        status_map = {
+            "active": "🟢 Участвуете",
+            "in_progress_payout": "⏳ Ожидается выплата",
+            "completed": "✅ Выплачено",
+        }
+        status = status_map.get(status_raw, "ℹ️ Обработка")
         payout_at = _format_payout_at(item.get("payout_at"))
         lines.append(
             f"• #{deal_number}: {amount} USDT • {status} • Выплата: {payout_at}"

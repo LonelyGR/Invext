@@ -126,28 +126,6 @@ def wallet_coin_kb() -> InlineKeyboardMarkup:
         ]
     )
 
-
-def turnover_main_kb() -> InlineKeyboardMarkup:
-    """Оборот команды: Обновить данные, Подробная статистика, Назад."""
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="🔄 Обновить данные", callback_data="turnover_update")],
-            [InlineKeyboardButton(text="📊 Подробная статистика", callback_data="turnover_detail")],
-            [InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_menu")],
-        ]
-    )
-
-
-def turnover_detail_kb() -> InlineKeyboardMarkup:
-    """Экран «Подробная статистика»: Общий оборот, Назад."""
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="📊 Общий оборот", callback_data="turnover_total")],
-            [InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_menu")],
-        ]
-    )
-
-
 def partners_main_kb(share_url: str | None = None) -> InlineKeyboardMarkup:
     """Партнёры: Моя команда, Реферальные бонусы, Поделиться ссылкой (нативный share), Назад."""
     rows = [

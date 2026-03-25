@@ -21,7 +21,6 @@ from src.handlers import (
     deposit,
     withdraw,
     partners,
-    team_turnover,
     stats,
     invest,
     back,
@@ -84,7 +83,6 @@ async def main() -> None:
     dp.include_router(deposit.router)
     dp.include_router(withdraw.router)
     dp.include_router(partners.router)
-    dp.include_router(team_turnover.router)
     dp.include_router(stats.router)
     dp.include_router(invest.router)
     dp.include_router(back.router)

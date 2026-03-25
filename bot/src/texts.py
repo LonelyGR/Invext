@@ -8,6 +8,19 @@ from __future__ import annotations
 from typing import Iterable, Mapping, Any
 
 
+# === formatting helpers ===
+
+def _fmt_usdt(value: Any) -> str:
+    """
+    Формат денег для UI: всегда 2 знака после запятой.
+    Не влияет на расчёты — только отображение.
+    """
+    try:
+        return f"{float(value):.2f}"
+    except (TypeError, ValueError):
+        return "0.00"
+
+
 # === /start, приветствие ===
 
 WELCOME_ABOUT = """📊 <b>О проекте</b>
@@ -33,8 +46,7 @@ def format_personal_data(
     ref_link: str | None = None,
 ) -> str:
     """Формирует блок «Личные данные» для второго сообщения при /start."""
-    usdt = float(balances.get("USDT", 0) or 0)
-    usdt_s = f"{usdt:.2f}"
+    usdt_s = _fmt_usdt(balances.get("USDT", 0) or 0)
 
     name = me.get("name") or me.get("username") or "не указано"
     email = me.get("email") or "не указано"
@@ -72,7 +84,7 @@ def make_balance_text(usdt: Any) -> str:
     """Основной экран раздела «Баланс»."""
     return (
         "💰 <b>Баланс</b>\n\n"
-        f"USDT: {usdt}\n\n"
+        f"USDT: {_fmt_usdt(usdt)}\n\n"
         "📌 Реферальные бонусы уже включены в баланс\n"
         "Вы можете использовать их для инвестиций или вывести в любой момент."
     )
@@ -103,7 +115,7 @@ def make_deposit_invoice_text(amount: Any) -> str:
     return (
         "💳 <b>Пополнение через NOWPayments</b>\n\n"
         
-        f"💰 Сумма: <b>{amount} USD</b>\n"
+        f"💰 Сумма: <b>{_fmt_usdt(amount)} USD</b>\n"
         "Сеть: BEP20 (USDT)\n\n"
         
         "📌 Как оплатить:\n"
@@ -140,7 +152,7 @@ def make_deposit_history_list_text(items: Iterable[Mapping[str, Any]]) -> str:
                 dt_str = " " + str(inv["created_at"])[:16].replace("T", " ")
             except Exception:
                 dt_str = ""
-        lines.append(f"• +{inv.get('amount', 0)} USDT — {st}{cred}{dt_str}")
+        lines.append(f"• +{_fmt_usdt(inv.get('amount', 0))} USDT — {st}{cred}{dt_str}")
     text = "\n".join(lines)
     if len(text) > 4000:
         text = "\n".join(lines[:12]) + "\n\n… и ещё."
@@ -237,8 +249,8 @@ def make_invest_success_text(invested: Any, new_balance: Any, payout_hint: str |
     return (
         "✅ <b>Инвестиция принята</b>\n\n"
         
-        f"💰 Сумма: {invested} USDT\n"
-        f"📊 Баланс: {new_balance} USDT\n\n"
+        f"💰 Сумма: {_fmt_usdt(invested)} USDT\n"
+        f"📊 Баланс: {_fmt_usdt(new_balance)} USDT\n\n"
         f"{payout_line}"
         "Средства участвуют в текущей сделке.\n"
         "Прибыль будет начислена в течение 24 часов после закрытия сбора. (За исключением выходных)"
@@ -295,26 +307,10 @@ def make_partners_team_text(me: Mapping[str, Any]) -> str:
             count = me.get("referrals_count", 0)
         levels_lines.append(f"{level} уровень — {int(count or 0)}")
 
-    team_usdt = me.get("team_deposits_usdt", "0") or "0"
-    try:
-        team_float = float(team_usdt)
-    except (TypeError, ValueError):
-        team_float = 0.0
-    lines = [
-        "<b>📊 Моя команда</b>\n\n"
-        + "\n".join(levels_lines)
-        + "\n\n"
-        f"💎 Оборот команды: {team_float:.2f} USDT"
-    ]
-    return "\n".join(lines)
+    return "<b>📊 Моя команда</b>\n\n" + "\n".join(levels_lines)
 
 
 def make_partners_bonuses_text(me: Mapping[str, Any]) -> str:
-    team_usdt = me.get("team_deposits_usdt", "0") or "0"
-    try:
-        team_float = float(team_usdt)
-    except (TypeError, ValueError):
-        team_float = 0.0
     lines: list[str] = []
     for level in range(1, 11):
         count = me.get(f"referrals_level_{level}", 0)
@@ -326,44 +322,8 @@ def make_partners_bonuses_text(me: Mapping[str, Any]) -> str:
         "🎁 <b>Реферальные бонусы</b>\n\n"
         + "\n".join(lines)
         + "\n\n"
-        f"💎 Оборот команды: {team_float:.2f} USDT\n\n"
         "📌 Бонус: 0.5% от прибыли реферала по сделке на каждом уровне\n"
         "Начисляется, только если вы участвуете в той же сделке"
-    )
-
-
-def make_team_turnover_main_text(me: Mapping[str, Any]) -> str:
-    usdt = me.get("team_deposits_usdt", "0") or "0"
-    try:
-        total = float(usdt)
-    except (TypeError, ValueError):
-        total = 0.0
-    return (
-        "📊 <b>Оборот команды</b>\n\n"
-        
-        f"💎 Общий оборот: {total:.2f} USDT"
-    )
-
-
-def make_team_turnover_detail_text(me: Mapping[str, Any]) -> str:
-    usdt = me.get("team_deposits_usdt", "0") or "0"
-    try:
-        usdt_f = float(usdt)
-    except (TypeError, ValueError):
-        usdt_f = 0.0
-    levels_lines: list[str] = []
-    for level in range(1, 11):
-        count = me.get(f"referrals_level_{level}", 0)
-        if level == 1 and not count:
-            count = me.get("referrals_count", 0)
-        levels_lines.append(f"{level} уровень — {int(count or 0)} чел.")
-    levels_block = "\n".join(levels_lines)
-
-    return (
-        "📈 <b>Статистика команды</b>\n\n"
-        "👥 Рефералы по уровням:\n\n"
-        f"{levels_block}\n\n"
-        f"💎 Общий оборот команды: {usdt_f:.2f} USDT\n"
     )
 
 
@@ -384,18 +344,18 @@ def make_stats_text(me: Mapping[str, Any]) -> str:
         "📊 <b>Статистика</b>\n\n"
         
         "💰 <b>Баланс</b>\n"
-        f"{balance_usdt} USDT\n\n"
+        f"{_fmt_usdt(balance_usdt)} USDT\n\n"
         
         "💳 <b>Депозиты</b>\n"
-        f"{d_usdt} USDT\n\n"
+        f"{_fmt_usdt(d_usdt)} USDT\n\n"
         
         "💸 <b>Выводы</b>\n"
-        f"{w_usdt} USDT\n\n"
+        f"{_fmt_usdt(w_usdt)} USDT\n\n"
         
         "📈 <b>Инвестиции и прибыль</b>\n"
-        f"Инвестировано: {invested_total} USDT\n"
-        f"Прибыль: {profit_total} USDT\n"
-        f"Реферальный доход: {referral_income} USDT\n\n"
+        f"Инвестировано: {_fmt_usdt(invested_total)} USDT\n"
+        f"Прибыль: {_fmt_usdt(profit_total)} USDT\n"
+        f"Реферальный доход: {_fmt_usdt(referral_income)} USDT\n\n"
         
         "📄 <b>Заявки</b>\n"
         f"Пополнения: {deposits_count}\n"
@@ -412,11 +372,7 @@ def make_profile_text(me: Mapping[str, Any], usdt: Any, ref_link: str | None = N
     country = me.get("country") or "не указано"
     referrals_count = me.get("referrals_count", 0)
 
-    invested_raw = me.get("invested_total_usdt", "0")
-    try:
-        invested = f"{float(invested_raw):.2f}"
-    except (TypeError, ValueError):
-        invested = "0.00"
+    invested = _fmt_usdt(me.get("invested_total_usdt", "0"))
 
     if ref_link:
         ref_part = f"🔗 <b>Реферальная ссылка</b>\n{ref_link}"
@@ -427,7 +383,7 @@ def make_profile_text(me: Mapping[str, Any], usdt: Any, ref_link: str | None = N
         "👤 <b>Профиль</b>\n\n"
         
         "💰 <b>Баланс</b>\n"
-        f"{usdt} USDT\n\n"
+        f"{_fmt_usdt(usdt)} USDT\n\n"
         
         "🔒 <b>В инвестициях</b>\n"
         f"{invested} USDT\n\n"
