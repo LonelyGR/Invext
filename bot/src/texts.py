@@ -270,6 +270,42 @@ def make_invest_deals_split_text(
     )
 
 
+def make_invest_deals_dashboard_text(
+    *,
+    active_deal_number: Any | None,
+    balance_usdt: Any,
+    participate_amount_usdt: Any | None,
+    in_work_lines: list[str],
+    history_lines: list[str],
+) -> str:
+    sep = "────────────────"
+
+    header_lines: list[str] = []
+    if active_deal_number is not None:
+        header_lines.append(f"🚀 <b>Сделка №{active_deal_number} открыта</b>\n")
+        header_lines.append(f"💰 Ваш баланс: <b>{_fmt_usdt(balance_usdt)} USDT</b>\n")
+        if participate_amount_usdt is not None:
+            header_lines.append(f"💵 Сумма участия: <b>{_fmt_usdt(participate_amount_usdt)} USDT</b>\n")
+        header_lines.append("👉 Нажмите «Участвовать», чтобы войти в сделку")
+    else:
+        header_lines.append("📭 <b>Сейчас нет активного сбора</b>\n")
+        header_lines.append("Ожидайте уведомление о новом сборе.")
+
+    in_work_block = "\n".join(in_work_lines) if in_work_lines else "—"
+    history_block = "\n".join(history_lines) if history_lines else "—"
+
+    return (
+        "\n".join(header_lines).strip()
+        + f"\n\n{sep}\n\n"
+        "📊 <b>Ваши средства</b>\n\n"
+        "🔥 <b>Сейчас в работе:</b>\n"
+        f"{in_work_block}\n\n"
+        f"{sep}\n\n"
+        "✅ <b>История выплат:</b>\n"
+        f"{history_block}"
+    )
+
+
 # === Партнёрка / команда / бонусы ===
 
 def make_partners_main_text(me: Mapping[str, Any], link: str | None, levels: list[tuple[float, str]]) -> str:

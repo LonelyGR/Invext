@@ -21,6 +21,7 @@ from src.texts import (
     make_invest_deals_split_text,
     make_invest_enter_amount_text,
     make_invest_success_text,
+    make_invest_deals_dashboard_text,
 )
 import logging
 
@@ -78,6 +79,45 @@ def _make_deal_lines(items: list[dict]) -> list[str]:
     return lines
 
 
+def _format_date_short(iso_str: str | None) -> str:
+    if not iso_str:
+        return ""
+    try:
+        dt_obj = datetime.fromisoformat(str(iso_str).replace("Z", "+00:00"))
+        return dt_obj.strftime("%d.%m")
+    except Exception:
+        return str(iso_str)[:10]
+
+
+def _build_in_work_lines(active_items: list[dict]) -> list[str]:
+    lines: list[str] = []
+    for item in active_items[:1]:
+        deal_number = item.get("deal_number")
+        amount_raw = item.get("amount_usdt")
+        try:
+            amount = f"{float(amount_raw):.2f}"
+        except (TypeError, ValueError):
+            amount = str(amount_raw or "0.00")
+        payout_at = _format_payout_at(item.get("payout_at"))
+        lines.append(f"• Сделка #{deal_number} — <b>{amount} USDT</b>\n⏳ Выплата: {payout_at}")
+    return lines
+
+
+def _build_history_lines(completed_items: list[dict]) -> list[str]:
+    lines: list[str] = []
+    for item in completed_items[:3]:
+        deal_number = item.get("deal_number")
+        amount_raw = item.get("amount_usdt")
+        try:
+            amount = f"{float(amount_raw):.2f}"
+        except (TypeError, ValueError):
+            amount = str(amount_raw or "0.00")
+        d = _format_date_short(item.get("payout_at"))
+        date_part = f" {d}" if d else ""
+        lines.append(f"#{deal_number} — <b>{amount} USDT</b> ✔️{date_part}")
+    return lines
+
+
 def _extract_invest_mode(settings: dict) -> tuple[str, Decimal, Decimal]:
     """
     Возвращает:
@@ -107,30 +147,33 @@ async def invest_section(message: Message, state: FSMContext):
         return
 
     usdt = float(balances.get("USDT", 0) or 0)
-    available_usdt = f"{usdt:.2f}"
 
     if active.get("active") and active.get("deal_number"):
         deal_number = active["deal_number"]
         mode, min_invest, max_invest = _extract_invest_mode(settings)
         if mode == "fixed":
-            amount_hint = f"💵 <b>Сбор в размере:</b> {min_invest} USD"
-            action_hint = "После нажатия «Участвовать» сумма спишется автоматически."
             participate_amount = min_invest
         else:
-            amount_hint = f"💵 <b>Сумма участия:</b> от {min_invest} до {max_invest} USD"
-            action_hint = "Минимальная сумма будет показана при вводе."
             participate_amount = None
-        text = make_invest_main_text_with_deal(deal_number, available_usdt, amount_hint, action_hint)
-        text += make_invest_deals_split_text(
-            _make_deal_lines(my_deals.get("active_deals", [])),
-            _make_deal_lines(my_deals.get("completed_deals", [])),
+        in_work_lines = _build_in_work_lines(my_deals.get("active_deals", []))
+        history_lines = _build_history_lines(my_deals.get("completed_deals", []))
+        text = make_invest_deals_dashboard_text(
+            active_deal_number=deal_number,
+            balance_usdt=usdt,
+            participate_amount_usdt=participate_amount,
+            in_work_lines=in_work_lines,
+            history_lines=history_lines,
         )
         await message.answer(text, reply_markup=_invest_deal_kb(with_participate=True, fixed_amount=participate_amount))
     else:
-        text = make_invest_main_text_no_deal()
-        text += make_invest_deals_split_text(
-            _make_deal_lines(my_deals.get("active_deals", [])),
-            _make_deal_lines(my_deals.get("completed_deals", [])),
+        in_work_lines = _build_in_work_lines(my_deals.get("active_deals", []))
+        history_lines = _build_history_lines(my_deals.get("completed_deals", []))
+        text = make_invest_deals_dashboard_text(
+            active_deal_number=None,
+            balance_usdt=usdt,
+            participate_amount_usdt=None,
+            in_work_lines=in_work_lines,
+            history_lines=history_lines,
         )
         await state.clear()
         await message.answer(text, reply_markup=_invest_deal_kb(with_participate=False))
@@ -235,33 +278,36 @@ async def open_invest_from_reminder(callback: CallbackQuery, state: FSMContext):
         return
 
     usdt = float(balances.get("USDT", 0) or 0)
-    available_usdt = f"{usdt:.2f}"
 
     if active.get("active") and active.get("deal_number"):
         deal_number = active["deal_number"]
         mode, min_invest, max_invest = _extract_invest_mode(settings)
         if mode == "fixed":
-            amount_hint = f"💵 <b>Сбор в размере:</b> {min_invest} USD"
-            action_hint = "После нажатия «Участвовать» сумма спишется автоматически."
             participate_amount = min_invest
         else:
-            amount_hint = f"💵 <b>Сумма участия:</b> от {min_invest} до {max_invest} USD"
-            action_hint = "Минимальная сумма будет показана при вводе."
             participate_amount = None
-        text = make_invest_main_text_with_deal(deal_number, available_usdt, amount_hint, action_hint)
-        text += make_invest_deals_split_text(
-            _make_deal_lines(my_deals.get("active_deals", [])),
-            _make_deal_lines(my_deals.get("completed_deals", [])),
+        in_work_lines = _build_in_work_lines(my_deals.get("active_deals", []))
+        history_lines = _build_history_lines(my_deals.get("completed_deals", []))
+        text = make_invest_deals_dashboard_text(
+            active_deal_number=deal_number,
+            balance_usdt=usdt,
+            participate_amount_usdt=participate_amount,
+            in_work_lines=in_work_lines,
+            history_lines=history_lines,
         )
         await callback.message.answer(
             text,
             reply_markup=_invest_deal_kb(with_participate=True, fixed_amount=participate_amount),
         )
     else:
-        text = make_invest_main_text_no_deal()
-        text += make_invest_deals_split_text(
-            _make_deal_lines(my_deals.get("active_deals", [])),
-            _make_deal_lines(my_deals.get("completed_deals", [])),
+        in_work_lines = _build_in_work_lines(my_deals.get("active_deals", []))
+        history_lines = _build_history_lines(my_deals.get("completed_deals", []))
+        text = make_invest_deals_dashboard_text(
+            active_deal_number=None,
+            balance_usdt=usdt,
+            participate_amount_usdt=None,
+            in_work_lines=in_work_lines,
+            history_lines=history_lines,
         )
         await callback.message.answer(text, reply_markup=_invest_deal_kb(with_participate=False))
     await callback.answer()
