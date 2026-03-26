@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.db.session import get_db
 from src.models import User
 from src.schemas.withdraw import WithdrawRequestIn, WithdrawRequestResponse
+from src.services.settings_service import get_system_settings
 from src.services.withdraw_service import create_withdraw_request, get_my_withdrawals
 
 router = APIRouter(prefix="/v1/withdrawals", tags=["withdrawals"])
@@ -19,6 +20,12 @@ async def create_withdraw(
     db: AsyncSession = Depends(get_db),
 ):
     """Создать заявку на вывод (PENDING). Проверяется баланс."""
+    sys_settings = await get_system_settings(db)
+    if not getattr(sys_settings, "allow_withdrawals", True):
+        raise HTTPException(
+            status_code=400,
+            detail="На данный момент вывод недоступен по техническим причинам. Пожалуйста, ожидайте.",
+        )
     result = await db.execute(select(User).where(User.telegram_id == body.telegram_id))
     user = result.scalar_one_or_none()
     if user is not None and getattr(user, "is_blocked", False):

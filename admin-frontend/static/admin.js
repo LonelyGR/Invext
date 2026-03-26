@@ -491,6 +491,19 @@ async function loadDashboard() {
     const topReferrers = ext?.top_referrers || [];
     const dau24h = Number(ext?.dau_24h || 0);
     const anomalyAlerts = ext?.anomaly_alerts || [];
+    const systemIssues = [];
+    if (data.pending_withdrawals_count > 30) {
+      systemIssues.push(`Высокая очередь выводов: ${data.pending_withdrawals_count}`);
+    }
+    for (const a of anomalyAlerts) {
+      const msg = String(a?.message || "").trim();
+      if (msg) systemIssues.push(msg);
+    }
+    const uniqueSystemIssues = [...new Set(systemIssues)];
+    const computedSystemStatus =
+      uniqueSystemIssues.length > 0
+        ? { text: "Проблемы", cls: "status-expired" }
+        : systemStatus;
     const labels = buildDateSeries(dayCount);
     const allLogRows = [...(logsCurrent.items || []), ...(logsPrev.items || []), ...(logsData.items || [])];
     const heatmapBuckets = {};
@@ -709,10 +722,15 @@ async function loadDashboard() {
         <div class="panel-card">
           <h3 class="dashboard-panel-title">Состояние системы</h3>
           <ul class="health-list">
-            <li>Статус: <span class="status-badge ${systemStatus.cls}">${systemStatus.text}</span></li>
+            <li>Статус: <span class="status-badge ${computedSystemStatus.cls}">${computedSystemStatus.text}</span></li>
             <li>Активная сделка: <strong>${data.active_deal_number ? "да" : "нет"}</strong></li>
             <li>Закрытие текущей сделки: <strong>${activeDealCloseText}</strong></li>
             <li>Ожидают вывода: <strong>${data.pending_withdrawals_count}</strong></li>
+            ${
+              uniqueSystemIssues.length
+                ? `<li>Причины: <strong>${uniqueSystemIssues.map((x) => escapeHtmlAttr(x)).join(" • ")}</strong></li>`
+                : ""
+            }
           </ul>
         </div>
         <div class="panel-card">
@@ -2870,7 +2888,12 @@ async function loadSettings() {
                   <div class="settings-label">Лимиты вывода</div>
                   <div class="settings-hint">Настройка минимальной/максимальной суммы вывода</div>
                 </div>
+                <label class="switch settings-inline-switch">
+                  <input type="checkbox" id="allow_withdrawals" ${s.allow_withdrawals !== false ? "checked" : ""} />
+                  <span class="switch-slider"></span>
+                </label>
               </div>
+              <div class="settings-inline-hint">Разрешить выводы</div>
               <div class="limit-mode-segment" id="mode_segment_withdraw">
                 <button type="button" class="limit-mode-btn" data-entity="withdraw" data-mode="fixed">Фиксированная сумма</button>
                 <button type="button" class="limit-mode-btn" data-entity="withdraw" data-mode="range">Диапазон</button>
@@ -3154,6 +3177,7 @@ async function loadSettings() {
       }
       payloadValues.allow_deposits = Boolean(document.getElementById("allow_deposits")?.checked);
       payloadValues.allow_investments = Boolean(document.getElementById("allow_investments")?.checked);
+      payloadValues.allow_withdrawals = Boolean(document.getElementById("allow_withdrawals")?.checked);
       return payloadValues;
     };
 
@@ -3192,7 +3216,7 @@ async function loadSettings() {
         updateSettingsSaveState();
       });
     });
-    ["allow_deposits", "allow_investments"].forEach((id) => {
+    ["allow_deposits", "allow_investments", "allow_withdrawals"].forEach((id) => {
       document.getElementById(id)?.addEventListener("change", updateSettingsSaveState);
     });
     setMode("deposit", initialModes.deposit);
@@ -3218,7 +3242,7 @@ async function loadSettings() {
         "fixed_deposit_usdt","min_deposit_usdt","max_deposit_usdt",
         "fixed_withdraw_usdt","min_withdraw_usdt","max_withdraw_usdt",
         "fixed_invest_usdt","min_invest_usdt","max_invest_usdt",
-        "allow_deposits","allow_investments",
+        "allow_deposits","allow_investments","allow_withdrawals",
       ].forEach((id) => setInput(id, payload[id]));
       updateSummaries();
       updateSettingsSaveState();
@@ -3240,6 +3264,7 @@ async function loadSettings() {
       });
       payload.allow_deposits = Boolean(document.getElementById("allow_deposits")?.checked);
       payload.allow_investments = Boolean(document.getElementById("allow_investments")?.checked);
+      payload.allow_withdrawals = Boolean(document.getElementById("allow_withdrawals")?.checked);
       return payload;
     };
     const readSettingsPresets = () => {
@@ -3359,6 +3384,7 @@ async function loadSettings() {
             max_invest_usdt: Number(s.max_invest_usdt),
             allow_deposits: Boolean(s.allow_deposits),
             allow_investments: Boolean(s.allow_investments),
+            allow_withdrawals: Boolean(s.allow_withdrawals !== false),
           };
           const labels = {
             min_deposit_usdt: "Мин. депозит",
@@ -3369,6 +3395,7 @@ async function loadSettings() {
             max_invest_usdt: "Макс. инвестиция",
             allow_deposits: "Пополнения",
             allow_investments: "Участие в сделках",
+            allow_withdrawals: "Выводы",
           };
           const changedLines = Object.keys(before)
             .filter((k) => String(before[k]) !== String(payloadValues[k]))

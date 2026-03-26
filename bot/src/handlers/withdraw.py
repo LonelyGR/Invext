@@ -31,6 +31,13 @@ class WithdrawStates(StatesGroup):
 
 @router.message(F.text == "📤 Вывести")
 async def withdraw_start(message: Message, state: FSMContext):
+    try:
+        settings = await api.get_system_settings()
+        if settings.get("allow_withdrawals") is False:
+            await message.answer("На данный момент вывод недоступен по техническим причинам. Пожалуйста, ожидайте.")
+            return
+    except Exception:
+        pass
     await state.clear()
     await state.set_state(WithdrawStates.choosing_currency)
     await message.answer(

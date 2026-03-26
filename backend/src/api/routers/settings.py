@@ -34,6 +34,7 @@ async def get_system_settings_admin(
         "deal_amount_usdt": str(row.deal_amount_usdt),
         "allow_deposits": bool(row.allow_deposits),
         "allow_investments": bool(row.allow_investments),
+        "allow_withdrawals": bool(getattr(row, "allow_withdrawals", True)),
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
     }
 
@@ -60,6 +61,7 @@ async def update_system_setting_field(
         "deal_amount_usdt",
         "allow_deposits",
         "allow_investments",
+        "allow_withdrawals",
     }
     if field not in allowed_fields:
         raise HTTPException(
@@ -71,7 +73,7 @@ async def update_system_setting_field(
         result = await db.execute(select(SystemSettings).limit(1).with_for_update())
         row = result.scalar_one()
 
-        if field in {"allow_deposits", "allow_investments"}:
+        if field in {"allow_deposits", "allow_investments", "allow_withdrawals"}:
             value_raw = payload.get("value")
             if isinstance(value_raw, bool):
                 bool_value = value_raw
@@ -88,8 +90,10 @@ async def update_system_setting_field(
                     )
             if field == "allow_deposits":
                 row.allow_deposits = bool_value
-            else:
+            elif field == "allow_investments":
                 row.allow_investments = bool_value
+            else:
+                row.allow_withdrawals = bool_value
         else:
             try:
                 value = Decimal(raw_value)

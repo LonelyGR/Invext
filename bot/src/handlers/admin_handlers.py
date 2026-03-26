@@ -417,11 +417,11 @@ async def admin_ledger_adjust_callback(callback: CallbackQuery):
         return
 
     parts = (callback.data or "").split(":")
-    if len(parts) < 4:
+    if len(parts) < 5:
         await callback.answer(make_admin_invalid_request_data_text())
         return
 
-    _, action, user_id_str, amount_str = parts[:4]
+    _, action, user_id_str, amount_str, request_tag = parts[:5]
     try:
         user_id = int(user_id_str)
     except ValueError:
@@ -430,14 +430,21 @@ async def admin_ledger_adjust_callback(callback: CallbackQuery):
 
     if action == "approve":
         try:
-            await api.admin_ledger_adjust(
+            result = await api.admin_ledger_adjust(
                 user_id=user_id,
                 amount_usdt=amount_str,
                 comment=None,
+                request_tag=request_tag,
                 decided_by_telegram_id=callback.from_user.id,
             )
-            await callback.message.edit_text(callback.message.text + "\n\n✅ Коррекция применена.")
-            await callback.answer(make_admin_ledger_applied_text())
+            if result.get("already_processed"):
+                by_admin = result.get("decided_by_telegram_id")
+                by_line = f" админом {by_admin}" if by_admin else ""
+                await callback.message.edit_text(callback.message.text + f"\n\nℹ️ Уже обработано{by_line}.")
+                await callback.answer("Уже обработано")
+            else:
+                await callback.message.edit_text(callback.message.text + "\n\n✅ Коррекция применена.")
+                await callback.answer(make_admin_ledger_applied_text())
         except Exception as e:
             await callback.message.edit_text(f"{callback.message.text}\n\n❌ Ошибка применения: {e}")
             await callback.answer(make_admin_ledger_apply_error_text())

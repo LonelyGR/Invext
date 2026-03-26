@@ -116,6 +116,7 @@ SYSTEM_SETTINGS_FIELDS = (
     "max_invest_usdt",
     "allow_deposits",
     "allow_investments",
+    "allow_withdrawals",
 )
 SYSTEM_SETTINGS_DEFAULTS = {
     "min_deposit_usdt": "10",
@@ -126,6 +127,7 @@ SYSTEM_SETTINGS_DEFAULTS = {
     "max_invest_usdt": "100000",
     "allow_deposits": True,
     "allow_investments": True,
+    "allow_withdrawals": True,
 }
 MAINTENANCE_RESET_LOCK = asyncio.Lock()
 MAINTENANCE_TABLES = [
@@ -288,6 +290,7 @@ def _settings_snapshot(row: SystemSettings) -> dict:
         "max_invest_usdt": str(row.max_invest_usdt),
         "allow_deposits": bool(row.allow_deposits),
         "allow_investments": bool(row.allow_investments),
+        "allow_withdrawals": bool(getattr(row, "allow_withdrawals", True)),
     }
 
 
@@ -307,7 +310,7 @@ def _validate_full_settings_payload(payload: dict) -> dict:
     for field in SYSTEM_SETTINGS_FIELDS:
         if field not in payload:
             raise HTTPException(status_code=400, detail=f"Missing field: {field}")
-        if field in {"allow_deposits", "allow_investments"}:
+        if field in {"allow_deposits", "allow_investments", "allow_withdrawals"}:
             parsed[field] = _coerce_bool(payload.get(field))
             continue
         raw = str(payload.get(field, "")).replace(",", ".").strip()
@@ -2266,18 +2269,20 @@ async def user_ledger_adjust(
     amount = body.amount_usdt
     amount_str = str(amount)
     comment = body.comment or ""
+    request_tag = uuid.uuid4().hex[:10]
 
     text = (
         "⚠️ Запрос ручной корректировки баланса\n\n"
         f"user_id: {user.id}\n"
         f"telegram_id: {user.telegram_id}\n"
         f"Сумма: {amount_str} USDT\n"
+        f"Запрос: {request_tag}\n"
         f"Комментарий: {comment or '—'}\n\n"
         "Подтвердите или отклоните корректировку."
     )
 
     # callback_data ограничено ~64 байт, поэтому кодируем только нужный минимум.
-    callback_base = f"{user.id}:{amount_str}"
+    callback_base = f"{user.id}:{amount_str}:{request_tag}"
     reply_markup = {
         "inline_keyboard": [
             [
@@ -2671,12 +2676,14 @@ async def update_system_settings_admin(
         row = result.scalar_one()
 
         before = _settings_snapshot(row)
-        if field in {"allow_deposits", "allow_investments"}:
+        if field in {"allow_deposits", "allow_investments", "allow_withdrawals"}:
             bool_value = _coerce_bool(body.get("value"))
             if field == "allow_deposits":
                 row.allow_deposits = bool_value
-            else:
+            elif field == "allow_investments":
                 row.allow_investments = bool_value
+            else:
+                row.allow_withdrawals = bool_value
         else:
             try:
                 value = Decimal(raw_value)

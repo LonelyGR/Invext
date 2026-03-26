@@ -127,6 +127,7 @@ async def admin_ledger_adjust(
     user_id: int = Query(..., description="ID пользователя"),
     amount_usdt: str = Query(..., description="Сумма корректировки, может быть отрицательной"),
     comment: str | None = Query(None, description="Комментарий к корректировке"),
+    request_tag: str | None = Query(None, description="Идентификатор запроса на подтверждение"),
     decided_by_telegram_id: int = Query(..., description="Telegram ID админа, принявшего решение"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -149,6 +150,29 @@ async def admin_ledger_adjust(
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
 
+        if request_tag:
+            existing_result = await db.execute(
+                select(LedgerTransaction)
+                .where(
+                    LedgerTransaction.user_id == user.id,
+                    LedgerTransaction.provider == "ADMIN_MANUAL",
+                )
+                .order_by(LedgerTransaction.id.desc())
+                .limit(200)
+            )
+            for existing_tx in existing_result.scalars().all():
+                meta = existing_tx.metadata_json or {}
+                if str(meta.get("request_tag", "")) == str(request_tag):
+                    current_balance = await get_balance_usdt(db, user.id)
+                    user.balance_usdt = current_balance
+                    return {
+                        "status": "ok",
+                        "user_id": user_id,
+                        "new_balance_usdt": str(current_balance),
+                        "already_processed": True,
+                        "decided_by_telegram_id": meta.get("decided_by_telegram_id"),
+                    }
+
         if amount > 0:
             tx_type = LEDGER_TYPE_DEPOSIT
             stored_amount = amount
@@ -164,6 +188,7 @@ async def admin_ledger_adjust(
             metadata_json={
                 "comment": comment,
                 "decided_by_telegram_id": decided_by_telegram_id,
+                "request_tag": request_tag,
             },
         )
         db.add(tx)

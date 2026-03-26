@@ -275,6 +275,7 @@ class BackendClient:
         user_id: int,
         amount_usdt: str,
         comment: Optional[str],
+        request_tag: Optional[str],
         decided_by_telegram_id: int,
     ) -> Dict[str, Any]:
         async with httpx.AsyncClient(timeout=self.timeout) as client:
@@ -284,6 +285,7 @@ class BackendClient:
                     "user_id": user_id,
                     "amount_usdt": amount_usdt,
                     "comment": comment,
+                    "request_tag": request_tag,
                     "decided_by_telegram_id": decided_by_telegram_id,
                 },
                 headers=self._admin_headers,
