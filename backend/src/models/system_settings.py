@@ -47,6 +47,7 @@ class SystemSettings(Base):
     allow_withdrawals: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default=true()
     )
+    support_contact: Mapped[str | None] = mapped_column(String(255), nullable=True)
     admin_2fa_enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=false()
     )

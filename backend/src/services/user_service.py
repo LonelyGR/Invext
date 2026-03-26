@@ -13,6 +13,7 @@ from src.models.wallet_transaction import WalletTransaction
 from src.models.withdraw_request import WithdrawRequest
 from src.models.ledger_transaction import LedgerTransaction
 from src.models.payment_invoice import PaymentInvoice
+from src.models.referral_reward import ReferralReward, STATUS_PAID
 from src.services.ledger_service import (
     LEDGER_TYPE_DEPOSIT,
     LEDGER_TYPE_WITHDRAW,
@@ -293,6 +294,28 @@ async def get_user_with_stats(db: AsyncSession, telegram_id: int) -> Optional[di
     )
     withdrawals_count = withdrawals_count_res.scalar() or 0
 
+    referral_by_level_res = await db.execute(
+        select(
+            ReferralReward.level,
+            func.count(func.distinct(ReferralReward.from_user_id)),
+            func.coalesce(func.sum(ReferralReward.amount), 0),
+        )
+        .where(
+            and_(
+                ReferralReward.to_user_id == user.id,
+                ReferralReward.status == STATUS_PAID,
+            )
+        )
+        .group_by(ReferralReward.level)
+    )
+    referral_by_level_map = {
+        int(level): {
+            "count": int(cnt or 0),
+            "amount": Decimal(str(amount or 0)),
+        }
+        for level, cnt, amount in referral_by_level_res.all()
+    }
+
     result_payload = {
         "user": user,
         "referrals_count": referrals_count,
@@ -311,4 +334,6 @@ async def get_user_with_stats(db: AsyncSession, telegram_id: int) -> Optional[di
     }
     for level in range(1, max_referral_levels + 1):
         result_payload[f"referrals_level_{level}"] = level_counts.get(level, 0)
+        result_payload[f"referral_rewarded_level_{level}_count"] = referral_by_level_map.get(level, {}).get("count", 0)
+        result_payload[f"referral_earned_level_{level}_usdt"] = referral_by_level_map.get(level, {}).get("amount", Decimal("0"))
     return result_payload

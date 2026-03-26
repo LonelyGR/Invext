@@ -42,6 +42,8 @@ def _serialize_user_me(u, data: dict) -> dict:
     }
     for level in range(1, 11):
         payload[f"referrals_level_{level}"] = data.get(f"referrals_level_{level}", 0)
+        payload[f"referral_rewarded_level_{level}_count"] = data.get(f"referral_rewarded_level_{level}_count", 0)
+        payload[f"referral_earned_level_{level}_usdt"] = str(data.get(f"referral_earned_level_{level}_usdt", "0"))
     return payload
 
 

@@ -15,7 +15,7 @@ def main_menu_kb(is_admin: bool = False) -> ReplyKeyboardMarkup:
         # ПАРТНЁРКА / НАСТРОЙКИ
         [KeyboardButton(text="👥 Партнёры"), KeyboardButton(text="⚙️ Кошелёк")],
         # СТАТИСТИКА
-        [KeyboardButton(text="📊 Статистика")],
+        [KeyboardButton(text="📊 Статистика"), KeyboardButton(text="🆘 Саппорт")],
     ]
     if is_admin:
         # АДМИН (только для админов)

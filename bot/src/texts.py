@@ -273,6 +273,9 @@ def make_invest_deals_split_text(
 def make_invest_deals_dashboard_text(
     *,
     active_deal_number: Any | None,
+    collecting_end: str | None,
+    in_work_deal_number: Any | None,
+    active_end: str | None,
     balance_usdt: Any,
     participate_amount_usdt: Any | None,
     in_work_lines: list[str],
@@ -293,10 +296,21 @@ def make_invest_deals_dashboard_text(
 
     in_work_block = "\n".join(in_work_lines) if in_work_lines else "—"
     history_block = "\n".join(history_lines) if history_lines else "—"
+    collecting_block = (
+        f"🟡 <b>Сбор средств:</b>\nСделка #{active_deal_number}\nДо: {collecting_end or '—'}"
+        if active_deal_number is not None
+        else "🟡 <b>Сбор средств:</b>\n—"
+    )
+    active_block = (
+        f"🔵 <b>В работе:</b>\nСделка #{in_work_deal_number}\nДо: {active_end or '—'}"
+        if in_work_deal_number is not None
+        else "🔵 <b>В работе:</b>\n—"
+    )
 
     return (
         "\n".join(header_lines).strip()
         + f"\n\n{sep}\n\n"
+        f"{collecting_block}\n\n{active_block}\n\n{sep}\n\n"
         "📊 <b>Ваши средства</b>\n\n"
         "🔥 <b>Сейчас в работе:</b>\n"
         f"{in_work_block}\n\n"
@@ -352,7 +366,8 @@ def make_partners_bonuses_text(me: Mapping[str, Any]) -> str:
         count = me.get(f"referrals_level_{level}", 0)
         if level == 1 and not count:
             count = me.get("referrals_count", 0)
-        lines.append(f"{level} уровень — {int(count or 0)} чел. • 0.5% с прибыли по сделке")
+        earned = _fmt_usdt(me.get(f"referral_earned_level_{level}_usdt", "0"))
+        lines.append(f"{level} уровень — {int(count or 0)} чел.\nЗаработано: {earned} USDT")
 
     return (
         "🎁 <b>Реферальные бонусы</b>\n\n"

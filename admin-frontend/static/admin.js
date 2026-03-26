@@ -2844,6 +2844,11 @@ async function loadSettings() {
           <h2>Лимиты операций</h2>
           <p>Выберите режим для каждой операции: фиксированная сумма или диапазон.</p>
         </div>
+        <div class="settings-field" style="margin-bottom:12px;">
+          <div class="settings-label">Контакт саппорта (Telegram)</div>
+          <input type="text" id="support_contact" class="settings-input" value="${escapeHtmlAttr(s.support_contact || "")}" placeholder="@support_username или https://t.me/support_username" />
+          <div class="settings-hint">Используется в кнопке 🆘 Саппорт в боте</div>
+        </div>
         <form id="settings-form" class="settings-form">
           <div class="settings-limit-grid">
             <div class="settings-limit-card" data-entity="deposit">
@@ -3178,6 +3183,7 @@ async function loadSettings() {
       payloadValues.allow_deposits = Boolean(document.getElementById("allow_deposits")?.checked);
       payloadValues.allow_investments = Boolean(document.getElementById("allow_investments")?.checked);
       payloadValues.allow_withdrawals = Boolean(document.getElementById("allow_withdrawals")?.checked);
+      payloadValues.support_contact = String(document.getElementById("support_contact")?.value || "").trim();
       return payloadValues;
     };
 
@@ -3201,6 +3207,7 @@ async function loadSettings() {
       });
     });
     [
+      "support_contact",
       "fixed_deposit_usdt",
       "min_deposit_usdt",
       "max_deposit_usdt",
@@ -3242,7 +3249,7 @@ async function loadSettings() {
         "fixed_deposit_usdt","min_deposit_usdt","max_deposit_usdt",
         "fixed_withdraw_usdt","min_withdraw_usdt","max_withdraw_usdt",
         "fixed_invest_usdt","min_invest_usdt","max_invest_usdt",
-        "allow_deposits","allow_investments","allow_withdrawals",
+        "allow_deposits","allow_investments","allow_withdrawals","support_contact",
       ].forEach((id) => setInput(id, payload[id]));
       updateSummaries();
       updateSettingsSaveState();
@@ -3256,6 +3263,7 @@ async function loadSettings() {
         },
       };
       [
+        "support_contact",
         "fixed_deposit_usdt","min_deposit_usdt","max_deposit_usdt",
         "fixed_withdraw_usdt","min_withdraw_usdt","max_withdraw_usdt",
         "fixed_invest_usdt","min_invest_usdt","max_invest_usdt",
@@ -3265,6 +3273,7 @@ async function loadSettings() {
       payload.allow_deposits = Boolean(document.getElementById("allow_deposits")?.checked);
       payload.allow_investments = Boolean(document.getElementById("allow_investments")?.checked);
       payload.allow_withdrawals = Boolean(document.getElementById("allow_withdrawals")?.checked);
+      payload.support_contact = String(document.getElementById("support_contact")?.value || "").trim();
       return payload;
     };
     const readSettingsPresets = () => {
@@ -3385,6 +3394,7 @@ async function loadSettings() {
             allow_deposits: Boolean(s.allow_deposits),
             allow_investments: Boolean(s.allow_investments),
             allow_withdrawals: Boolean(s.allow_withdrawals !== false),
+            support_contact: String(s.support_contact || ""),
           };
           const labels = {
             min_deposit_usdt: "Мин. депозит",
@@ -3396,6 +3406,7 @@ async function loadSettings() {
             allow_deposits: "Пополнения",
             allow_investments: "Участие в сделках",
             allow_withdrawals: "Выводы",
+            support_contact: "Саппорт",
           };
           const changedLines = Object.keys(before)
             .filter((k) => String(before[k]) !== String(payloadValues[k]))

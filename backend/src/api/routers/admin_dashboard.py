@@ -117,6 +117,7 @@ SYSTEM_SETTINGS_FIELDS = (
     "allow_deposits",
     "allow_investments",
     "allow_withdrawals",
+    "support_contact",
 )
 SYSTEM_SETTINGS_DEFAULTS = {
     "min_deposit_usdt": "10",
@@ -128,6 +129,7 @@ SYSTEM_SETTINGS_DEFAULTS = {
     "allow_deposits": True,
     "allow_investments": True,
     "allow_withdrawals": True,
+    "support_contact": "",
 }
 MAINTENANCE_RESET_LOCK = asyncio.Lock()
 MAINTENANCE_TABLES = [
@@ -291,6 +293,7 @@ def _settings_snapshot(row: SystemSettings) -> dict:
         "allow_deposits": bool(row.allow_deposits),
         "allow_investments": bool(row.allow_investments),
         "allow_withdrawals": bool(getattr(row, "allow_withdrawals", True)),
+        "support_contact": str(getattr(row, "support_contact", "") or ""),
     }
 
 
@@ -312,6 +315,9 @@ def _validate_full_settings_payload(payload: dict) -> dict:
             raise HTTPException(status_code=400, detail=f"Missing field: {field}")
         if field in {"allow_deposits", "allow_investments", "allow_withdrawals"}:
             parsed[field] = _coerce_bool(payload.get(field))
+            continue
+        if field == "support_contact":
+            parsed[field] = str(payload.get(field) or "").strip()[:255]
             continue
         raw = str(payload.get(field, "")).replace(",", ".").strip()
         try:
@@ -2684,6 +2690,8 @@ async def update_system_settings_admin(
                 row.allow_investments = bool_value
             else:
                 row.allow_withdrawals = bool_value
+        elif field == "support_contact":
+            row.support_contact = (str(body.get("value") or "").strip()[:255] or None)
         else:
             try:
                 value = Decimal(raw_value)
