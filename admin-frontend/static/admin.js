@@ -2452,6 +2452,8 @@ async function loadUserDetail(userId) {
           </div>
         </div>
         <h2>Реферальная структура (preview)</h2>
+        <div class="referrals-preview-subtitle">Последние 5 рефералов</div>
+        <div class="referrals-total">Всего рефералов: <strong>${detail.referrals_count || 0}</strong></div>
         <div class="table-wrapper">
           <div class="table-wrapper-inner">
             <table>
@@ -2466,6 +2468,73 @@ async function loadUserDetail(userId) {
               </thead>
               <tbody>${referralsRows || `<tr><td colspan="5"><div class="empty-state"><strong>Рефералов пока нет</strong><span>Список заполнится после появления приглашённых пользователей.</span></div></td></tr>`}</tbody>
             </table>
+          </div>
+        </div>
+        <div style="margin-top:10px;">
+          <button type="button" id="referrals-show-all-btn" class="btn-secondary-small">Показать всех рефералов</button>
+        </div>
+        <div id="referrals-full-section" class="referrals-full-section" style="display:none; margin-top:14px;">
+          <div class="referrals-full-level-summary" id="referrals-level-summary"></div>
+          <div class="toolbar" style="margin-bottom:10px;">
+            <label class="filter-label">
+              Уровень
+              <select id="referrals-level-filter" class="page-size-select">
+                <option value="">Все</option>
+                <option value="1">L1</option>
+                <option value="2">L2</option>
+                <option value="3">L3</option>
+                <option value="4">L4</option>
+                <option value="5">L5</option>
+                <option value="6">L6</option>
+                <option value="7">L7</option>
+                <option value="8">L8</option>
+                <option value="9">L9</option>
+                <option value="10">L10</option>
+              </select>
+            </label>
+            <div class="search-field">
+              <span class="search-field-icon">🔍</span>
+              <input id="referrals-search" type="text" placeholder="Поиск по username" />
+            </div>
+            <button type="button" id="referrals-search-btn" class="btn-secondary-small">Найти</button>
+            <label class="filter-label">
+              Сортировка
+              <select id="referrals-sort-select" class="page-size-select">
+                <option value="newest" selected>Новые</option>
+                <option value="oldest">Старые</option>
+                <option value="balance">Баланс</option>
+              </select>
+            </label>
+          </div>
+          <div class="pagination-bar" style="margin-top:0;">
+            <span class="pagination-info" id="referrals-pagination-info"></span>
+            <div class="pagination-actions">
+              <button type="button" id="referrals-prev" class="btn-secondary-small disabled">← Назад</button>
+              <button type="button" id="referrals-next" class="btn-secondary-small disabled">Вперёд →</button>
+            </div>
+          </div>
+          <div class="table-wrapper">
+            <div class="table-wrapper-inner">
+              <table>
+                <thead>
+                  <tr>
+                    <th>User ID</th>
+                    <th>Telegram ID</th>
+                    <th>Username</th>
+                    <th>Баланс</th>
+                    <th>Уровень</th>
+                    <th>Профиль</th>
+                  </tr>
+                </thead>
+                <tbody id="referrals-full-tbody">
+                  <tr>
+                    <td colspan="6">
+                      <div class="empty-state"><strong>Нажмите “Показать всех”</strong><span>чтобы увидеть список с пагинацией</span></div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       </div>
@@ -2550,6 +2619,166 @@ async function loadUserDetail(userId) {
         }
       };
     }
+
+    // --- Referral tree (full list with pagination/filters) ---
+    const referralsState = {
+      page: 1,
+      pageSize: 20,
+      level: "",
+      q: "",
+      sort: "newest",
+      isLoading: false,
+    };
+
+    const showAllBtn = document.getElementById("referrals-show-all-btn");
+    const fullSectionEl = document.getElementById("referrals-full-section");
+    const summaryEl = document.getElementById("referrals-level-summary");
+    const levelFilterEl = document.getElementById("referrals-level-filter");
+    const searchEl = document.getElementById("referrals-search");
+    const searchBtnEl = document.getElementById("referrals-search-btn");
+    const sortEl = document.getElementById("referrals-sort-select");
+    const paginationInfoEl = document.getElementById("referrals-pagination-info");
+    const paginationPrevEl = document.getElementById("referrals-prev");
+    const paginationNextEl = document.getElementById("referrals-next");
+    const referralsTbodyEl = document.getElementById("referrals-full-tbody");
+
+    async function loadReferralsFull() {
+      if (!fullSectionEl || !referralsTbodyEl) return;
+      if (referralsState.isLoading) return;
+      referralsState.isLoading = true;
+
+      referralsTbodyEl.innerHTML = `
+        <tr>
+          <td colspan="6">
+            <div class="empty-state"><strong>Загрузка...</strong><span>Подождите</span></div>
+          </td>
+        </tr>
+      `;
+
+      try {
+        const params = new URLSearchParams();
+        params.set("page", String(referralsState.page));
+        params.set("page_size", String(referralsState.pageSize));
+        params.set("sort", referralsState.sort);
+        if (referralsState.level) params.set("level", String(referralsState.level));
+        if (referralsState.q) params.set("q", referralsState.q);
+
+        const data = await apiRequest(
+          `/users/${userId}/referrals?${params.toString()}`
+        );
+
+        const summary = data.summary_by_level || {};
+        if (summaryEl) {
+          const parts = [];
+          for (let l = 1; l <= 10; l++) {
+            parts.push(`Уровень ${l}: ${summary[l] || 0} чел`);
+          }
+          summaryEl.textContent = parts.join(" · ");
+        }
+
+        const items = Array.isArray(data.items) ? data.items : [];
+        if (!items.length) {
+          referralsTbodyEl.innerHTML = `
+            <tr>
+              <td colspan="6">
+                <div class="empty-state"><strong>Рефералы пока не найдены</strong><span>Проверьте фильтры</span></div>
+              </td>
+            </tr>
+          `;
+        } else {
+          referralsTbodyEl.innerHTML = items
+            .map((r) => {
+              const bal = Number(r.balance_usdt || 0);
+              const hasBal = bal > 0;
+              const lvl = r.level != null && r.level !== "" ? r.level : "—";
+              const username = r.username ? escapeHtmlAttr(String(r.username)) : "";
+              return `
+                <tr class="${hasBal ? "referral-has-balance" : ""}">
+                  <td>${r.user_id}</td>
+                  <td>${r.telegram_id}</td>
+                  <td>${username}</td>
+                  <td class="num-cell">${r.balance_usdt}</td>
+                  <td><span class="level-badge">L${lvl}</span></td>
+                  <td><a href="#user-${r.user_id}" class="btn-secondary-small">Открыть</a></td>
+                </tr>
+              `;
+            })
+            .join("");
+        }
+
+        const total = Number(data.total || 0);
+        const pageSize = Number(data.page_size || referralsState.pageSize);
+        const totalPages = Math.max(1, Math.ceil(total / pageSize) || 1);
+        if (paginationInfoEl) {
+          paginationInfoEl.textContent = `Страница ${data.page} из ${totalPages} · всего рефералов: ${total}`;
+        }
+        const currentPage = Number(data.page || 1);
+        if (paginationPrevEl) paginationPrevEl.disabled = currentPage <= 1;
+        if (paginationNextEl) paginationNextEl.disabled = currentPage >= totalPages;
+      } catch (e) {
+        showToast(e.message || "Ошибка загрузки рефералов", "error");
+      } finally {
+        referralsState.isLoading = false;
+      }
+    }
+
+    function applyReferralFullQueryAndLoad(newPage = 1) {
+      referralsState.page = newPage;
+      loadReferralsFull();
+    }
+
+    if (showAllBtn && fullSectionEl) {
+      showAllBtn.addEventListener("click", () => {
+        fullSectionEl.style.display = "";
+        applyReferralFullQueryAndLoad(1);
+      });
+    }
+
+    if (levelFilterEl) {
+      levelFilterEl.addEventListener("change", () => {
+        referralsState.level = levelFilterEl.value || "";
+        applyReferralFullQueryAndLoad(1);
+      });
+    }
+
+    if (sortEl) {
+      sortEl.addEventListener("change", () => {
+        referralsState.sort = sortEl.value || "newest";
+        applyReferralFullQueryAndLoad(1);
+      });
+    }
+
+    if (searchEl) {
+      searchEl.addEventListener("keydown", (ev) => {
+        if (ev.key !== "Enter") return;
+        ev.preventDefault();
+        referralsState.q = searchEl.value.trim();
+        applyReferralFullQueryAndLoad(1);
+      });
+    }
+
+    if (searchBtnEl) {
+      searchBtnEl.addEventListener("click", () => {
+        referralsState.q = (searchEl?.value || "").trim();
+        applyReferralFullQueryAndLoad(1);
+      });
+    }
+
+    if (paginationPrevEl) {
+      paginationPrevEl.addEventListener("click", () => {
+        if (referralsState.page <= 1) return;
+        referralsState.page -= 1;
+        loadReferralsFull();
+      });
+    }
+
+    if (paginationNextEl) {
+      paginationNextEl.addEventListener("click", () => {
+        referralsState.page += 1;
+        loadReferralsFull();
+      });
+    }
+
     section.querySelectorAll(".copy-address-btn").forEach((btn) => {
       btn.addEventListener("click", async (ev) => {
         ev.preventDefault();

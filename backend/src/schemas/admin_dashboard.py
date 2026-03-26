@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from pydantic import BaseModel
 
@@ -80,6 +80,23 @@ class UserRow(BaseModel):
     is_blocked: bool = False
     blocked_reason: Optional[str] = None
     created_at: datetime
+
+
+class ReferralTreeRow(BaseModel):
+    user_id: int
+    telegram_id: int
+    username: Optional[str]
+    balance_usdt: Decimal
+    level: int
+    created_at: datetime
+
+
+class PaginatedReferralTree(BaseModel):
+    items: List[ReferralTreeRow]
+    total: int
+    page: int
+    page_size: int
+    summary_by_level: Dict[int, int]
 
 
 class PaginatedUsers(BaseModel):

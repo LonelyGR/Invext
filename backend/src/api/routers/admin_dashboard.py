@@ -69,6 +69,7 @@ from src.schemas.admin_dashboard import (
     PaginatedBroadcasts,
     PaginatedDeposits,
     PaginatedUsers,
+    PaginatedReferralTree,
     SendDealNotificationsResponse,
     UserActionItem,
     UserDetail,
@@ -2152,6 +2153,102 @@ async def get_user_detail(
         referrals_count=referrals_count,
         referrals_preview=referrals_preview,
         recent_actions=recent_actions,
+    )
+
+
+@router.get("/users/{user_id}/referrals", response_model=PaginatedReferralTree)
+async def list_user_referrals(
+    request: Request,
+    user_id: int,
+    level: Optional[int] = Query(None, ge=1, le=10, description="Фильтр по уровню L1..L10"),
+    q: Optional[str] = Query(None, description="Поиск по username"),
+    sort: str = Query("newest", description="newest|oldest|balance"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    admin_token_id, _ = await get_admin_context(request)
+
+    root = await db.get(User, user_id)
+    if not root:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    referral_tree_ids, levels_map = await _collect_referral_tree_ids(db, user_id, max_levels=10)
+
+    # Summary по уровням для всего дерева (без учёта фильтров q/level).
+    summary_by_level: dict[int, int] = {i: 0 for i in range(1, 11)}
+    for lv in levels_map.values():
+        if 1 <= lv <= 10:
+            summary_by_level[lv] += 1
+
+    if not referral_tree_ids:
+        return PaginatedReferralTree(
+            items=[],
+            total=0,
+            page=page,
+            page_size=page_size,
+            summary_by_level=summary_by_level,
+        )
+
+    filtered_ids = referral_tree_ids
+    if level is not None:
+        filtered_ids = [uid for uid in referral_tree_ids if levels_map.get(uid) == level]
+    if not filtered_ids:
+        return PaginatedReferralTree(
+            items=[],
+            total=0,
+            page=page,
+            page_size=page_size,
+            summary_by_level=summary_by_level,
+        )
+
+    username_search = (q or "").strip()
+    conditions = [User.id.in_(filtered_ids)]
+    if username_search:
+        conditions.append(User.username.ilike(f"%{username_search}%"))
+
+    total_q = select(func.count()).select_from(User).where(*conditions)
+    total = int((await db.execute(total_q)).scalar() or 0)
+
+    query = select(User).where(*conditions)
+    if sort == "newest":
+        query = query.order_by(desc(User.created_at))
+    elif sort == "oldest":
+        query = query.order_by(User.created_at)
+    elif sort == "balance":
+        query = query.order_by(desc(func.coalesce(User.balance_usdt, 0)))
+    else:
+        raise HTTPException(status_code=400, detail="Invalid sort. Use newest|oldest|balance")
+
+    query = query.offset((page - 1) * page_size).limit(page_size)
+    rows = (await db.execute(query)).scalars().all()
+
+    items = [
+        {
+            "user_id": r.id,
+            "telegram_id": r.telegram_id,
+            "username": r.username,
+            "balance_usdt": r.balance_usdt,
+            "level": levels_map.get(r.id, 0),
+            "created_at": r.created_at,
+        }
+        for r in rows
+    ]
+
+    await log_admin_action(
+        db=db,
+        admin_token_id=admin_token_id,
+        action_type="VIEW_REFERRALS",
+        entity_type="USER",
+        entity_id=user_id,
+    )
+
+    return PaginatedReferralTree(
+        items=items,
+        total=total,
+        page=page,
+        page_size=page_size,
+        summary_by_level=summary_by_level,
     )
 
 
