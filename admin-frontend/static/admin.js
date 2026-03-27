@@ -1194,6 +1194,71 @@ async function loadDeals() {
           </div>
         </div>`;
 
+    const lifecycleBlock = `
+      <div class="panel-card">
+        <h2>Жизненный цикл сделки (что и когда)</h2>
+        <div class="table-wrapper">
+          <div class="table-wrapper-inner">
+            <table>
+              <thead>
+                <tr>
+                  <th>Этап</th>
+                  <th>Когда</th>
+                  <th>Что делает система</th>
+                  <th>Статусы</th>
+                  <th>Уведомления</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Напоминание по рефералке</td>
+                  <td>11:00 (Europe/Chisinau)</td>
+                  <td>Проверяет активную сделку и отправляет напоминания по потенциальным бонусам</td>
+                  <td>Сделка: <code>active</code></td>
+                  <td>“Через час закроется сбор...”</td>
+                </tr>
+                <tr>
+                  <td>Плановое закрытие сбора</td>
+                  <td>12:00 (Europe/Chisinau)</td>
+                  <td>Закрывает активную сделку, фиксирует прибыль участиям, переводит выплаты в ожидание</td>
+                  <td>Сделка: <code>active → closed</code><br/>Участие: <code>active → in_progress_payout</code></td>
+                  <td>“Сбор закрыт, средства в работе”</td>
+                </tr>
+                <tr>
+                  <td>Плановое открытие новой сделки</td>
+                  <td>13:00 (Europe/Chisinau)</td>
+                  <td>Перед открытием обрабатывает pending payouts, затем открывает новую сделку</td>
+                  <td>Сделка: <code>draft → active</code> (новая)</td>
+                  <td>“Открыт сбор на сделку #...”</td>
+                </tr>
+                <tr>
+                  <td>Страховочное закрытие по дедлайну</td>
+                  <td>Каждую минуту</td>
+                  <td>Проверяет сделки с <code>end_at &lt;= now</code> и закрывает, если пропущен cron</td>
+                  <td>Сделка: <code>active → closed</code></td>
+                  <td>Как при обычном закрытии</td>
+                </tr>
+                <tr>
+                  <td>Страховочная обработка выплат</td>
+                  <td>Каждые 10 минут</td>
+                  <td>Делает фактическое зачисление инвестиций/прибыли/рефералки и закрывает участия</td>
+                  <td>Участие: <code>in_progress_payout → completed</code></td>
+                  <td>“Выплата по сделке #...”</td>
+                </tr>
+                <tr>
+                  <td>Ручное досрочное закрытие</td>
+                  <td>По кнопке админа</td>
+                  <td>Закрывает активную сделку принудительно (для экстренных сценариев)</td>
+                  <td>Сделка: <code>active → closed</code></td>
+                  <td>Как при обычном закрытии</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    `;
+
     const rows = deals
       .map(
         (d) => {
@@ -1255,6 +1320,7 @@ async function loadDeals() {
       <h1>Сделки</h1>
       <p class="section-desc">Текущие и завершённые сделки, управление доходностью.</p>
       ${statusBlock}
+      ${lifecycleBlock}
       <div class="panel-card">
         <h2>Риск-уведомления по сделкам</h2>
         ${

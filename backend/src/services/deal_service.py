@@ -118,49 +118,85 @@ def next_scheduled_open_1300_chisinau(after_utc: Optional[dt.datetime] = None) -
     return candidate.astimezone(dt.timezone.utc)
 
 
-def calculate_payout_at_for_investment(now_utc: Optional[dt.datetime] = None) -> dt.datetime:
+def calculate_payout_at(invest_datetime_utc: Optional[dt.datetime] = None) -> dt.datetime:
     """
-    Фиксированный график выплаты (Europe/Chisinau):
-    - инвестиция до 12:00 -> T+1;
-    - инвестиция с 13:00 и позже -> T+2;
-    - пятница с 13:00, суббота, воскресенье -> ближайший вторник;
-    - время выплаты всегда 15:00.
+    Фиксированное расписание выплат (Europe/Chisinau), строго 15:00:
+
+    Пн:
+      - оплата до 12:00 -> вторник 15:00
+      - оплата после 13:00 -> среда 15:00
+    Вт:
+      - до 12:00 -> среда 15:00
+      - после 13:00 -> четверг 15:00
+    Ср:
+      - до 12:00 -> четверг 15:00
+      - после 13:00 -> пятница 15:00
+    Чт:
+      - до 12:00 -> пятница 15:00
+      - после 13:00 -> понедельник 15:00
+    Пт:
+      - до 12:00 -> понедельник 15:00
+      - после 13:00 -> вторник 15:00
+    Сб/Вс:
+      - выплата во вторник 15:00 (время не важно)
+
     Возвращает datetime в UTC для хранения в БД.
     """
-    now_utc = now_utc or dt.datetime.now(dt.timezone.utc)
-    local_now = now_utc.astimezone(PAYOUT_TZ)
-    local_date = local_now.date()
-    weekday = local_now.weekday()  # Mon=0 ... Sun=6
-    hour = local_now.hour
+    invest_datetime_utc = invest_datetime_utc or dt.datetime.now(dt.timezone.utc)
+    if invest_datetime_utc.tzinfo is None:
+        invest_datetime_utc = invest_datetime_utc.replace(tzinfo=dt.timezone.utc)
+
+    local_dt = invest_datetime_utc.astimezone(PAYOUT_TZ)
+    local_date = local_dt.date()
+    weekday = local_dt.weekday()  # Mon=0 ... Sun=6
+
+    # В системе окна сделок разорваны: между закрытием (12:00) и открытием (13:00)
+    # пользователь обычно не может инвестировать. На всякий случай считаем времена
+    # > 12:00 как "после 13:00" по смыслу.
+    before_12 = local_dt.time() <= dt.time(hour=12, minute=0, second=0)
 
     if weekday == 5:  # Saturday
-        days_to_tuesday = 3
-        payout_date = local_date + dt.timedelta(days=days_to_tuesday)
+        payout_date = local_date + dt.timedelta(days=3)  # -> Tuesday
     elif weekday == 6:  # Sunday
-        days_to_tuesday = 2
-        payout_date = local_date + dt.timedelta(days=days_to_tuesday)
-    elif weekday == 4 and hour >= 13:  # Friday after 13:00
-        days_to_tuesday = 4
-        payout_date = local_date + dt.timedelta(days=days_to_tuesday)
+        payout_date = local_date + dt.timedelta(days=2)  # -> Tuesday
     else:
-        days_to_add = 1 if hour < 12 else 2
-        payout_date = local_date + dt.timedelta(days=days_to_add)
-        # Если расчет попал на выходные — переносим на ближайший вторник.
-        if payout_date.weekday() == 5:  # Saturday
-            payout_date = payout_date + dt.timedelta(days=3)
-        elif payout_date.weekday() == 6:  # Sunday
-            payout_date = payout_date + dt.timedelta(days=2)
+        # Рабочие дни (Mon..Fri)
+        if weekday == 0:  # Monday
+            days = 1 if before_12 else 2
+        elif weekday == 1:  # Tuesday
+            days = 1 if before_12 else 2
+        elif weekday == 2:  # Wednesday
+            days = 1 if before_12 else 2
+        elif weekday == 3:  # Thursday
+            days = 1 if before_12 else 4
+        elif weekday == 4:  # Friday
+            days = 3 if before_12 else 4
+        else:
+            # Не должно случиться
+            days = 2
+        payout_date = local_date + dt.timedelta(days=days)
 
-    payout_local = dt.datetime.combine(
-        payout_date,
-        dt.time(hour=15, minute=0, second=0, tzinfo=PAYOUT_TZ),
+    payout_local = dt.datetime(
+        payout_date.year,
+        payout_date.month,
+        payout_date.day,
+        15,
+        0,
+        0,
+        tzinfo=PAYOUT_TZ,
     )
     return payout_local.astimezone(dt.timezone.utc)
+
+
+def calculate_payout_at_for_investment(now_utc: Optional[dt.datetime] = None) -> dt.datetime:
+    # Совместимость с существующими вызовами.
+    return calculate_payout_at(now_utc)
 
 
 async def get_active_deal(db: AsyncSession) -> Optional[Deal]:
     """Сделка с открытым окном сбора: status=active и now между start_at и end_at."""
     now = dt.datetime.now(dt.timezone.utc)
+    now_local = now.astimezone(SCHEDULE_TZ)
     result = await db.execute(
         select(Deal)
         .where(
@@ -173,7 +209,25 @@ async def get_active_deal(db: AsyncSession) -> Optional[Deal]:
         .order_by(Deal.start_at.desc())
         .limit(1)
     )
-    return result.scalar_one_or_none()
+    deal = result.scalar_one_or_none()
+    # В выходные разрешаем только ту сделку, которая была открыта в пятницу (13:00 local)
+    # и остаётся активной до понедельника (12:00).
+    if deal and now_local.weekday() in (5, 6):
+        try:
+            start_local = deal.start_at.astimezone(SCHEDULE_TZ) if deal.start_at else None
+            end_local = deal.end_at.astimezone(SCHEDULE_TZ) if deal.end_at else None
+            if not (
+                start_local
+                and start_local.weekday() == 4  # Friday
+                and start_local.hour == 13
+                and end_local
+                and end_local.weekday() == 0  # Monday
+                and end_local.hour == 12
+            ):
+                return None
+        except Exception:
+            return None
+    return deal
 
 
 async def participate_in_deal(
@@ -188,14 +242,17 @@ async def participate_in_deal(
     уже проверена на минималку/баланс.
     """
 
+    now = dt.datetime.now(dt.timezone.utc)
+    now_local = now.astimezone(SCHEDULE_TZ)
+
     deal_result = await db.execute(
         select(Deal)
         .where(
             Deal.status == DEAL_STATUS_ACTIVE,
             Deal.start_at.isnot(None),
             Deal.end_at.isnot(None),
-            Deal.start_at <= dt.datetime.now(dt.timezone.utc),
-            Deal.end_at > dt.datetime.now(dt.timezone.utc),
+            Deal.start_at <= now,
+            Deal.end_at > now,
         )
         .order_by(Deal.start_at.desc())
         .limit(1)
@@ -204,6 +261,21 @@ async def participate_in_deal(
     deal = deal_result.scalar_one_or_none()
     if not deal:
         raise ValueError("Нет активной сделки для участия")
+
+    # В выходные разрешаем вход только в пятничную сделку (которая активна до понедельника 12:00).
+    if now_local.weekday() in (5, 6):
+        start_local = deal.start_at.astimezone(SCHEDULE_TZ) if deal.start_at else None
+        end_local = deal.end_at.astimezone(SCHEDULE_TZ) if deal.end_at else None
+        ok = (
+            start_local
+            and start_local.weekday() == 4  # Friday
+            and start_local.hour == 13
+            and end_local
+            and end_local.weekday() == 0  # Monday
+            and end_local.hour == 12
+        )
+        if not ok:
+            raise ValueError("В выходные вход в сделки доступен только для пятничной сделки.")
 
     # Лочим пользователя, чтобы защититься от гонок при списании баланса.
     user_locked_result = await db.execute(
@@ -328,7 +400,7 @@ async def close_deal_flow(db: AsyncSession, deal: Deal) -> None:
     if participations:
         await db.flush()
 
-    # Реферальная линия: рассчитываем на закрытии сделки, но зачисляем вместе с payout через 24 часа.
+    # Реферальная линия: рассчитываем на закрытии сделки, зачисление — в момент payout по расписанию.
     for p in participations:
         inv_user = await db.get(User, p.user_id)
         if not inv_user:
@@ -399,14 +471,18 @@ async def process_pending_payouts(db: AsyncSession) -> int:
     """
     Обработка всех инвестиций в статусе in_progress_payout:
     — зачисляем тело + прибыль на баланс (PROFIT ledger entry)
-    — статус → completed, payout_at = now
+    — статус → completed, payout_at = по расписанию (15:00)
     — отправляем персональное уведомление каждому пользователю.
     Вызывается перед открытием новой сделки.
     Возвращает кол-во обработанных записей.
     """
-    # Выплата строго через 24 часа после закрытия сделки.
+    # Для новой бизнес-логики:
+    # — выплата происходит строго по рассчитанному payout_at (15:00 расписание)
+    # — на выходные выплаты не выполняются (защитимся на уровне джобы)
     now = dt.datetime.now(dt.timezone.utc)
-    eligible_before = now - dt.timedelta(hours=24)
+    now_local = now.astimezone(SCHEDULE_TZ)
+    if now_local.weekday() in (5, 6):  # Sat/Sun
+        return 0
 
     # Важно для идемпотентности при нескольких воркерах:
     # лочим строки и пропускаем уже залоченные (чтобы не выплатить дважды).
@@ -416,7 +492,8 @@ async def process_pending_payouts(db: AsyncSession) -> int:
         .where(
             DealParticipation.status == PARTICIPATION_STATUS_IN_PROGRESS,
             Deal.closed_at.isnot(None),
-            Deal.closed_at <= eligible_before,
+            DealParticipation.payout_at.isnot(None),
+            DealParticipation.payout_at <= now,
         )
         .order_by(DealParticipation.deal_id)
         .with_for_update(skip_locked=True)
@@ -432,6 +509,15 @@ async def process_pending_payouts(db: AsyncSession) -> int:
 
     for p in participations:
         try:
+            # На случай старых записей: пересчитаем payout_at по дате/времени участия,
+            # чтобы убрать зависимость от deal.closed_at + 24h.
+            desired_payout_at = calculate_payout_at(p.created_at)
+            if desired_payout_at > now:
+                # Обновим scheduled time, чтобы в следующих прогонах джобы не пытаться
+                # обработать это участие раньше времени.
+                p.payout_at = desired_payout_at
+                continue
+
             profit = p.profit_amount or Decimal("0")
 
             if p.deal_id not in deal_cache:
@@ -490,7 +576,7 @@ async def process_pending_payouts(db: AsyncSession) -> int:
                     rw.status = STATUS_PAID
 
             p.status = PARTICIPATION_STATUS_COMPLETED
-            p.payout_at = now
+            p.payout_at = desired_payout_at
             affected_user_ids.add(p.user_id)
             processed += 1
 
@@ -558,6 +644,9 @@ async def process_due_deals(db: AsyncSession) -> int:
     т.к. первый db.execute() уже запускает autobegin.
     """
     now = dt.datetime.now(dt.timezone.utc)
+    now_local = now.astimezone(SCHEDULE_TZ)
+    if now_local.weekday() in (5, 6):  # Sat/Sun
+        return 0
     result = await db.execute(
         select(Deal).where(
             Deal.status == DEAL_STATUS_ACTIVE,
@@ -636,6 +725,9 @@ async def close_active_deal_by_schedule(db: AsyncSession, *, force: bool = False
     Транзакция управляется вызывающим кодом (scheduler); не вызывать db.begin() здесь.
     """
     now = dt.datetime.now(dt.timezone.utc)
+    now_local = now.astimezone(SCHEDULE_TZ)
+    if not force and now_local.weekday() in (5, 6):  # Sat/Sun
+        return False
     filters = [Deal.status == DEAL_STATUS_ACTIVE]
     if not force:
         filters.append(Deal.end_at <= now)
@@ -722,7 +814,25 @@ async def get_active_deal_legacy(db: AsyncSession) -> Optional[Deal]:
     result = await db.execute(
         select(Deal).where(Deal.status == "open").order_by(Deal.opened_at.desc()).limit(1)
     )
-    return result.scalar_one_or_none()
+    deal = result.scalar_one_or_none()
+    now_local = dt.datetime.now(dt.timezone.utc).astimezone(SCHEDULE_TZ)
+    if deal and now_local.weekday() in (5, 6):
+        # Наследованная логика: на выходные оставляем доступ только к пятничной сделке.
+        try:
+            start_local = deal.start_at.astimezone(SCHEDULE_TZ) if getattr(deal, "start_at", None) else None
+            end_local = deal.end_at.astimezone(SCHEDULE_TZ) if getattr(deal, "end_at", None) else None
+            if not (
+                start_local
+                and start_local.weekday() == 4
+                and start_local.hour == 13
+                and end_local
+                and end_local.weekday() == 0
+                and end_local.hour == 12
+            ):
+                return None
+        except Exception:
+            return None
+    return deal
 
 
 async def open_new_deal(

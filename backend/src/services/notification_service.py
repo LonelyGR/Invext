@@ -225,7 +225,7 @@ async def broadcast_deal_closed(
 ) -> None:
     """
     Рассылка о закрытии этапа сбора.
-    Прибыль и реферальный бонус начисляются только через 24 часа.
+    Прибыль и реферальный бонус начисляются по фиксированному расписанию выплат (15:00).
     """
     if not telegram_ids:
         return
@@ -239,7 +239,7 @@ async def broadcast_deal_closed(
 
         if tid in participant_telegram_ids:
             lines.append("Средства отправлены в работу.")
-            lines.append("Начисление прибыли произойдёт в течение 24 часов.")
+            lines.append("Начисление прибыли произойдёт по расписанию в 15:00.")
             lines.append("")
 
         ref_profit = referral_profit_by_telegram.get(tid)
