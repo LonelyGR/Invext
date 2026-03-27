@@ -55,6 +55,16 @@ def _format_payout_at(payout_at_iso: str | None) -> str:
         return payout_at_iso
 
 
+def _format_collecting_end(end_at_iso: str | None) -> str:
+    if not end_at_iso:
+        return "—"
+    try:
+        dt_obj = datetime.fromisoformat(end_at_iso.replace("Z", "+00:00"))
+        return f"{dt_obj.strftime('%d.%m')} до {dt_obj.strftime('%H:%M')}"
+    except Exception:
+        return str(end_at_iso)
+
+
 def _make_deal_lines(items: list[dict]) -> list[str]:
     lines: list[str] = []
     for item in items[:3]:
@@ -103,7 +113,11 @@ def _extract_first_in_work(active_items: list[dict]) -> tuple[int | None, str | 
 
 def _build_in_work_lines(active_items: list[dict]) -> list[str]:
     lines: list[str] = []
-    for item in active_items[:1]:
+    pending_items = [
+        item for item in active_items
+        if str(item.get("status") or "") == "in_progress_payout"
+    ]
+    for item in pending_items[:3]:
         deal_number = item.get("deal_number")
         amount_raw = item.get("amount_usdt")
         try:
@@ -111,7 +125,7 @@ def _build_in_work_lines(active_items: list[dict]) -> list[str]:
         except (TypeError, ValueError):
             amount = str(amount_raw or "0.00")
         payout_at = _format_payout_at(item.get("payout_at"))
-        lines.append(f"• Сделка #{deal_number} — <b>{amount} USDT</b>\n⏳ Выплата: {payout_at}")
+        lines.append(f"• Сделка #{deal_number} — {amount} USDT\nВыплата: {payout_at}")
     return lines
 
 
@@ -171,7 +185,7 @@ async def invest_section(message: Message, state: FSMContext):
         history_lines = _build_history_lines(my_deals.get("completed_deals", []))
         text = make_invest_deals_dashboard_text(
             active_deal_number=deal_number,
-            collecting_end=_format_payout_at(active.get("end_at")) if active.get("end_at") else None,
+            collecting_end=_format_collecting_end(active.get("end_at")) if active.get("end_at") else None,
             in_work_deal_number=_extract_first_in_work(my_deals.get("active_deals", []))[0],
             active_end=_extract_first_in_work(my_deals.get("active_deals", []))[1],
             balance_usdt=usdt,
@@ -308,7 +322,7 @@ async def open_invest_from_reminder(callback: CallbackQuery, state: FSMContext):
         history_lines = _build_history_lines(my_deals.get("completed_deals", []))
         text = make_invest_deals_dashboard_text(
             active_deal_number=deal_number,
-            collecting_end=_format_payout_at(active.get("end_at")) if active.get("end_at") else None,
+            collecting_end=_format_collecting_end(active.get("end_at")) if active.get("end_at") else None,
             in_work_deal_number=_extract_first_in_work(my_deals.get("active_deals", []))[0],
             active_end=_extract_first_in_work(my_deals.get("active_deals", []))[1],
             balance_usdt=usdt,

@@ -301,18 +301,12 @@ def make_invest_deals_dashboard_text(
         if active_deal_number is not None
         else "🟡 <b>Сбор средств:</b>\n—"
     )
-    active_block = (
-        f"🔵 <b>В работе:</b>\nСделка #{in_work_deal_number}\nДо: {active_end or '—'}"
-        if in_work_deal_number is not None
-        else "🔵 <b>В работе:</b>\n—"
-    )
-
     return (
         "\n".join(header_lines).strip()
         + f"\n\n{sep}\n\n"
-        f"{collecting_block}\n\n{active_block}\n\n{sep}\n\n"
+        f"{collecting_block}\n\n{sep}\n\n"
         "📊 <b>Ваши средства</b>\n\n"
-        "🔥 <b>Сейчас в работе:</b>\n"
+        "🔥 <b>Ожидает выплаты:</b>\n"
         f"{in_work_block}\n\n"
         f"{sep}\n\n"
         "✅ <b>История выплат:</b>\n"
