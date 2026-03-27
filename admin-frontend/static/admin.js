@@ -207,6 +207,7 @@ function updateBreadcrumbs(hash) {
     "#dashboard": "Дашборд",
     "#users": "Пользователи",
     "#deals": "Сделки",
+    "#deal-schedule": "Сделки → Расписание",
     "#messages": "Сообщения",
     "#deposits": "Пополнения",
     "#withdrawals": "Выводы",
@@ -261,6 +262,10 @@ function setPageActions(hash) {
   } else if (hash === "#settings") {
     addBtn("Кнопка Сохранить ↓", () => {
       document.getElementById("settings-save-btn")?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  } else if (hash === "#deal-schedule") {
+    addBtn("Открыть настройки расписания", () => {
+      location.hash = "#settings";
     });
   } else if (hash === "#messages") {
     addBtn("Обновить список", () => loadMessages(1));
@@ -367,11 +372,37 @@ function ensureMessagesNavAndSection() {
       nav.appendChild(link);
     }
   }
+  if (nav && !nav.querySelector('a[data-section="deal-schedule"]')) {
+    const dealsLink = nav.querySelector('a[data-section="deals"]');
+    const link = document.createElement("a");
+    link.href = "#deal-schedule";
+    link.setAttribute("data-section", "deal-schedule");
+    link.innerHTML = `
+      <span class="nav-icon">🗓️</span>
+      <span class="nav-label">Расписание сделок</span>
+    `;
+    if (dealsLink && dealsLink.nextSibling) {
+      nav.insertBefore(link, dealsLink.nextSibling);
+    } else {
+      nav.appendChild(link);
+    }
+  }
 
   const content = document.querySelector("main.content");
   if (content && !document.getElementById("messages-section")) {
     const section = document.createElement("section");
     section.id = "messages-section";
+    section.className = "section hidden";
+    const dealsSection = document.getElementById("deals-section");
+    if (dealsSection && dealsSection.nextSibling) {
+      content.insertBefore(section, dealsSection.nextSibling);
+    } else {
+      content.appendChild(section);
+    }
+  }
+  if (content && !document.getElementById("deal-schedule-section")) {
+    const section = document.createElement("section");
+    section.id = "deal-schedule-section";
     section.className = "section hidden";
     const dealsSection = document.getElementById("deals-section");
     if (dealsSection && dealsSection.nextSibling) {
@@ -1085,7 +1116,7 @@ function switchSection(hash) {
   }
   updateBreadcrumbs(hash || "#dashboard");
   setPageActions(hash || "#dashboard");
-  const sections = ["dashboard", "users", "deals", "messages", "deposits", "withdrawals", "logs", "settings", "user"];
+  const sections = ["dashboard", "users", "deals", "deal-schedule", "messages", "deposits", "withdrawals", "logs", "settings", "user"];
   const sidebarLinks = document.querySelectorAll(".sidebar nav a");
   sections.forEach((name) => {
     const el = document.getElementById(`${name}-section`);
@@ -1116,6 +1147,8 @@ function switchSection(hash) {
     loadDashboard();
   } else if (hash === "#deals") {
     loadDeals();
+  } else if (hash === "#deal-schedule") {
+    loadDealSchedule();
   } else if (hash === "#messages") {
     loadMessages();
   } else if (hash === "#deposits") {
@@ -1194,74 +1227,6 @@ async function loadDeals() {
           </div>
         </div>`;
 
-    const lifecycleBlock = `
-      <div class="panel-card">
-        <h2>Расписание сделок по дням</h2>
-        <div class="table-wrapper">
-          <div class="table-wrapper-inner">
-            <table>
-              <thead>
-                <tr>
-                  <th>День</th>
-                  <th>Открытие сбора</th>
-                  <th>Закрытие сбора</th>
-                  <th>Выплата</th>
-                  <th>Комментарий</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>Понедельник</td>
-                  <td>13:00</td>
-                  <td>Вторник, 12:00</td>
-                  <td>Вторник, после 15:00*</td>
-                  <td>Старт рабочей недели, обычный цикл</td>
-                </tr>
-                <tr>
-                  <td>Вторник</td>
-                  <td>13:00</td>
-                  <td>Среда, 12:00</td>
-                  <td>Среда, после 15:00*</td>
-                  <td>Обычный цикл</td>
-                </tr>
-                <tr>
-                  <td>Среда</td>
-                  <td>13:00</td>
-                  <td>Четверг, 12:00</td>
-                  <td>Четверг, после 15:00*</td>
-                  <td>Обычный цикл</td>
-                </tr>
-                <tr>
-                  <td>Четверг</td>
-                  <td>13:00</td>
-                  <td>Пятница, 12:00</td>
-                  <td>Пятница, после 15:00*</td>
-                  <td>Обычный цикл</td>
-                </tr>
-                <tr>
-                  <td>Пятница</td>
-                  <td>13:00</td>
-                  <td>Понедельник, 12:00</td>
-                  <td>Понедельник, после 15:00*</td>
-                  <td>Сделка переносится через выходные</td>
-                </tr>
-                <tr>
-                  <td>Суббота/Воскресенье</td>
-                  <td>Новых открытий нет</td>
-                  <td>—</td>
-                  <td>По графику текущей сделки</td>
-                  <td>Работает только пятничная сделка до понедельника</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-        <div class="mini-hint" style="margin-top:10px;">
-          * Время зоны: Europe/Chisinau. Выплата пользователю проводится после закрытия сделки по payout-циклу и отображается как итоговое уведомление.
-        </div>
-      </div>
-    `;
-
     const rows = deals
       .map(
         (d) => {
@@ -1323,7 +1288,6 @@ async function loadDeals() {
       <h1>Сделки</h1>
       <p class="section-desc">Текущие и завершённые сделки, управление доходностью.</p>
       ${statusBlock}
-      ${lifecycleBlock}
       <div class="panel-card">
         <h2>Риск-уведомления по сделкам</h2>
         ${
@@ -1500,6 +1464,174 @@ async function loadDeals() {
     });
   } catch (e) {
     section.innerHTML = `<h1>Сделки</h1><div class="error">${e.message}</div>`;
+  }
+}
+
+async function loadDealSchedule() {
+  const section = document.getElementById("deal-schedule-section");
+  section.innerHTML = `<h1>Расписание сделок</h1><p>Загрузка...</p>`;
+  try {
+    const s = await apiRequest("/system-settings");
+    const defaultSchedule = {
+      "0": { enabled: true, open: "13:00", close_day: 1, close_time: "12:00", payout_day: 2, payout_time: "15:00" },
+      "1": { enabled: true, open: "13:00", close_day: 2, close_time: "12:00", payout_day: 3, payout_time: "15:00" },
+      "2": { enabled: true, open: "13:00", close_day: 3, close_time: "12:00", payout_day: 4, payout_time: "15:00" },
+      "3": { enabled: true, open: "13:00", close_day: 4, close_time: "12:00", payout_day: 0, payout_time: "15:00" },
+      "4": { enabled: true, open: "13:00", close_day: 0, close_time: "12:00", payout_day: 1, payout_time: "15:00" },
+      "5": { enabled: false, open: "13:00", close_day: 0, close_time: "12:00", payout_day: 1, payout_time: "15:00" },
+      "6": { enabled: false, open: "13:00", close_day: 0, close_time: "12:00", payout_day: 1, payout_time: "15:00" },
+    };
+    let schedule = null;
+    try {
+      schedule = s?.deal_schedule_json ? JSON.parse(s.deal_schedule_json) : null;
+    } catch (_) {
+      schedule = null;
+    }
+    const merged = JSON.parse(JSON.stringify(defaultSchedule));
+    if (schedule && typeof schedule === "object") {
+      for (let d = 0; d < 7; d++) {
+        const key = String(d);
+        if (!schedule[key] || typeof schedule[key] !== "object") continue;
+        merged[key] = { ...merged[key], ...schedule[key] };
+      }
+    }
+    const dayLabel = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"];
+    const shortDay = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
+    const now = new Date();
+    const jsDay = now.getDay(); // Sun=0..Sat=6
+    const currentDay = jsDay === 0 ? 6 : jsDay - 1; // Mon=0..Sun=6
+    const currentRule = merged[String(currentDay)] || null;
+    const fmtDateTime = (d) =>
+      d.toLocaleString("ru-RU", {
+        day: "2-digit",
+        month: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    const parseTime = (raw, fallbackH, fallbackM) => {
+      const v = String(raw || "");
+      const parts = v.split(":");
+      const h = Number(parts[0]);
+      const m = Number(parts[1]);
+      return {
+        h: Number.isFinite(h) ? Math.max(0, Math.min(23, h)) : fallbackH,
+        m: Number.isFinite(m) ? Math.max(0, Math.min(59, m)) : fallbackM,
+      };
+    };
+    const shiftToWeekday = (weekdayMon0, hh, mm) => {
+      const dayDelta = (Number(weekdayMon0) - currentDay + 7) % 7;
+      const d = new Date(now);
+      d.setDate(d.getDate() + dayDelta);
+      d.setHours(hh, mm, 0, 0);
+      if (d <= now) d.setDate(d.getDate() + 7);
+      return d;
+    };
+    const formatLeft = (ms) => {
+      if (!Number.isFinite(ms) || ms <= 0) return "сейчас";
+      const totalMin = Math.floor(ms / 60000);
+      const days = Math.floor(totalMin / (24 * 60));
+      const hours = Math.floor((totalMin % (24 * 60)) / 60);
+      const mins = totalMin % 60;
+      if (days > 0) return `${days}д ${hours}ч ${mins}м`;
+      return `${hours}ч ${mins}м`;
+    };
+    let todayOpsHtml = `<div class="empty-state"><strong>Сегодня нет активного правила</strong><span>День отключен в расписании.</span></div>`;
+    if (currentRule && currentRule.enabled) {
+      const openT = parseTime(currentRule.open, 13, 0);
+      const closeT = parseTime(currentRule.close_time, 12, 0);
+      const payoutT = parseTime(currentRule.payout_time, 15, 0);
+      const nextOpen = shiftToWeekday(currentDay, openT.h, openT.m);
+      const nextClose = shiftToWeekday(Number(currentRule.close_day) || 0, closeT.h, closeT.m);
+      const nextPayout = shiftToWeekday(Number(currentRule.payout_day) || 0, payoutT.h, payoutT.m);
+      const cards = [
+        {
+          title: "Ближайшее открытие",
+          when: `${shortDay[currentDay]}, ${String(openT.h).padStart(2, "0")}:${String(openT.m).padStart(2, "0")}`,
+          at: nextOpen,
+        },
+        {
+          title: "Ближайшее закрытие",
+          when: `${shortDay[Number(currentRule.close_day) || 0]}, ${String(closeT.h).padStart(2, "0")}:${String(closeT.m).padStart(2, "0")}`,
+          at: nextClose,
+        },
+        {
+          title: "Ближайшая выплата",
+          when: `${shortDay[Number(currentRule.payout_day) || 0]}, ${String(payoutT.h).padStart(2, "0")}:${String(payoutT.m).padStart(2, "0")}`,
+          at: nextPayout,
+        },
+      ];
+      todayOpsHtml = `<div class="cards-grid">
+        ${cards
+          .map(
+            (c) => `<div class="stat-card">
+              <div class="stat-label">${c.title}</div>
+              <div class="stat-value">${c.when}</div>
+              <div class="mini-hint">через ${formatLeft(c.at.getTime() - now.getTime())}</div>
+              <div class="mini-hint">~ ${fmtDateTime(c.at)}</div>
+            </div>`
+          )
+          .join("")}
+      </div>`;
+    }
+    const rows = Array.from({ length: 7 })
+      .map((_, d) => {
+        const row = merged[String(d)] || {};
+        if (!row.enabled) {
+          return `<tr>
+            <td>${dayLabel[d]}</td>
+            <td>Отключено</td>
+            <td>—</td>
+            <td>—</td>
+            <td><span class="status-badge status-unknown">off</span></td>
+          </tr>`;
+        }
+        const open = row.open || "13:00";
+        const closeDay = shortDay[Number(row.close_day) || 0];
+        const closeTime = row.close_time || "12:00";
+        const payoutDay = shortDay[Number(row.payout_day) || 0];
+        const payoutTime = row.payout_time || "15:00";
+        return `<tr>
+          <td>${dayLabel[d]}</td>
+          <td>${open}</td>
+          <td>${closeDay}, ${closeTime}</td>
+          <td>${payoutDay}, после ${payoutTime}</td>
+          <td><span class="status-badge status-paid">on</span></td>
+        </tr>`;
+      })
+      .join("");
+
+    section.innerHTML = `
+      <h1>Расписание сделок</h1>
+      <p class="section-desc">Отдельный календарь цикла сделок. Настройка выполняется в разделе «Настройки → Финансы».</p>
+      <div class="panel-card">
+        <h2>Сегодня по графику</h2>
+        ${todayOpsHtml}
+      </div>
+      <div class="panel-card">
+        <h2>Недельный график</h2>
+        <div class="table-wrapper">
+          <div class="table-wrapper-inner">
+            <table>
+              <thead>
+                <tr>
+                  <th>День</th>
+                  <th>Открытие</th>
+                  <th>Закрытие</th>
+                  <th>Выплата</th>
+                  <th>Статус</th>
+                </tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+        </div>
+        <div class="mini-hint" style="margin-top:10px;">
+          Время зоны: Europe/Chisinau. Изменение расписания: «Настройки» → «Гибкое расписание сделок».
+        </div>
+      </div>
+    `;
+  } catch (e) {
+    section.innerHTML = `<h1>Расписание сделок</h1><div class="error">${e.message}</div>`;
   }
 }
 
@@ -3147,6 +3279,11 @@ async function loadSettings() {
           <input type="text" id="support_contact" class="settings-input" value="${escapeHtmlAttr(s.support_contact || "")}" placeholder="@support_username или https://t.me/support_username" />
           <div class="settings-hint">Используется в кнопке 🆘 Саппорт в боте</div>
         </div>
+        <div class="settings-field" style="margin-bottom:12px;">
+          <div class="settings-label">Гибкое расписание сделок (по дням)</div>
+          <div class="settings-hint">Для каждого дня задайте время открытия, день/время закрытия и день/время выплаты.</div>
+          <div id="deal-schedule-editor"></div>
+        </div>
         <form id="settings-form" class="settings-form">
           <div class="settings-limit-grid">
             <div class="settings-limit-card" data-entity="deposit">
@@ -3376,6 +3513,89 @@ async function loadSettings() {
       if (!Number.isFinite(n)) return "—";
       return `${n.toLocaleString("ru-RU", { maximumFractionDigits: 2 })} USDT`;
     };
+    const weekdayOptions = [
+      { value: 0, label: "Пн" },
+      { value: 1, label: "Вт" },
+      { value: 2, label: "Ср" },
+      { value: 3, label: "Чт" },
+      { value: 4, label: "Пт" },
+      { value: 5, label: "Сб" },
+      { value: 6, label: "Вс" },
+    ];
+    const defaultDealSchedule = {
+      "0": { enabled: true, open: "13:00", close_day: 1, close_time: "12:00", payout_day: 2, payout_time: "15:00" },
+      "1": { enabled: true, open: "13:00", close_day: 2, close_time: "12:00", payout_day: 3, payout_time: "15:00" },
+      "2": { enabled: true, open: "13:00", close_day: 3, close_time: "12:00", payout_day: 4, payout_time: "15:00" },
+      "3": { enabled: true, open: "13:00", close_day: 4, close_time: "12:00", payout_day: 0, payout_time: "15:00" },
+      "4": { enabled: true, open: "13:00", close_day: 0, close_time: "12:00", payout_day: 1, payout_time: "15:00" },
+      "5": { enabled: false, open: "13:00", close_day: 0, close_time: "12:00", payout_day: 1, payout_time: "15:00" },
+      "6": { enabled: false, open: "13:00", close_day: 0, close_time: "12:00", payout_day: 1, payout_time: "15:00" },
+    };
+    const parseSchedule = (raw) => {
+      let data = null;
+      try {
+        data = raw ? JSON.parse(raw) : null;
+      } catch (_) {
+        data = null;
+      }
+      const out = JSON.parse(JSON.stringify(defaultDealSchedule));
+      if (!data || typeof data !== "object") return out;
+      for (let d = 0; d < 7; d++) {
+        const key = String(d);
+        const v = data[key];
+        if (!v || typeof v !== "object") continue;
+        out[key].enabled = Boolean(v.enabled);
+        out[key].open = String(v.open || out[key].open);
+        out[key].close_day = Number.isFinite(Number(v.close_day)) ? Number(v.close_day) : out[key].close_day;
+        out[key].close_time = String(v.close_time || out[key].close_time);
+        out[key].payout_day = Number.isFinite(Number(v.payout_day)) ? Number(v.payout_day) : out[key].payout_day;
+        out[key].payout_time = String(v.payout_time || out[key].payout_time);
+      }
+      return out;
+    };
+    const renderDaySelect = (selected) =>
+      `<select>${weekdayOptions
+        .map((x) => `<option value="${x.value}" ${Number(selected) === x.value ? "selected" : ""}>${x.label}</option>`)
+        .join("")}</select>`;
+    const scheduleState = parseSchedule(s.deal_schedule_json || "");
+    const scheduleEditor = document.getElementById("deal-schedule-editor");
+    if (scheduleEditor) {
+      scheduleEditor.innerHTML = `
+        <div class="table-wrapper"><div class="table-wrapper-inner">
+          <table>
+            <thead><tr><th>День</th><th>Вкл</th><th>Открытие</th><th>Закрытие</th><th>Выплата</th></tr></thead>
+            <tbody>
+              ${weekdayOptions
+                .map((day) => {
+                  const row = scheduleState[String(day.value)];
+                  return `<tr>
+                    <td>${day.label}</td>
+                    <td><input type="checkbox" id="schedule_${day.value}_enabled" ${row.enabled ? "checked" : ""} /></td>
+                    <td><input type="time" id="schedule_${day.value}_open" value="${escapeHtmlAttr(row.open)}" /></td>
+                    <td><span style="display:flex;gap:8px;align-items:center;">${renderDaySelect(row.close_day).replace("<select>", `<select id="schedule_${day.value}_close_day">`)}<input type="time" id="schedule_${day.value}_close_time" value="${escapeHtmlAttr(row.close_time)}" /></span></td>
+                    <td><span style="display:flex;gap:8px;align-items:center;">${renderDaySelect(row.payout_day).replace("<select>", `<select id="schedule_${day.value}_payout_day">`)}<input type="time" id="schedule_${day.value}_payout_time" value="${escapeHtmlAttr(row.payout_time)}" /></span></td>
+                  </tr>`;
+                })
+                .join("")}
+            </tbody>
+          </table>
+        </div></div>
+      `;
+    }
+    const collectScheduleJson = () => {
+      const payload = {};
+      for (let d = 0; d < 7; d++) {
+        payload[String(d)] = {
+          enabled: Boolean(document.getElementById(`schedule_${d}_enabled`)?.checked),
+          open: String(document.getElementById(`schedule_${d}_open`)?.value || "13:00"),
+          close_day: Number(document.getElementById(`schedule_${d}_close_day`)?.value || 0),
+          close_time: String(document.getElementById(`schedule_${d}_close_time`)?.value || "12:00"),
+          payout_day: Number(document.getElementById(`schedule_${d}_payout_day`)?.value || 0),
+          payout_time: String(document.getElementById(`schedule_${d}_payout_time`)?.value || "15:00"),
+        };
+      }
+      return JSON.stringify(payload);
+    };
     const setMode = (entity, mode) => {
       const modeInput = document.getElementById(`mode_${entity}`);
       if (modeInput) modeInput.value = mode;
@@ -3482,6 +3702,7 @@ async function loadSettings() {
       payloadValues.allow_investments = Boolean(document.getElementById("allow_investments")?.checked);
       payloadValues.allow_withdrawals = Boolean(document.getElementById("allow_withdrawals")?.checked);
       payloadValues.support_contact = String(document.getElementById("support_contact")?.value || "").trim();
+      payloadValues.deal_schedule_json = collectScheduleJson();
       return payloadValues;
     };
 
@@ -3523,6 +3744,10 @@ async function loadSettings() {
     });
     ["allow_deposits", "allow_investments", "allow_withdrawals"].forEach((id) => {
       document.getElementById(id)?.addEventListener("change", updateSettingsSaveState);
+    });
+    section.querySelectorAll('[id^="schedule_"]').forEach((el) => {
+      const evt = el.tagName === "SELECT" || (el.type && el.type.toLowerCase() === "checkbox") ? "change" : "input";
+      el.addEventListener(evt, updateSettingsSaveState);
     });
     setMode("deposit", initialModes.deposit);
     setMode("withdraw", initialModes.withdraw);

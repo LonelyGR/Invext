@@ -20,6 +20,7 @@ from src.services.deal_service import (
     send_referral_bonus_reminders_for_active_deal,
 )
 from src.services.broadcast_service import process_pending_broadcasts
+from src.services.settings_service import get_system_settings
 
 logger = logging.getLogger(__name__)
 
@@ -70,19 +71,20 @@ def init_deal_scheduler(scheduler: AsyncIOScheduler, db_factory) -> None:
                 logger.exception("referral_reminder_1100 job failed: %s", e)
 
     async def _job_open_deal_1300():
-        logger.info("open_deal_1300 job started")
-        # Окно сбора — единая функция в deal_service (пятница → понедельник 12:00;
-        # суббота/воскресенье: новые сделки по cron не открываем).
+        logger.info("open_deal_by_schedule job started")
         now_utc = dt.datetime.now(dt.timezone.utc)
-        window = scheduled_collection_window_1300_chisinau(now_utc)
-        if window is None:
-            logger.info("open_deal_1300: skipped (weekend — no scheduled collection open)")
-            return
-        start_at, end_at = window
 
         async with db_factory() as db:
             logger.debug("open_deal_1300: session created")
             try:
+                settings = await get_system_settings(db)
+                window = scheduled_collection_window_1300_chisinau(
+                    now_utc,
+                    schedule_raw=getattr(settings, "deal_schedule_json", None),
+                )
+                if window is None:
+                    return
+                start_at, end_at = window
                 logger.debug("open_deal_1300: before open_new_deal_by_schedule")
                 deal = await open_new_deal_by_schedule(db, start_at=start_at, end_at=end_at)
                 if deal:
@@ -157,6 +159,6 @@ def init_deal_scheduler(scheduler: AsyncIOScheduler, db_factory) -> None:
     )
     scheduler.add_job(
         _job_open_deal_1300,
-        CronTrigger(hour=13, minute=0, timezone=SCHEDULE_TZ),
-        name="open_deal_1300_chisinau",
+        IntervalTrigger(minutes=1),
+        name="open_deal_by_schedule",
     )

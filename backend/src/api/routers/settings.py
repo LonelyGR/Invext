@@ -36,6 +36,7 @@ async def get_system_settings_admin(
         "allow_investments": bool(row.allow_investments),
         "allow_withdrawals": bool(getattr(row, "allow_withdrawals", True)),
         "support_contact": getattr(row, "support_contact", None),
+        "deal_schedule_json": getattr(row, "deal_schedule_json", None),
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
     }
 
@@ -64,6 +65,7 @@ async def update_system_setting_field(
         "allow_investments",
         "allow_withdrawals",
         "support_contact",
+        "deal_schedule_json",
     }
     if field not in allowed_fields:
         raise HTTPException(
@@ -98,6 +100,9 @@ async def update_system_setting_field(
                 row.allow_withdrawals = bool_value
         elif field == "support_contact":
             row.support_contact = (str(payload.get("value") or "").strip()[:255] or None)
+        elif field == "deal_schedule_json":
+            raw = str(payload.get("value") or "").strip()
+            row.deal_schedule_json = raw or None
         else:
             try:
                 value = Decimal(raw_value)

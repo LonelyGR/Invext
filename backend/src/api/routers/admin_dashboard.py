@@ -119,6 +119,7 @@ SYSTEM_SETTINGS_FIELDS = (
     "allow_investments",
     "allow_withdrawals",
     "support_contact",
+    "deal_schedule_json",
 )
 SYSTEM_SETTINGS_DEFAULTS = {
     "min_deposit_usdt": "10",
@@ -131,6 +132,7 @@ SYSTEM_SETTINGS_DEFAULTS = {
     "allow_investments": True,
     "allow_withdrawals": True,
     "support_contact": "",
+    "deal_schedule_json": "",
 }
 MAINTENANCE_RESET_LOCK = asyncio.Lock()
 MAINTENANCE_TABLES = [
@@ -295,6 +297,7 @@ def _settings_snapshot(row: SystemSettings) -> dict:
         "allow_investments": bool(row.allow_investments),
         "allow_withdrawals": bool(getattr(row, "allow_withdrawals", True)),
         "support_contact": str(getattr(row, "support_contact", "") or ""),
+        "deal_schedule_json": str(getattr(row, "deal_schedule_json", "") or ""),
     }
 
 
@@ -319,6 +322,9 @@ def _validate_full_settings_payload(payload: dict) -> dict:
             continue
         if field == "support_contact":
             parsed[field] = str(payload.get(field) or "").strip()[:255]
+            continue
+        if field == "deal_schedule_json":
+            parsed[field] = str(payload.get(field) or "").strip()
             continue
         raw = str(payload.get(field, "")).replace(",", ".").strip()
         try:
@@ -2789,6 +2795,9 @@ async def update_system_settings_admin(
                 row.allow_withdrawals = bool_value
         elif field == "support_contact":
             row.support_contact = (str(body.get("value") or "").strip()[:255] or None)
+        elif field == "deal_schedule_json":
+            raw_schedule = str(body.get("value") or "").strip()
+            row.deal_schedule_json = raw_schedule or None
         else:
             try:
                 value = Decimal(raw_value)

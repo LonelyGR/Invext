@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 import logging
 from decimal import Decimal
 from typing import List, Optional
@@ -51,8 +52,69 @@ REFERRAL_LEVEL_PERCENTS: List[float] = [
 ]
 MAX_REFERRAL_LEVELS = 10
 
+DEFAULT_WEEKLY_DEAL_SCHEDULE = {
+    # weekday: Mon=0 ... Sun=6
+    "0": {"enabled": True, "open": "13:00", "close_day": 1, "close_time": "12:00", "payout_day": 2, "payout_time": "15:00"},
+    "1": {"enabled": True, "open": "13:00", "close_day": 2, "close_time": "12:00", "payout_day": 3, "payout_time": "15:00"},
+    "2": {"enabled": True, "open": "13:00", "close_day": 3, "close_time": "12:00", "payout_day": 4, "payout_time": "15:00"},
+    "3": {"enabled": True, "open": "13:00", "close_day": 4, "close_time": "12:00", "payout_day": 0, "payout_time": "15:00"},
+    "4": {"enabled": True, "open": "13:00", "close_day": 0, "close_time": "12:00", "payout_day": 1, "payout_time": "15:00"},
+    "5": {"enabled": False, "open": "13:00", "close_day": 0, "close_time": "12:00", "payout_day": 1, "payout_time": "15:00"},
+    "6": {"enabled": False, "open": "13:00", "close_day": 0, "close_time": "12:00", "payout_day": 1, "payout_time": "15:00"},
+}
 
-def collection_end_local_for_start(start_local: dt.datetime) -> dt.datetime:
+
+def _parse_hhmm(value: str, default_hour: int, default_minute: int) -> tuple[int, int]:
+    raw = str(value or "").strip()
+    try:
+        hh, mm = raw.split(":", 1)
+        hour = max(0, min(23, int(hh)))
+        minute = max(0, min(59, int(mm)))
+        return hour, minute
+    except Exception:
+        return default_hour, default_minute
+
+
+def _normalized_schedule(raw: object) -> dict[str, dict]:
+    base = {k: dict(v) for k, v in DEFAULT_WEEKLY_DEAL_SCHEDULE.items()}
+    payload = raw
+    if isinstance(raw, str):
+        txt = raw.strip()
+        if not txt:
+            return base
+        try:
+            payload = json.loads(txt)
+        except Exception:
+            return base
+    if not isinstance(payload, dict):
+        return base
+    for day in range(7):
+        key = str(day)
+        candidate = payload.get(key)
+        if not isinstance(candidate, dict):
+            continue
+        current = base[key]
+        current["enabled"] = bool(candidate.get("enabled", current["enabled"]))
+        current["open"] = str(candidate.get("open", current["open"]) or current["open"])
+        current["close_day"] = int(candidate.get("close_day", current["close_day"]))
+        current["close_time"] = str(candidate.get("close_time", current["close_time"]) or current["close_time"])
+        current["payout_day"] = int(candidate.get("payout_day", current["payout_day"]))
+        current["payout_time"] = str(candidate.get("payout_time", current["payout_time"]) or current["payout_time"])
+    return base
+
+
+def _next_weekday_time_after(start_local: dt.datetime, target_weekday: int, hhmm: str) -> dt.datetime:
+    h, m = _parse_hhmm(hhmm, 0, 0)
+    days_delta = (int(target_weekday) - start_local.weekday()) % 7
+    candidate = (start_local + dt.timedelta(days=days_delta)).replace(
+        hour=h, minute=m, second=0, microsecond=0
+    )
+    if candidate <= start_local:
+        candidate = candidate + dt.timedelta(days=7)
+    return candidate
+
+
+def collection_end_local_for_start(start_local: dt.datetime, schedule_raw: object | None = None) -> dt.datetime:
     """
     Момент закрытия сбора по локальному времени начала (Europe/Chisinau).
 
@@ -66,17 +128,16 @@ def collection_end_local_for_start(start_local: dt.datetime) -> dt.datetime:
         start_local = start_local.replace(tzinfo=SCHEDULE_TZ)
     else:
         start_local = start_local.astimezone(SCHEDULE_TZ)
-    if start_local.weekday() == 4:  # Friday
-        return (start_local + dt.timedelta(days=3)).replace(
-            hour=12, minute=0, second=0, microsecond=0
-        )
-    return (start_local + dt.timedelta(days=1)).replace(
-        hour=12, minute=0, second=0, microsecond=0
-    )
+    schedule = _normalized_schedule(schedule_raw)
+    rule = schedule.get(str(start_local.weekday()), DEFAULT_WEEKLY_DEAL_SCHEDULE[str(start_local.weekday())])
+    close_day = int(rule.get("close_day", (start_local.weekday() + 1) % 7))
+    close_time = str(rule.get("close_time", "12:00"))
+    return _next_weekday_time_after(start_local, close_day, close_time)
 
 
 def scheduled_collection_window_1300_chisinau(
     now_utc: dt.datetime,
+    schedule_raw: object | None = None,
 ) -> Optional[tuple[dt.datetime, dt.datetime]]:
     """
     Окно сбора для автоматического открытия сделки в 13:00 Europe/Chisinau.
@@ -86,17 +147,25 @@ def scheduled_collection_window_1300_chisinau(
     Возвращает (start_at UTC, end_at UTC).
     """
     now_local = now_utc.astimezone(SCHEDULE_TZ)
-    if now_local.weekday() in (5, 6):
+    schedule = _normalized_schedule(schedule_raw)
+    today_rule = schedule.get(str(now_local.weekday()))
+    if not today_rule or not bool(today_rule.get("enabled", True)):
         return None
-    start_local = now_local.replace(hour=13, minute=0, second=0, microsecond=0)
-    end_local = collection_end_local_for_start(start_local)
+    open_h, open_m = _parse_hhmm(str(today_rule.get("open", "13:00")), 13, 0)
+    if now_local.hour != open_h or now_local.minute != open_m:
+        return None
+    start_local = now_local.replace(hour=open_h, minute=open_m, second=0, microsecond=0)
+    end_local = collection_end_local_for_start(start_local, schedule_raw=schedule)
     return (
         start_local.astimezone(dt.timezone.utc),
         end_local.astimezone(dt.timezone.utc),
     )
 
 
-def next_scheduled_open_1300_chisinau(after_utc: Optional[dt.datetime] = None) -> dt.datetime:
+def next_scheduled_open_1300_chisinau(
+    after_utc: Optional[dt.datetime] = None,
+    schedule_raw: object | None = None,
+) -> dt.datetime:
     """
     Следующее фиксированное открытие сбора: 13:00 Europe/Chisinau в рабочий день.
     Расчёт идёт по календарному слоту, а не от фактического момента прошлой сделки.
@@ -108,17 +177,21 @@ def next_scheduled_open_1300_chisinau(after_utc: Optional[dt.datetime] = None) -
         base_utc = base_utc.astimezone(dt.timezone.utc)
 
     local_now = base_utc.astimezone(SCHEDULE_TZ)
-    candidate = local_now.replace(hour=13, minute=0, second=0, microsecond=0)
-    if candidate <= local_now:
-        candidate = candidate + dt.timedelta(days=1)
+    schedule = _normalized_schedule(schedule_raw)
+    for delta_days in range(0, 14):
+        day_dt = local_now + dt.timedelta(days=delta_days)
+        rule = schedule.get(str(day_dt.weekday()))
+        if not rule or not bool(rule.get("enabled", True)):
+            continue
+        h, m = _parse_hhmm(str(rule.get("open", "13:00")), 13, 0)
+        candidate = day_dt.replace(hour=h, minute=m, second=0, microsecond=0)
+        if candidate > local_now:
+            return candidate.astimezone(dt.timezone.utc)
+    # Fallback на прежнее время если все дни выключены/битые
+    return local_now.replace(hour=13, minute=0, second=0, microsecond=0).astimezone(dt.timezone.utc)
 
-    while candidate.weekday() in (5, 6):  # Saturday/Sunday
-        candidate = candidate + dt.timedelta(days=1)
 
-    return candidate.astimezone(dt.timezone.utc)
-
-
-def calculate_payout_at(invest_datetime_utc: Optional[dt.datetime] = None) -> dt.datetime:
+def calculate_payout_at(invest_datetime_utc: Optional[dt.datetime] = None, schedule_raw: object | None = None) -> dt.datetime:
     """
     Фиксированное расписание выплат (Europe/Chisinau), строго 15:00:
 
@@ -147,56 +220,35 @@ def calculate_payout_at(invest_datetime_utc: Optional[dt.datetime] = None) -> dt
         invest_datetime_utc = invest_datetime_utc.replace(tzinfo=dt.timezone.utc)
 
     local_dt = invest_datetime_utc.astimezone(PAYOUT_TZ)
-    local_date = local_dt.date()
-    weekday = local_dt.weekday()  # Mon=0 ... Sun=6
-
-    # В системе окна сделок разорваны: между закрытием (12:00) и открытием (13:00)
-    # пользователь обычно не может инвестировать. На всякий случай считаем времена
-    # > 12:00 как "после 13:00" по смыслу.
-    before_12 = local_dt.time() <= dt.time(hour=12, minute=0, second=0)
-
-    if weekday == 5:  # Saturday
-        payout_date = local_date + dt.timedelta(days=3)  # -> Tuesday
-    elif weekday == 6:  # Sunday
-        payout_date = local_date + dt.timedelta(days=2)  # -> Tuesday
-    else:
-        # Рабочие дни (Mon..Fri)
-        if weekday == 0:  # Monday
-            days = 1 if before_12 else 2
-        elif weekday == 1:  # Tuesday
-            days = 1 if before_12 else 2
-        elif weekday == 2:  # Wednesday
-            days = 1 if before_12 else 2
-        elif weekday == 3:  # Thursday
-            days = 1 if before_12 else 4
-        elif weekday == 4:  # Friday
-            days = 3 if before_12 else 4
-        else:
-            # Не должно случиться
-            days = 2
-        payout_date = local_date + dt.timedelta(days=days)
-
-    payout_local = dt.datetime(
-        payout_date.year,
-        payout_date.month,
-        payout_date.day,
-        15,
-        0,
-        0,
-        tzinfo=PAYOUT_TZ,
-    )
+    schedule = _normalized_schedule(schedule_raw)
+    rule = schedule.get(str(local_dt.weekday()), DEFAULT_WEEKLY_DEAL_SCHEDULE[str(local_dt.weekday())])
+    payout_day = int(rule.get("payout_day", (local_dt.weekday() + 2) % 7))
+    payout_time = str(rule.get("payout_time", "15:00"))
+    payout_local = _next_weekday_time_after(local_dt, payout_day, payout_time)
     return payout_local.astimezone(dt.timezone.utc)
 
 
-def calculate_payout_at_for_investment(now_utc: Optional[dt.datetime] = None) -> dt.datetime:
+def calculate_payout_at_for_deal_start(start_at_utc: Optional[dt.datetime], schedule_raw: object | None = None) -> dt.datetime:
+    base_utc = start_at_utc or dt.datetime.now(dt.timezone.utc)
+    if base_utc.tzinfo is None:
+        base_utc = base_utc.replace(tzinfo=dt.timezone.utc)
+    local_start = base_utc.astimezone(PAYOUT_TZ)
+    schedule = _normalized_schedule(schedule_raw)
+    rule = schedule.get(str(local_start.weekday()), DEFAULT_WEEKLY_DEAL_SCHEDULE[str(local_start.weekday())])
+    payout_day = int(rule.get("payout_day", (local_start.weekday() + 2) % 7))
+    payout_time = str(rule.get("payout_time", "15:00"))
+    payout_local = _next_weekday_time_after(local_start, payout_day, payout_time)
+    return payout_local.astimezone(dt.timezone.utc)
+
+
+def calculate_payout_at_for_investment(now_utc: Optional[dt.datetime] = None, schedule_raw: object | None = None) -> dt.datetime:
     # Совместимость с существующими вызовами.
-    return calculate_payout_at(now_utc)
+    return calculate_payout_at(now_utc, schedule_raw=schedule_raw)
 
 
 async def get_active_deal(db: AsyncSession) -> Optional[Deal]:
     """Сделка с открытым окном сбора: status=active и now между start_at и end_at."""
     now = dt.datetime.now(dt.timezone.utc)
-    now_local = now.astimezone(SCHEDULE_TZ)
     result = await db.execute(
         select(Deal)
         .where(
@@ -210,23 +262,6 @@ async def get_active_deal(db: AsyncSession) -> Optional[Deal]:
         .limit(1)
     )
     deal = result.scalar_one_or_none()
-    # В выходные разрешаем только ту сделку, которая была открыта в пятницу (13:00 local)
-    # и остаётся активной до понедельника (12:00).
-    if deal and now_local.weekday() in (5, 6):
-        try:
-            start_local = deal.start_at.astimezone(SCHEDULE_TZ) if deal.start_at else None
-            end_local = deal.end_at.astimezone(SCHEDULE_TZ) if deal.end_at else None
-            if not (
-                start_local
-                and start_local.weekday() == 4  # Friday
-                and start_local.hour == 13
-                and end_local
-                and end_local.weekday() == 0  # Monday
-                and end_local.hour == 12
-            ):
-                return None
-        except Exception:
-            return None
     return deal
 
 
@@ -243,7 +278,6 @@ async def participate_in_deal(
     """
 
     now = dt.datetime.now(dt.timezone.utc)
-    now_local = now.astimezone(SCHEDULE_TZ)
 
     deal_result = await db.execute(
         select(Deal)
@@ -261,21 +295,6 @@ async def participate_in_deal(
     deal = deal_result.scalar_one_or_none()
     if not deal:
         raise ValueError("Нет активной сделки для участия")
-
-    # В выходные разрешаем вход только в пятничную сделку (которая активна до понедельника 12:00).
-    if now_local.weekday() in (5, 6):
-        start_local = deal.start_at.astimezone(SCHEDULE_TZ) if deal.start_at else None
-        end_local = deal.end_at.astimezone(SCHEDULE_TZ) if deal.end_at else None
-        ok = (
-            start_local
-            and start_local.weekday() == 4  # Friday
-            and start_local.hour == 13
-            and end_local
-            and end_local.weekday() == 0  # Monday
-            and end_local.hour == 12
-        )
-        if not ok:
-            raise ValueError("В выходные вход в сделки доступен только для пятничной сделки.")
 
     # Лочим пользователя, чтобы защититься от гонок при списании баланса.
     user_locked_result = await db.execute(
@@ -323,7 +342,7 @@ async def participate_in_deal(
         user_id=user_locked.id,
         amount=amount,
         status=PARTICIPATION_STATUS_ACTIVE,
-        payout_at=calculate_payout_at_for_investment(),
+        payout_at=calculate_payout_at_for_deal_start(deal.start_at),
     )
     db.add(participation)
     await db.flush()
@@ -451,7 +470,11 @@ async def close_deal_flow(db: AsyncSession, deal: Deal) -> None:
                     referral_missed_by_telegram[tid] = referral_missed_by_telegram.get(tid, 0.0) + float(amount)
 
         profit_pct = float(deal.profit_percent) if deal.profit_percent is not None else None
-        next_open_at = next_scheduled_open_1300_chisinau(now)
+        settings = await get_system_settings(db)
+        next_open_at = next_scheduled_open_1300_chisinau(
+            now,
+            schedule_raw=getattr(settings, "deal_schedule_json", None),
+        )
         await broadcast_deal_closed(
             telegram_ids,
             deal.number,
@@ -477,12 +500,10 @@ async def process_pending_payouts(db: AsyncSession) -> int:
     Возвращает кол-во обработанных записей.
     """
     # Для новой бизнес-логики:
-    # — выплата происходит строго по рассчитанному payout_at (15:00 расписание)
-    # — на выходные выплаты не выполняются (защитимся на уровне джобы)
+    # — выплата происходит строго по рассчитанному payout_at по расписанию.
     now = dt.datetime.now(dt.timezone.utc)
-    now_local = now.astimezone(SCHEDULE_TZ)
-    if now_local.weekday() in (5, 6):  # Sat/Sun
-        return 0
+    settings = await get_system_settings(db)
+    schedule_raw = getattr(settings, "deal_schedule_json", None)
 
     # Важно для идемпотентности при нескольких воркерах:
     # лочим строки и пропускаем уже залоченные (чтобы не выплатить дважды).
@@ -509,9 +530,18 @@ async def process_pending_payouts(db: AsyncSession) -> int:
 
     for p in participations:
         try:
+            if p.deal_id not in deal_cache:
+                deal_obj = await db.get(Deal, p.deal_id)
+                if deal_obj:
+                    deal_cache[p.deal_id] = deal_obj
+            deal = deal_cache.get(p.deal_id)
+
             # На случай старых записей: пересчитаем payout_at по дате/времени участия,
             # чтобы убрать зависимость от deal.closed_at + 24h.
-            desired_payout_at = calculate_payout_at(p.created_at)
+            desired_payout_at = calculate_payout_at_for_deal_start(
+                deal.start_at if deal else p.created_at,
+                schedule_raw=schedule_raw,
+            )
             if desired_payout_at > now:
                 # Обновим scheduled time, чтобы в следующих прогонах джобы не пытаться
                 # обработать это участие раньше времени.
@@ -520,12 +550,6 @@ async def process_pending_payouts(db: AsyncSession) -> int:
 
             profit = p.profit_amount or Decimal("0")
 
-            if p.deal_id not in deal_cache:
-                deal_obj = await db.get(Deal, p.deal_id)
-                if deal_obj:
-                    deal_cache[p.deal_id] = deal_obj
-
-            deal = deal_cache.get(p.deal_id)
             meta_base = {
                 "deal_id": p.deal_id,
                 "deal_number": deal.number if deal else None,
@@ -725,9 +749,6 @@ async def close_active_deal_by_schedule(db: AsyncSession, *, force: bool = False
     Транзакция управляется вызывающим кодом (scheduler); не вызывать db.begin() здесь.
     """
     now = dt.datetime.now(dt.timezone.utc)
-    now_local = now.astimezone(SCHEDULE_TZ)
-    if not force and now_local.weekday() in (5, 6):  # Sat/Sun
-        return False
     filters = [Deal.status == DEAL_STATUS_ACTIVE]
     if not force:
         filters.append(Deal.end_at <= now)
@@ -814,25 +835,7 @@ async def get_active_deal_legacy(db: AsyncSession) -> Optional[Deal]:
     result = await db.execute(
         select(Deal).where(Deal.status == "open").order_by(Deal.opened_at.desc()).limit(1)
     )
-    deal = result.scalar_one_or_none()
-    now_local = dt.datetime.now(dt.timezone.utc).astimezone(SCHEDULE_TZ)
-    if deal and now_local.weekday() in (5, 6):
-        # Наследованная логика: на выходные оставляем доступ только к пятничной сделке.
-        try:
-            start_local = deal.start_at.astimezone(SCHEDULE_TZ) if getattr(deal, "start_at", None) else None
-            end_local = deal.end_at.astimezone(SCHEDULE_TZ) if getattr(deal, "end_at", None) else None
-            if not (
-                start_local
-                and start_local.weekday() == 4
-                and start_local.hour == 13
-                and end_local
-                and end_local.weekday() == 0
-                and end_local.hour == 12
-            ):
-                return None
-        except Exception:
-            return None
-    return deal
+    return result.scalar_one_or_none()
 
 
 async def open_new_deal(

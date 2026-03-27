@@ -21,6 +21,7 @@ class SettingsDTO:
     allow_investments: bool
     allow_withdrawals: bool
     support_contact: str | None
+    deal_schedule_json: str | None
 
 
 async def get_system_settings(db: AsyncSession) -> SettingsDTO:
@@ -44,6 +45,7 @@ async def get_system_settings(db: AsyncSession) -> SettingsDTO:
         allow_investments=bool(row.allow_investments),
         allow_withdrawals=bool(getattr(row, "allow_withdrawals", True)),
         support_contact=getattr(row, "support_contact", None),
+        deal_schedule_json=getattr(row, "deal_schedule_json", None),
     )
 
 
