@@ -4,6 +4,7 @@
 """
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
+from zoneinfo import ZoneInfo
 
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
@@ -27,6 +28,7 @@ import logging
 
 router = Router(name="invest")
 logger = logging.getLogger(__name__)
+BOT_TZ = ZoneInfo("Europe/Chisinau")
 
 
 class InvestStates(StatesGroup):
@@ -50,6 +52,9 @@ def _format_payout_at(payout_at_iso: str | None) -> str:
         return "не назначена"
     try:
         dt_obj = datetime.fromisoformat(payout_at_iso.replace("Z", "+00:00"))
+        if dt_obj.tzinfo is None:
+            dt_obj = dt_obj.replace(tzinfo=ZoneInfo("UTC"))
+        dt_obj = dt_obj.astimezone(BOT_TZ)
         return f"{dt_obj.strftime('%d.%m')} после 15:00"
     except Exception:
         return payout_at_iso
@@ -60,6 +65,9 @@ def _format_collecting_end(end_at_iso: str | None) -> str:
         return "—"
     try:
         dt_obj = datetime.fromisoformat(end_at_iso.replace("Z", "+00:00"))
+        if dt_obj.tzinfo is None:
+            dt_obj = dt_obj.replace(tzinfo=ZoneInfo("UTC"))
+        dt_obj = dt_obj.astimezone(BOT_TZ)
         return f"{dt_obj.strftime('%d.%m')} до {dt_obj.strftime('%H:%M')}"
     except Exception:
         return str(end_at_iso)
@@ -94,6 +102,9 @@ def _format_date_short(iso_str: str | None) -> str:
         return ""
     try:
         dt_obj = datetime.fromisoformat(str(iso_str).replace("Z", "+00:00"))
+        if dt_obj.tzinfo is None:
+            dt_obj = dt_obj.replace(tzinfo=ZoneInfo("UTC"))
+        dt_obj = dt_obj.astimezone(BOT_TZ)
         return dt_obj.strftime("%d.%m")
     except Exception:
         return str(iso_str)[:10]
