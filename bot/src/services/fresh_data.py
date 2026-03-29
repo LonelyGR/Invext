@@ -21,10 +21,12 @@ async def get_invest_dashboard(telegram_id: int) -> dict[str, Any]:
     balances = await api.get_balances(telegram_id)
     active = await api.get_active_deal()
     my_deals = await api.get_my_deals(telegram_id)
+    pending_payout = await api.get_pending_payout_info(telegram_id)
     settings = await api.get_system_settings()
     return {
         "balances": balances or {"USDT": 0},
         "active": active or {"active": False},
         "my_deals": my_deals or {"active_deals": [], "completed_deals": []},
+        "pending_payout": pending_payout or {"pending": False},
         "settings": settings or {},
     }

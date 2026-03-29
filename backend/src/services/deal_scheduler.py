@@ -1,18 +1,17 @@
 """
 Планировщик: периодическая проверка сделок с истёкшим end_at и закрытие их.
+Открытие сбора — по минутному интервалу и расписанию из админки (deal_schedule_json).
+Закрытие по календарю — через process_due_deals (end_at), без отдельного cron на 12:00.
 """
 from __future__ import annotations
 
 import datetime as dt
 import logging
-from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from src.services.deal_service import (
-    close_active_deal_by_schedule,
     open_new_deal_by_schedule,
     process_due_deals,
     process_pending_payouts,
@@ -23,9 +22,6 @@ from src.services.broadcast_service import process_pending_broadcasts
 from src.services.settings_service import get_system_settings
 
 logger = logging.getLogger(__name__)
-
-# Весь календарь сделок завязан на времени Кишинёва.
-SCHEDULE_TZ = ZoneInfo("Europe/Chisinau")
 
 
 def init_deal_scheduler(scheduler: AsyncIOScheduler, db_factory) -> None:
@@ -45,30 +41,6 @@ def init_deal_scheduler(scheduler: AsyncIOScheduler, db_factory) -> None:
             except Exception as e:
                 await db.rollback()
                 logger.exception("process_due_deals job failed: %s", e)
-
-    async def _job_close_deal_1200():
-        logger.info("close_deal_1200 job started")
-        async with db_factory() as db:
-            logger.debug("close_deal_1200: session created")
-            try:
-                closed = await close_active_deal_by_schedule(db)
-                await db.commit()
-                logger.info("close_deal_1200 job finished, closed=%s", closed)
-            except Exception as e:
-                await db.rollback()
-                logger.exception("close_deal_1200 job failed: %s", e)
-
-    async def _job_referral_reminder_1100():
-        logger.info("referral_reminder_1100 job started")
-        async with db_factory() as db:
-            logger.debug("referral_reminder_1100: session created")
-            try:
-                sent = await send_referral_bonus_reminders_for_active_deal(db)
-                await db.commit()
-                logger.info("referral_reminder_1100 job finished, sent=%s", sent)
-            except Exception as e:
-                await db.rollback()
-                logger.exception("referral_reminder_1100 job failed: %s", e)
 
     async def _job_open_deal_1300():
         logger.info("open_deal_by_schedule job started")
@@ -129,6 +101,18 @@ def init_deal_scheduler(scheduler: AsyncIOScheduler, db_factory) -> None:
                 await db.rollback()
                 logger.exception("process_broadcasts job failed: %s", e)
 
+    async def _job_referral_preclose_reminder():
+        """Реф. напоминание только в окне ~1 ч до end_at и не в субботу (логика внутри)."""
+        async with db_factory() as db:
+            try:
+                n = await send_referral_bonus_reminders_for_active_deal(db)
+                await db.commit()
+                if n:
+                    logger.info("referral_preclose_reminder job sent=%s", n)
+            except Exception as e:
+                await db.rollback()
+                logger.exception("referral_preclose_reminder job failed: %s", e)
+
     scheduler.add_job(
         _job_process_due_deals,
         IntervalTrigger(minutes=1),
@@ -146,19 +130,13 @@ def init_deal_scheduler(scheduler: AsyncIOScheduler, db_factory) -> None:
         name="process_broadcasts",
     )
 
-    # Ежедневные задачи по времени Кишинёва:
-    scheduler.add_job(
-        _job_referral_reminder_1100,
-        CronTrigger(hour=11, minute=0, timezone=SCHEDULE_TZ),
-        name="referral_reminder_1100_chisinau",
-    )
-    scheduler.add_job(
-        _job_close_deal_1200,
-        CronTrigger(hour=12, minute=0, timezone=SCHEDULE_TZ),
-        name="close_deal_1200_chisinau",
-    )
     scheduler.add_job(
         _job_open_deal_1300,
         IntervalTrigger(minutes=1),
         name="open_deal_by_schedule",
+    )
+    scheduler.add_job(
+        _job_referral_preclose_reminder,
+        IntervalTrigger(minutes=5),
+        name="referral_preclose_reminder",
     )

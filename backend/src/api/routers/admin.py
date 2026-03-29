@@ -27,11 +27,13 @@ from src.services.withdraw_service import (
     reject_withdraw,
 )
 from src.services.deal_service import (
+    acquire_deal_open_advisory_lock,
     get_active_deal,
     open_new_deal,
     process_pending_payouts,
     collection_end_local_for_start,
 )
+from src.services.withdraw_service import withdraw_fee_and_net
 from src.services.notification_service import broadcast_deal_opened
 
 router = APIRouter(prefix="/v1/admin", tags=["admin"], dependencies=[Depends(require_admin_key)])
@@ -42,21 +44,26 @@ ADMIN_MAINTENANCE_LOCK = asyncio.Lock()
 async def admin_pending_withdrawals(db: AsyncSession = Depends(get_db)):
     """Список заявок на вывод со статусом PENDING с данными пользователя."""
     items = await get_pending_withdrawals_with_users(db)
-    return [
-        {
-            "id": req.id,
-            "user_id": req.user_id,
-            "user_telegram_id": user.telegram_id,
-            "user_username": user.username,
-            "user_name": user.name,
-            "currency": req.currency,
-            "amount": str(req.amount),
-            "address": req.address,
-            "status": req.status,
-            "created_at": req.created_at.isoformat(),
-        }
-        for req, user in items
-    ]
+    out = []
+    for req, user in items:
+        fee, net = withdraw_fee_and_net(req.amount)
+        out.append(
+            {
+                "id": req.id,
+                "user_id": req.user_id,
+                "user_telegram_id": user.telegram_id,
+                "user_username": user.username,
+                "user_name": user.name,
+                "currency": req.currency,
+                "amount": str(req.amount),
+                "fee_amount": str(fee),
+                "net_amount": str(net),
+                "address": req.address,
+                "status": req.status,
+                "created_at": req.created_at.isoformat(),
+            }
+        )
+    return out
 
 
 @router.post("/withdrawals/{withdraw_id}/approve")
@@ -262,6 +269,8 @@ async def admin_open_deal_now(
     decided_by_telegram_id: int = Query(..., description="Telegram ID админа"),
     db: AsyncSession = Depends(get_db),
 ):
+    await acquire_deal_open_advisory_lock(db)
+
     active = await get_active_deal(db)
     if active:
         raise HTTPException(status_code=400, detail=f"Уже есть активная сделка #{active.number}")

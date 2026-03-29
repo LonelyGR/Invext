@@ -2473,7 +2473,9 @@ async function loadUserDetail(userId) {
         (w) => `
         <tr>
           <td>${w.id}</td>
-          <td>${w.amount}</td>
+          <td class="num-cell">${w.amount}</td>
+          <td class="num-cell">${w.fee_amount ?? "—"}</td>
+          <td class="num-cell">${w.net_amount ?? "—"}</td>
           <td>${w.currency}</td>
           <td class="cell-address">${escapeHtmlAttr(w.address || "")} <button type="button" class="btn-secondary-small copy-address-btn" data-address="${escapeHtmlAttr(w.address || "")}">Копировать</button></td>
           <td>${w.status}</td>
@@ -2635,13 +2637,16 @@ async function loadUserDetail(userId) {
           </div>
         </div>
         <h2>Заявки на вывод</h2>
+        <p class="section-desc mini-hint">Списание — с баланса; комиссия 10%; к выплате — на адрес пользователя.</p>
         <div class="table-wrapper">
           <div class="table-wrapper-inner">
             <table>
               <thead>
                 <tr>
                   <th>ID</th>
-                  <th>Сумма</th>
+                  <th>Списание</th>
+                  <th>Комиссия 10%</th>
+                  <th>К выплате</th>
                   <th>Валюта</th>
                   <th>Кошелек</th>
                   <th>Статус</th>
@@ -3050,7 +3055,7 @@ async function loadWithdrawals() {
         <td>${w.id}</td>
         <td>${w.telegram_id}</td>
         <td>${w.username || ""}</td>
-        <td class="amount-negative">−${w.amount} ${w.currency}</td>
+        <td class="amount-negative"><div>−${w.amount} ${w.currency}</div><div class="mini-hint">комиссия ${w.fee_amount ?? "—"} · к выплате ${w.net_amount ?? "—"}</div></td>
         <td class="cell-address">${escapeHtmlAttr(w.address || "")} <button type="button" class="btn-secondary-small copy-address-btn" data-address="${escapeHtmlAttr(w.address || "")}">Копировать</button></td>
         <td><span class="${withdrawalStatusBadge(w.status)}">${w.status}</span></td>
         <td>${
@@ -3068,7 +3073,7 @@ async function loadWithdrawals() {
     const rowsHtml = rows || `<tr><td colspan="9"><div class="empty-state"><strong>Нет заявок на вывод</strong><span>Смените статус в фильтре или зайдите позже.</span></div></td></tr>`;
     section.innerHTML = `
       <h1>Выводы</h1>
-      <p class="section-desc">Управление заявками на вывод средств.</p>
+      <p class="section-desc">Управление заявками на вывод средств. С баланса списывается указанная сумма; комиссия 10%; на кошелёк пользователя — остаток (к выплате).</p>
       <div class="panel-card">
         <div class="toolbar filters-toolbar">
           <label class="filter-label">
@@ -3109,7 +3114,7 @@ async function loadWithdrawals() {
                   <th>ID</th>
                   <th>Telegram ID</th>
                   <th>Username</th>
-                  <th>Сумма</th>
+                  <th>Суммы (списание / комиссия / к выплате)</th>
                   <th>Кошелек</th>
                   <th>Статус</th>
                   <th>Риск</th>
@@ -3153,7 +3158,9 @@ async function loadWithdrawals() {
           const body = [
             `ID: ${w.id}`,
             `User: ${w.user_id} (${w.telegram_id}${w.username ? ` @${w.username}` : ""})`,
-            `Сумма: ${w.amount} ${w.currency}`,
+            `Списание с баланса: ${w.amount} ${w.currency}`,
+            `Комиссия 10%: ${w.fee_amount ?? "—"} ${w.currency}`,
+            `К выплате на адрес: ${w.net_amount ?? "—"} ${w.currency}`,
             `Кошелек: ${w.address}`,
             `Risk: ${flags.length ? flags.join(", ") : "OK"}`,
             "",

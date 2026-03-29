@@ -16,6 +16,8 @@ SUPPORT_TEMPLATES = {
     ),
     "support_withdraw": (
         "Здравствуйте. Нужна помощь по выводу средств в Invext.\n\n"
+        "При выводе с баланса удерживается комиссия 10% от суммы заявки; "
+        "на кошелёк отправляется 90%.\n\n"
         "Мой ID: {user_id}\n"
         "Username: {username}\n\n"
         "Опишу проблему подробнее:"
@@ -26,12 +28,6 @@ SUPPORT_TEMPLATES = {
         "Username: {username}\n\n"
         "Номер сделки, если есть:\n"
         "Что произошло:"
-    ),
-    "support_ref": (
-        "Здравствуйте. У меня вопрос по реферальной системе в Invext.\n\n"
-        "Мой ID: {user_id}\n"
-        "Username: {username}\n\n"
-        "Опишу подробнее:"
     ),
     "support_other": (
         "Здравствуйте. Нужна помощь по Invext.\n\n"
@@ -66,7 +62,6 @@ def _support_menu_kb() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="💰 Пополнение", callback_data="support_deposit")],
             [InlineKeyboardButton(text="💸 Вывод", callback_data="support_withdraw")],
             [InlineKeyboardButton(text="📊 Сделки", callback_data="support_deals")],
-            [InlineKeyboardButton(text="👥 Реферальная система", callback_data="support_ref")],
             [InlineKeyboardButton(text="⚙️ Другое", callback_data="support_other")],
         ]
     )

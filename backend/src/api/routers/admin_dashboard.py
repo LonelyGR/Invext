@@ -90,12 +90,14 @@ from src.services.ledger_service import (
     get_balance_usdt,
 )
 from src.services.deal_service import (
+    acquire_deal_open_advisory_lock,
     collection_end_local_for_start,
     get_active_deal,
     get_active_deal_legacy,
     open_new_deal,
     process_pending_payouts,
 )
+from src.services.withdraw_service import withdraw_fee_and_net
 from src.services.notification_service import broadcast_deal_opened, send_telegram_message, send_telegram_photo
 from src.core.config import get_settings
 from src.services.settings_service import invalidate_system_settings_cache
@@ -1673,6 +1675,8 @@ async def open_deal_now(
     admin_token_id, _ = await get_admin_context(request)
     require_admin_role(request)
 
+    await acquire_deal_open_advisory_lock(db)
+
     # Обработать отложенные выплаты перед открытием новой сделки.
     await process_pending_payouts(db)
 
@@ -2282,20 +2286,24 @@ async def list_withdrawals(
     result = await db.execute(query)
     rows = result.all()
 
-    items = [
-        {
-            "id": req.id,
-            "user_id": req.user_id,
-            "telegram_id": user.telegram_id,
-            "username": user.username,
-            "amount": str(req.amount),
-            "currency": req.currency,
-            "address": req.address,
-            "status": req.status,
-            "created_at": req.created_at.isoformat(),
-        }
-        for req, user in rows
-    ]
+    items = []
+    for req, user in rows:
+        fee, net = withdraw_fee_and_net(req.amount)
+        items.append(
+            {
+                "id": req.id,
+                "user_id": req.user_id,
+                "telegram_id": user.telegram_id,
+                "username": user.username,
+                "amount": str(req.amount),
+                "fee_amount": str(fee),
+                "net_amount": str(net),
+                "currency": req.currency,
+                "address": req.address,
+                "status": req.status,
+                "created_at": req.created_at.isoformat(),
+            }
+        )
 
     await log_admin_action(
         db=db,
@@ -2332,12 +2340,15 @@ async def get_withdrawal_detail(
         entity_type="WITHDRAW",
         entity_id=withdrawal_id,
     )
+    fee, net = withdraw_fee_and_net(req.amount)
     return {
         "id": req.id,
         "user_id": req.user_id,
         "telegram_id": user.telegram_id,
         "username": user.username,
         "amount": str(req.amount),
+        "fee_amount": str(fee),
+        "net_amount": str(net),
         "currency": req.currency,
         "address": req.address,
         "status": req.status,

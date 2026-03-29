@@ -207,6 +207,16 @@ class BackendClient:
             r.raise_for_status()
             return r.json()
 
+    async def get_pending_payout_info(self, telegram_id: int) -> Dict[str, Any]:
+        """Ожидание выплаты по последнему закрытому сбору (время из deal_schedule_json)."""
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            r = await client.get(
+                self._url("/api/deals/pending-payout-info"),
+                params={"user_id": telegram_id},
+            )
+            r.raise_for_status()
+            return r.json()
+
     async def invest(
         self,
         telegram_id: int,

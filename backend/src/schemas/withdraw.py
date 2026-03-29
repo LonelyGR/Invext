@@ -5,14 +5,20 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
+
+from src.services.withdraw_service import withdraw_fee_and_net
 
 
 class WithdrawRequestIn(BaseModel):
     """Создание заявки на вывод."""
     telegram_id: int
     currency: str = Field(..., pattern="^(USDT|USDC)$")
-    amount: Decimal = Field(..., gt=0)
+    amount: Decimal = Field(
+        ...,
+        gt=0,
+        description="Сумма списания с баланса; комиссия 10%, на кошелёк уходит 90%",
+    )
     address: str = Field(..., min_length=1, max_length=512)
 
 
@@ -30,6 +36,16 @@ class WithdrawRequestResponse(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+    @computed_field
+    def fee_amount(self) -> Decimal:
+        fee, _ = withdraw_fee_and_net(self.amount)
+        return fee
+
+    @computed_field
+    def net_amount(self) -> Decimal:
+        _, net = withdraw_fee_and_net(self.amount)
+        return net
 
 
 class WithdrawRequestWithUserResponse(WithdrawRequestResponse):

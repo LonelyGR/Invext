@@ -179,28 +179,45 @@ def make_deposit_balance_credited_text() -> str:
 # === Вывод средств ===
 
 def make_withdraw_choose_currency_text() -> str:
-    return "Выберите валюту вывода:"
+    return (
+        "Выберите валюту вывода:\n\n"
+        "ℹ️ Укажите сумму <b>списания с баланса</b>. Комиссия <b>10%</b> от неё; "
+        "на кошелёк будет отправлено <b>90%</b>."
+    )
 
 
 def make_withdraw_enter_amount_text(currency: str, min_wd: Any, max_wd: Any) -> str:
     return (
         f"💸 <b>Вывод средств ({currency})</b>\n\n"
-        "Введите сумму:\n\n"
+        "Введите сумму <b>списания с баланса</b> (полную сумму заявки):\n\n"
         f"Минимум — {min_wd}\n"
-        f"Максимум — {max_wd}"
+        f"Максимум — {max_wd}\n\n"
+        "Комиссия — <b>10%</b> от этой суммы; на указанный адрес уйдёт <b>90%</b>."
     )
 
 
 def make_withdraw_enter_address_text() -> str:
-    return ("🏦 <b>Адрес для вывода</b>\n\n"
-            "Введите адрес кошелька:")
+    return (
+        "🏦 <b>Адрес для вывода</b>\n\n"
+        "Введите адрес кошелька, на который поступит сумма после вычета комиссии 10%."
+    )
 
 
-def make_withdraw_success_text(req_id: Any) -> str:
+def make_withdraw_success_text(
+    req_id: Any,
+    *,
+    gross: Any,
+    fee: Any,
+    net: Any,
+    currency: str = "USDT",
+) -> str:
     return (
         "✅ <b>Заявка на вывод создана</b>\n\n"
         "Заявка отправлена на проверку\n"
         "Средства будут переведены в течение 48 часов\n\n"
+        f"Списание с баланса: <b>{gross}</b> {currency}\n"
+        f"Комиссия (10%): <b>{fee}</b> {currency}\n"
+        f"К получению на кошелёк: <b>{net}</b> {currency}\n\n"
         f"🆔 ID заявки: {req_id}"
     )
 
@@ -253,7 +270,7 @@ def make_invest_success_text(invested: Any, new_balance: Any, payout_hint: str |
         f"📊 Баланс: {_fmt_usdt(new_balance)} USDT\n\n"
         f"{payout_line}"
         "Средства участвуют в текущей сделке.\n"
-        "Прибыль будет начислена в течение 24 часов после закрытия сбора. (За исключением выходных)"
+        "Срок выплаты после закрытия сбора задаётся расписанием в системе."
     )
 
 
@@ -274,12 +291,12 @@ def make_invest_deals_dashboard_text(
     *,
     active_deal_number: Any | None,
     collecting_end: str | None,
-    in_work_deal_number: Any | None,
-    active_end: str | None,
     balance_usdt: Any,
     participate_amount_usdt: Any | None,
-    in_work_lines: list[str],
+    pending_payout_block: str,
     history_lines: list[str],
+    already_participating: bool = False,
+    participation_in_open_deal_usdt: Any | None = None,
 ) -> str:
     sep = "────────────────"
 
@@ -287,14 +304,25 @@ def make_invest_deals_dashboard_text(
     if active_deal_number is not None:
         header_lines.append(f"🚀 <b>Сделка №{active_deal_number} открыта</b>\n")
         header_lines.append(f"💰 Ваш баланс: <b>{_fmt_usdt(balance_usdt)} USDT</b>\n")
-        if participate_amount_usdt is not None:
-            header_lines.append(f"💵 Сумма участия: <b>{_fmt_usdt(participate_amount_usdt)} USDT</b>\n")
-        header_lines.append("👉 Нажмите «Участвовать», чтобы войти в сделку")
+        if already_participating:
+            if participation_in_open_deal_usdt is not None:
+                header_lines.append(
+                    f"💵 Ваш вклад в этом сборе: <b>{_fmt_usdt(participation_in_open_deal_usdt)} USDT</b>\n"
+                )
+            header_lines.append(
+                "✅ <b>Вы уже участвуете в этой сделке.</b>\n"
+                "В одном сборе можно оформить только одно участие. "
+                "Дальше просто дождитесь закрытия сбора — выплата будет по расписанию."
+            )
+        else:
+            if participate_amount_usdt is not None:
+                header_lines.append(f"💵 Сумма участия: <b>{_fmt_usdt(participate_amount_usdt)} USDT</b>\n")
+            header_lines.append("👉 Нажмите «Участвовать», чтобы войти в сделку")
     else:
         header_lines.append("📭 <b>Сейчас нет активного сбора</b>\n")
         header_lines.append("Ожидайте уведомление о новом сборе.")
 
-    in_work_block = "\n".join(in_work_lines) if in_work_lines else "—"
+    in_work_block = pending_payout_block.strip() if pending_payout_block else "—"
     history_block = "\n".join(history_lines) if history_lines else "—"
     collecting_block = (
         f"🟡 <b>Сбор средств:</b>\nСделка #{active_deal_number}\nДо: {collecting_end or '—'}"
@@ -574,8 +602,14 @@ def make_admin_pending_withdrawals_text(items: Iterable[Mapping[str, Any]]) -> s
     lines = []
     for r in items:
         addr = str(r.get("address", ""))
+        fee = r.get("fee_amount")
+        net = r.get("net_amount")
+        if fee is not None and net is not None:
+            amt = f"списание {r.get('amount')}, комиссия {fee}, к выплате {net} {r.get('currency')}"
+        else:
+            amt = f"{r.get('currency')} {r.get('amount')}"
         line = (
-            f"ID: {r.get('id')} | {r.get('currency')} {r.get('amount')} → "
+            f"ID: {r.get('id')} | {amt} → "
             f"{addr[:20]}{'...' if len(addr) > 20 else ''} | "
             f"user_id={r.get('user_telegram_id')}"
         )
@@ -585,8 +619,16 @@ def make_admin_pending_withdrawals_text(items: Iterable[Mapping[str, Any]]) -> s
 
 def make_admin_withdraw_card_text(item: Mapping[str, Any]) -> str:
     addr = str(item.get("address", ""))
+    cur = item.get("currency", "USDT")
+    gross = item.get("amount")
+    fee = item.get("fee_amount")
+    net = item.get("net_amount")
+    if fee is not None and net is not None:
+        amt_part = f"списание {gross} {cur}, комиссия {fee}, к выплате {net}"
+    else:
+        amt_part = f"{cur} {gross}"
     return (
-        f"Вывод #{item.get('id')}: {item.get('currency')} {item.get('amount')} | "
+        f"Вывод #{item.get('id')}: {amt_part} | "
         f"Адрес: {addr[:30]}{'...' if len(addr) > 30 else ''} | "
         f"TG: {item.get('user_telegram_id')}"
     )
@@ -598,7 +640,8 @@ def make_admin_fin_settings_text(data: Mapping[str, Any]) -> str:
         f"Минимальный депозит: {data.get('min_deposit_usdt')} USDT\n"
         f"Максимальный депозит: {data.get('max_deposit_usdt')} USDT\n\n"
         f"Минимальный вывод: {data.get('min_withdraw_usdt')} USDT\n"
-        f"Максимальный вывод: {data.get('max_withdraw_usdt')} USDT\n\n"
+        f"Максимальный вывод: {data.get('max_withdraw_usdt')} USDT\n"
+        "(лимиты по сумме списания с баланса; комиссия 10%, на кошелёк — 90%)\n\n"
         f"Минимальная инвестиция: {data.get('min_invest_usdt')} USDT\n"
         f"Максимальная инвестиция: {data.get('max_invest_usdt')} USDT"
     )

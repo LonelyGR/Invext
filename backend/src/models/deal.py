@@ -43,6 +43,10 @@ class Deal(Base):
     risk_note: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     referral_processed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     close_notification_sent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Одноразовое напоминание о реф. бонусе за ~1 ч до end_at (не дублировать при каждом тике планировщика).
+    referral_preclose_reminder_sent: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

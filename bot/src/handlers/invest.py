@@ -48,16 +48,17 @@ def _invest_deal_kb(with_participate: bool, fixed_amount: Decimal | None = None)
 
 
 def _format_payout_at(payout_at_iso: str | None) -> str:
+    """Текст времени выплаты по ISO из API (расписание админки → UTC → Кишинёв)."""
     if not payout_at_iso:
         return "не назначена"
     try:
-        dt_obj = datetime.fromisoformat(payout_at_iso.replace("Z", "+00:00"))
+        dt_obj = datetime.fromisoformat(str(payout_at_iso).replace("Z", "+00:00"))
         if dt_obj.tzinfo is None:
             dt_obj = dt_obj.replace(tzinfo=ZoneInfo("UTC"))
         dt_obj = dt_obj.astimezone(BOT_TZ)
-        return f"{dt_obj.strftime('%d.%m')} после 15:00"
+        return f"{dt_obj.strftime('%d.%m.%Y')} в {dt_obj.strftime('%H:%M')} (Кишинёв)"
     except Exception:
-        return payout_at_iso
+        return str(payout_at_iso)
 
 
 def _format_collecting_end(end_at_iso: str | None) -> str:
@@ -110,34 +111,45 @@ def _format_date_short(iso_str: str | None) -> str:
         return str(iso_str)[:10]
 
 
-def _extract_first_in_work(active_items: list[dict]) -> tuple[int | None, str | None]:
-    for item in active_items:
-        st = str(item.get("status") or "")
-        if st in {"in_progress_payout", "active"}:
-            try:
-                number = int(item.get("deal_number"))
-            except Exception:
-                number = None
-            return number, _format_payout_at(item.get("payout_at"))
-    return None, None
+def _is_already_in_deal_api_error(err: str) -> bool:
+    e = (err or "").lower()
+    return "уже участвуете" in e or "already" in e and "deal" in e
 
 
-def _build_in_work_lines(active_items: list[dict]) -> list[str]:
-    lines: list[str] = []
-    pending_items = [
-        item for item in active_items
-        if str(item.get("status") or "") == "in_progress_payout"
-    ]
-    for item in pending_items[:3]:
-        deal_number = item.get("deal_number")
-        amount_raw = item.get("amount_usdt")
+def _participation_in_open_deal(
+    open_deal_number: int | None, active_deals: list[dict]
+) -> dict | None:
+    """Участие со статусом active в текущем открытом сборе (одна заявка на сделку)."""
+    if open_deal_number is None:
+        return None
+    try:
+        want = int(open_deal_number)
+    except (TypeError, ValueError):
+        return None
+    for item in active_deals:
+        if str(item.get("status") or "") != "active":
+            continue
         try:
-            amount = f"{float(amount_raw):.2f}"
+            n = int(item.get("deal_number"))
         except (TypeError, ValueError):
-            amount = str(amount_raw or "0.00")
-        payout_at = _format_payout_at(item.get("payout_at"))
-        lines.append(f"• Сделка #{deal_number} — {amount} USDT\nВыплата: {payout_at}")
-    return lines
+            continue
+        if n == want:
+            return item
+    return None
+
+
+def _format_pending_payout_block(pending: dict | None) -> str:
+    """Один блок «ожидает выплаты» по последнему закрытому сбору (ответ /api/deals/pending-payout-info)."""
+    if not pending or not pending.get("pending"):
+        return "—"
+    deal_number = pending.get("deal_number")
+    amount_raw = pending.get("amount_usdt")
+    try:
+        amount = f"{float(amount_raw):.2f}"
+    except (TypeError, ValueError):
+        amount = str(amount_raw or "0.00")
+    when = _format_payout_at(pending.get("payout_at"))
+    return f"Сделка №{deal_number} — {amount} USDT\nВыплата: {when}"
 
 
 def _build_history_lines(completed_items: list[dict]) -> list[str]:
@@ -153,6 +165,44 @@ def _build_history_lines(completed_items: list[dict]) -> list[str]:
         date_part = f" {d}" if d else ""
         lines.append(f"#{deal_number} — <b>{amount} USDT</b> ✔️{date_part}")
     return lines
+
+
+def _build_open_deal_dashboard(dash: dict) -> tuple[str, InlineKeyboardMarkup] | None:
+    """Экран открытого сбора: текст + клавиатура (без «Участвовать», если уже в сделке)."""
+    active = dash.get("active") or {}
+    if not active.get("active") or not active.get("deal_number"):
+        return None
+    balances = dash.get("balances") or {}
+    my_deals = dash.get("my_deals") or {}
+    pending_payout = dash.get("pending_payout") or {}
+    settings = dash.get("settings") or {}
+    usdt = float(balances.get("USDT", 0) or 0)
+    payout_block = _format_pending_payout_block(pending_payout if isinstance(pending_payout, dict) else {})
+    deal_number = active["deal_number"]
+    mode, min_invest, max_invest = _extract_invest_mode(settings)
+    participate_amount = min_invest if mode == "fixed" else None
+    active_items = my_deals.get("active_deals") or []
+    part_open = _participation_in_open_deal(
+        deal_number, active_items if isinstance(active_items, list) else []
+    )
+    already = part_open is not None
+    in_deal_amt = part_open.get("amount_usdt") if part_open else None
+    history_lines = _build_history_lines(my_deals.get("completed_deals", []))
+    text = make_invest_deals_dashboard_text(
+        active_deal_number=deal_number,
+        collecting_end=_format_collecting_end(active.get("end_at")) if active.get("end_at") else None,
+        balance_usdt=usdt,
+        participate_amount_usdt=participate_amount,
+        pending_payout_block=payout_block,
+        history_lines=history_lines,
+        already_participating=already,
+        participation_in_open_deal_usdt=in_deal_amt,
+    )
+    kb = _invest_deal_kb(
+        with_participate=not already,
+        fixed_amount=participate_amount if not already else None,
+    )
+    return text, kb
 
 
 def _extract_invest_mode(settings: dict) -> tuple[str, Decimal, Decimal]:
@@ -176,46 +226,27 @@ async def invest_section(message: Message, state: FSMContext):
     try:
         dash = await get_invest_dashboard(telegram_id)
         balances = dash["balances"]
-        active = dash["active"]
         my_deals = dash["my_deals"]
-        settings = dash["settings"]
+        pending_payout = dash.get("pending_payout") or {}
     except Exception as e:
         await message.answer(f"Ошибка: {e}")
         return
 
     usdt = float(balances.get("USDT", 0) or 0)
+    payout_block = _format_pending_payout_block(pending_payout if isinstance(pending_payout, dict) else {})
 
-    if active.get("active") and active.get("deal_number"):
-        deal_number = active["deal_number"]
-        mode, min_invest, max_invest = _extract_invest_mode(settings)
-        if mode == "fixed":
-            participate_amount = min_invest
-        else:
-            participate_amount = None
-        in_work_lines = _build_in_work_lines(my_deals.get("active_deals", []))
-        history_lines = _build_history_lines(my_deals.get("completed_deals", []))
-        text = make_invest_deals_dashboard_text(
-            active_deal_number=deal_number,
-            collecting_end=_format_collecting_end(active.get("end_at")) if active.get("end_at") else None,
-            in_work_deal_number=_extract_first_in_work(my_deals.get("active_deals", []))[0],
-            active_end=_extract_first_in_work(my_deals.get("active_deals", []))[1],
-            balance_usdt=usdt,
-            participate_amount_usdt=participate_amount,
-            in_work_lines=in_work_lines,
-            history_lines=history_lines,
-        )
-        await message.answer(text, reply_markup=_invest_deal_kb(with_participate=True, fixed_amount=participate_amount))
+    built = _build_open_deal_dashboard(dash)
+    if built is not None:
+        text, kb = built
+        await message.answer(text, reply_markup=kb)
     else:
-        in_work_lines = _build_in_work_lines(my_deals.get("active_deals", []))
         history_lines = _build_history_lines(my_deals.get("completed_deals", []))
         text = make_invest_deals_dashboard_text(
             active_deal_number=None,
             collecting_end=None,
-            in_work_deal_number=_extract_first_in_work(my_deals.get("active_deals", []))[0],
-            active_end=_extract_first_in_work(my_deals.get("active_deals", []))[1],
             balance_usdt=usdt,
             participate_amount_usdt=None,
-            in_work_lines=in_work_lines,
+            pending_payout_block=payout_block,
             history_lines=history_lines,
         )
         await state.clear()
@@ -227,28 +258,45 @@ async def invest_participate(callback: CallbackQuery, state: FSMContext):
     """Пользователь нажал «Участвовать» — просим ввести сумму с подсказкой минимума."""
     telegram_id = callback.from_user.id
     try:
-        active = await api.get_active_deal()
-        settings = await api.get_system_settings()
-        if not active.get("active"):
-            await state.clear()
-            await callback.message.edit_text(
-                "⏳ Сбор на сделку уже закрыт.\n\nОжидайте следующего открытия.",
-                reply_markup=_invest_deal_kb(with_participate=False),
-            )
-            await callback.answer()
-            return
-        if settings.get("allow_investments") is False:
-            await state.clear()
-            await callback.message.edit_text(
-                "⚠️ Участие в сделках временно недоступно по техническим причинам.\n\nПопробуйте позже.",
-                reply_markup=_invest_deal_kb(with_participate=False),
-            )
-            await callback.answer()
-            return
+        dash = await get_invest_dashboard(telegram_id)
+        active = dash["active"]
+        settings = dash["settings"]
+    except Exception as e:
+        await callback.answer(f"Не удалось загрузить данные. Попробуйте позже.", show_alert=True)
+        logger.exception("invest_participate: dashboard failed: %s", e)
+        return
 
-        mode, min_invest, max_invest = _extract_invest_mode(settings)
-    except Exception:
-        mode, min_invest, max_invest = "range", None, None
+    if not active.get("active"):
+        await state.clear()
+        await callback.message.edit_text(
+            "⏳ Сбор на сделку уже закрыт.\n\nОжидайте следующего открытия.",
+            reply_markup=_invest_deal_kb(with_participate=False),
+        )
+        await callback.answer()
+        return
+
+    if settings.get("allow_investments") is False:
+        await state.clear()
+        await callback.message.edit_text(
+            "⚠️ Участие в сделках временно недоступно по техническим причинам.\n\nПопробуйте позже.",
+            reply_markup=_invest_deal_kb(with_participate=False),
+        )
+        await callback.answer()
+        return
+
+    deal_number = active.get("deal_number")
+    my_deals = dash.get("my_deals") or {}
+    active_items = my_deals.get("active_deals") or []
+    if _participation_in_open_deal(deal_number, active_items if isinstance(active_items, list) else []):
+        built = _build_open_deal_dashboard(dash)
+        if built:
+            text, kb = built
+            await callback.message.edit_text(text, reply_markup=kb)
+        await state.clear()
+        await callback.answer()
+        return
+
+    mode, min_invest, max_invest = _extract_invest_mode(settings)
 
     if mode == "fixed" and min_invest is not None:
         if not await with_double_click_protection(callback, "invest"):
@@ -265,10 +313,28 @@ async def invest_participate(callback: CallbackQuery, state: FSMContext):
                             err = body["detail"] if isinstance(body["detail"], str) else str(body["detail"])
                     except Exception:
                         pass
-                await callback.message.edit_text(
-                    f"Ошибка инвестирования: {err}",
-                    reply_markup=_invest_deal_kb(with_participate=False),
-                )
+                if _is_already_in_deal_api_error(err):
+                    try:
+                        dash = await get_invest_dashboard(telegram_id)
+                        built = _build_open_deal_dashboard(dash)
+                        if built:
+                            t, kb = built
+                            await callback.message.edit_text(t, reply_markup=kb)
+                            await state.clear()
+                            await callback.answer()
+                            return
+                    except Exception:
+                        pass
+                    await callback.message.edit_text(
+                        "✅ Вы уже участвуете в этой сделке.\n\n"
+                        "В одном сборе доступно только одно участие.",
+                        reply_markup=_invest_deal_kb(with_participate=False),
+                    )
+                else:
+                    await callback.message.edit_text(
+                        f"Ошибка инвестирования: {err}",
+                        reply_markup=_invest_deal_kb(with_participate=False),
+                    )
                 await state.clear()
                 await callback.answer()
                 return
@@ -313,49 +379,27 @@ async def open_invest_from_reminder(callback: CallbackQuery, state: FSMContext):
     try:
         dash = await get_invest_dashboard(telegram_id)
         balances = dash["balances"]
-        active = dash["active"]
         my_deals = dash["my_deals"]
-        settings = dash["settings"]
+        pending_payout = dash.get("pending_payout") or {}
     except Exception as e:
         await callback.answer(f"Ошибка: {e}", show_alert=True)
         return
 
     usdt = float(balances.get("USDT", 0) or 0)
+    payout_block = _format_pending_payout_block(pending_payout if isinstance(pending_payout, dict) else {})
 
-    if active.get("active") and active.get("deal_number"):
-        deal_number = active["deal_number"]
-        mode, min_invest, max_invest = _extract_invest_mode(settings)
-        if mode == "fixed":
-            participate_amount = min_invest
-        else:
-            participate_amount = None
-        in_work_lines = _build_in_work_lines(my_deals.get("active_deals", []))
-        history_lines = _build_history_lines(my_deals.get("completed_deals", []))
-        text = make_invest_deals_dashboard_text(
-            active_deal_number=deal_number,
-            collecting_end=_format_collecting_end(active.get("end_at")) if active.get("end_at") else None,
-            in_work_deal_number=_extract_first_in_work(my_deals.get("active_deals", []))[0],
-            active_end=_extract_first_in_work(my_deals.get("active_deals", []))[1],
-            balance_usdt=usdt,
-            participate_amount_usdt=participate_amount,
-            in_work_lines=in_work_lines,
-            history_lines=history_lines,
-        )
-        await callback.message.answer(
-            text,
-            reply_markup=_invest_deal_kb(with_participate=True, fixed_amount=participate_amount),
-        )
+    built = _build_open_deal_dashboard(dash)
+    if built is not None:
+        text, kb = built
+        await callback.message.answer(text, reply_markup=kb)
     else:
-        in_work_lines = _build_in_work_lines(my_deals.get("active_deals", []))
         history_lines = _build_history_lines(my_deals.get("completed_deals", []))
         text = make_invest_deals_dashboard_text(
             active_deal_number=None,
             collecting_end=None,
-            in_work_deal_number=_extract_first_in_work(my_deals.get("active_deals", []))[0],
-            active_end=_extract_first_in_work(my_deals.get("active_deals", []))[1],
             balance_usdt=usdt,
             participate_amount_usdt=None,
-            in_work_lines=in_work_lines,
+            pending_payout_block=payout_block,
             history_lines=history_lines,
         )
         await callback.message.answer(text, reply_markup=_invest_deal_kb(with_participate=False))
@@ -391,6 +435,25 @@ async def invest_amount_entered(message: Message, state: FSMContext):
                         err = body["detail"] if isinstance(body["detail"], str) else str(body["detail"])
                 except Exception:
                     pass
+
+            if _is_already_in_deal_api_error(err):
+                try:
+                    dash = await get_invest_dashboard(telegram_id)
+                    built = _build_open_deal_dashboard(dash)
+                    if built:
+                        t, kb = built
+                        await message.answer(t, reply_markup=kb)
+                        await state.clear()
+                        return
+                except Exception:
+                    pass
+                await message.answer(
+                    "✅ Вы уже участвуете в этой сделке.\n\n"
+                    "В одном сборе доступно только одно участие.",
+                    reply_markup=_invest_deal_kb(with_participate=False),
+                )
+                await state.clear()
+                return
 
             logger.error("invest failed for user %s: %s", telegram_id, err)
             await message.answer(f"Ошибка инвестирования: {err}")

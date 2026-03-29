@@ -1,9 +1,12 @@
 """
 Сервис заявок на вывод: создание (с проверкой баланса), список, админ approve/reject.
 При approve — создаётся запись в ledger WITHDRAW COMPLETED (баланс списывается).
+
+Сумма заявки (amount) — полное списание с баланса. Комиссия 10% от этой суммы;
+на внешний кошелёк отправляется 90% (net), 10% остаётся платформе.
 """
 from datetime import datetime, timezone
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 
 from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,6 +16,20 @@ from src.models.withdraw_request import WithdrawRequest
 from src.models.wallet_transaction import WalletTransaction
 from src.services.wallet_service import get_balances
 from src.services.settings_service import get_system_settings
+
+# Доля комиссии от суммы списания (gross).
+WITHDRAW_FEE_RATE = Decimal("0.10")
+
+
+def withdraw_fee_and_net(gross: Decimal) -> tuple[Decimal, Decimal]:
+    """
+    gross — сумма списания с баланса (как в заявке).
+    Возвращает (fee, net): комиссия 10% от gross, к выплате на адрес — net = gross − fee.
+    """
+    g = gross.quantize(Decimal("0.01"))
+    fee = (g * WITHDRAW_FEE_RATE).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    net = g - fee
+    return fee, net
 
 
 def _validate_amount(amount: Decimal, min_val: float, max_val: float) -> None:
@@ -29,11 +46,18 @@ async def create_withdraw_request(
 ) -> WithdrawRequest:
     """Создать заявку на вывод (PENDING). Проверка баланса и лимитов.
 
+    amount — сумма полного списания с баланса (до вычета комиссии на стороне сети:
+    комиссия 10% от этой суммы, пользователю на адрес уходит 90%).
+
     Защита от дублей: при повторной отправке тех же данных (user, currency, amount, address)
     и статусе PENDING возвращает уже существующую заявку.
     """
     settings = await get_system_settings(db)
     _validate_amount(amount, float(settings.min_withdraw_usdt), float(settings.max_withdraw_usdt))
+
+    _, net = withdraw_fee_and_net(amount)
+    if net <= 0:
+        raise ValueError("Сумма к получению после комиссии должна быть больше 0. Увеличьте сумму вывода.")
 
     result = await db.execute(select(User).where(User.telegram_id == telegram_id))
     user = result.scalar_one_or_none()

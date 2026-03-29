@@ -11,7 +11,7 @@ from decimal import Decimal
 from typing import List, Optional
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select, func
+from sqlalchemy import select, func, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models import Deal, DealParticipation, LedgerTransaction, ReferralReward, User
@@ -43,8 +43,33 @@ from src.services.notification_service import (
 
 logger = logging.getLogger(__name__)
 PAYOUT_TZ = ZoneInfo("Europe/Chisinau")
+
+# Сериализация открытия сделки между планировщиком и админ-эндпоинтами (несколько воркеров / гонка).
+DEAL_OPEN_ADVISORY_LOCK_KEY = 582_944_001
+
+
+async def acquire_deal_open_advisory_lock(db: AsyncSession) -> None:
+    await db.execute(
+        text("SELECT pg_advisory_xact_lock(:key)"),
+        {"key": DEAL_OPEN_ADVISORY_LOCK_KEY},
+    )
 # Единый календарь сделок (окно сбора) — то же, что в планировщике и админке.
 SCHEDULE_TZ = PAYOUT_TZ
+
+# Python weekday: пн=0 … вс=6. Суббота (Europe/Chisinau) — без автооткрытия, без автозакрытия, без реф. «за час».
+WEEKDAY_SATURDAY = 5
+
+
+def _chisinau_local(utc_dt: dt.datetime) -> dt.datetime:
+    if utc_dt.tzinfo is None:
+        utc_dt = utc_dt.replace(tzinfo=dt.timezone.utc)
+    return utc_dt.astimezone(SCHEDULE_TZ)
+
+
+def _is_saturday_chisinau(utc_dt: Optional[dt.datetime] = None) -> bool:
+    utc_dt = utc_dt or dt.datetime.now(dt.timezone.utc)
+    return _chisinau_local(utc_dt).weekday() == WEEKDAY_SATURDAY
+
 
 # Проценты реферального бонуса по уровням (1–10)
 REFERRAL_LEVEL_PERCENTS: List[float] = [
@@ -52,16 +77,20 @@ REFERRAL_LEVEL_PERCENTS: List[float] = [
 ]
 MAX_REFERRAL_LEVELS = 10
 
-DEFAULT_WEEKLY_DEAL_SCHEDULE = {
-    # weekday: Mon=0 ... Sun=6
-    "0": {"enabled": True, "open": "13:00", "close_day": 1, "close_time": "12:00", "payout_day": 2, "payout_time": "15:00"},
-    "1": {"enabled": True, "open": "13:00", "close_day": 2, "close_time": "12:00", "payout_day": 3, "payout_time": "15:00"},
-    "2": {"enabled": True, "open": "13:00", "close_day": 3, "close_time": "12:00", "payout_day": 4, "payout_time": "15:00"},
-    "3": {"enabled": True, "open": "13:00", "close_day": 4, "close_time": "12:00", "payout_day": 0, "payout_time": "15:00"},
-    "4": {"enabled": True, "open": "13:00", "close_day": 0, "close_time": "12:00", "payout_day": 1, "payout_time": "15:00"},
-    "5": {"enabled": False, "open": "13:00", "close_day": 0, "close_time": "12:00", "payout_day": 1, "payout_time": "15:00"},
-    "6": {"enabled": False, "open": "13:00", "close_day": 0, "close_time": "12:00", "payout_day": 1, "payout_time": "15:00"},
-}
+
+def _rule_for_weekday(schedule: dict[str, dict], weekday: int) -> dict:
+    """Правило дня из JSON админки; если дня нет — выключенный запасной слот (без старого недельного шаблона)."""
+    r = schedule.get(str(weekday))
+    if isinstance(r, dict) and r:
+        return r
+    return {
+        "enabled": False,
+        "open": "13:00",
+        "close_day": (weekday + 1) % 7,
+        "close_time": "12:00",
+        "payout_day": (weekday + 2) % 7,
+        "payout_time": "15:00",
+    }
 
 
 def _parse_hhmm(value: str, default_hour: int, default_minute: int) -> tuple[int, int]:
@@ -75,32 +104,37 @@ def _parse_hhmm(value: str, default_hour: int, default_minute: int) -> tuple[int
         return default_hour, default_minute
 
 
-def _normalized_schedule(raw: object) -> dict[str, dict]:
-    base = {k: dict(v) for k, v in DEFAULT_WEEKLY_DEAL_SCHEDULE.items()}
-    payload = raw
+def _normalized_schedule(raw: object | None) -> dict[str, dict]:
+    """
+    Расписание только из deal_schedule_json (админка). Без подмешивания отдельного недельного дефолта.
+    Пустой JSON → {} (все дни обрабатываются через _rule_for_weekday как выключенные при отсутствии ключа).
+    """
+    payload: object | None = raw
     if isinstance(raw, str):
         txt = raw.strip()
         if not txt:
-            return base
+            return {}
         try:
             payload = json.loads(txt)
         except Exception:
-            return base
+            return {}
     if not isinstance(payload, dict):
-        return base
+        return {}
+    out: dict[str, dict] = {}
     for day in range(7):
         key = str(day)
         candidate = payload.get(key)
         if not isinstance(candidate, dict):
             continue
-        current = base[key]
-        current["enabled"] = bool(candidate.get("enabled", current["enabled"]))
-        current["open"] = str(candidate.get("open", current["open"]) or current["open"])
-        current["close_day"] = int(candidate.get("close_day", current["close_day"]))
-        current["close_time"] = str(candidate.get("close_time", current["close_time"]) or current["close_time"])
-        current["payout_day"] = int(candidate.get("payout_day", current["payout_day"]))
-        current["payout_time"] = str(candidate.get("payout_time", current["payout_time"]) or current["payout_time"])
-    return base
+        out[key] = {
+            "enabled": bool(candidate.get("enabled", False)),
+            "open": str(candidate.get("open") or "13:00"),
+            "close_day": int(candidate.get("close_day", (day + 1) % 7)),
+            "close_time": str(candidate.get("close_time") or "12:00"),
+            "payout_day": int(candidate.get("payout_day", (day + 2) % 7)),
+            "payout_time": str(candidate.get("payout_time") or "15:00"),
+        }
+    return out
 
 
 def _next_weekday_time_after(start_local: dt.datetime, target_weekday: int, hhmm: str) -> dt.datetime:
@@ -116,20 +150,15 @@ def _next_weekday_time_after(start_local: dt.datetime, target_weekday: int, hhmm
 
 def collection_end_local_for_start(start_local: dt.datetime, schedule_raw: object | None = None) -> dt.datetime:
     """
-    Момент закрытия сбора по локальному времени начала (Europe/Chisinau).
-
-    Правила (как в планировщике 13:00):
-    - Пн–Чт и т.д.: закрытие на следующий календарный день в 12:00;
-    - Пятница: закрытие в понедельник в 12:00 (суббота/воскресенье не используются как день закрытия).
-
-    Не смешивать с «72 часа»: это именно календарные сутки / перенос через выходные для пятницы.
+    Момент закрытия сбора по локальному времени начала (Europe/Chisinau) — поля `close_day` / `close_time`
+    из `deal_schedule_json` админки (день недели 0=Пн … 6=Вс).
     """
     if start_local.tzinfo is None:
         start_local = start_local.replace(tzinfo=SCHEDULE_TZ)
     else:
         start_local = start_local.astimezone(SCHEDULE_TZ)
     schedule = _normalized_schedule(schedule_raw)
-    rule = schedule.get(str(start_local.weekday()), DEFAULT_WEEKLY_DEAL_SCHEDULE[str(start_local.weekday())])
+    rule = _rule_for_weekday(schedule, start_local.weekday())
     close_day = int(rule.get("close_day", (start_local.weekday() + 1) % 7))
     close_time = str(rule.get("close_time", "12:00"))
     return _next_weekday_time_after(start_local, close_day, close_time)
@@ -140,13 +169,14 @@ def scheduled_collection_window_1300_chisinau(
     schedule_raw: object | None = None,
 ) -> Optional[tuple[dt.datetime, dt.datetime]]:
     """
-    Окно сбора для автоматического открытия сделки в 13:00 Europe/Chisinau.
-
-    В субботу и воскресенье новые сделки по расписанию не открываются (возвращает None).
-    Иначе start = сегодня 13:00 локально, end = collection_end_local_for_start(start).
+    Окно автоматического открытия сбора: только если для сегодняшнего дня в админ-расписании `enabled`,
+    и локальное время совпадает с полем `open` (по умолчанию 13:00). Конец окна — по `close_*` из JSON.
+    В субботу (Europe/Chisinau) не открываем, даже если день включён в JSON.
     Возвращает (start_at UTC, end_at UTC).
     """
     now_local = now_utc.astimezone(SCHEDULE_TZ)
+    if now_local.weekday() == WEEKDAY_SATURDAY:
+        return None
     schedule = _normalized_schedule(schedule_raw)
     today_rule = schedule.get(str(now_local.weekday()))
     if not today_rule or not bool(today_rule.get("enabled", True)):
@@ -155,7 +185,7 @@ def scheduled_collection_window_1300_chisinau(
     if now_local.hour != open_h or now_local.minute != open_m:
         return None
     start_local = now_local.replace(hour=open_h, minute=open_m, second=0, microsecond=0)
-    end_local = collection_end_local_for_start(start_local, schedule_raw=schedule)
+    end_local = collection_end_local_for_start(start_local, schedule_raw=schedule_raw)
     return (
         start_local.astimezone(dt.timezone.utc),
         end_local.astimezone(dt.timezone.utc),
@@ -180,6 +210,8 @@ def next_scheduled_open_1300_chisinau(
     schedule = _normalized_schedule(schedule_raw)
     for delta_days in range(0, 14):
         day_dt = local_now + dt.timedelta(days=delta_days)
+        if day_dt.weekday() == WEEKDAY_SATURDAY:
+            continue
         rule = schedule.get(str(day_dt.weekday()))
         if not rule or not bool(rule.get("enabled", True)):
             continue
@@ -193,27 +225,8 @@ def next_scheduled_open_1300_chisinau(
 
 def calculate_payout_at(invest_datetime_utc: Optional[dt.datetime] = None, schedule_raw: object | None = None) -> dt.datetime:
     """
-    Фиксированное расписание выплат (Europe/Chisinau), строго 15:00:
-
-    Пн:
-      - оплата до 12:00 -> вторник 15:00
-      - оплата после 13:00 -> среда 15:00
-    Вт:
-      - до 12:00 -> среда 15:00
-      - после 13:00 -> четверг 15:00
-    Ср:
-      - до 12:00 -> четверг 15:00
-      - после 13:00 -> пятница 15:00
-    Чт:
-      - до 12:00 -> пятница 15:00
-      - после 13:00 -> понедельник 15:00
-    Пт:
-      - до 12:00 -> понедельник 15:00
-      - после 13:00 -> вторник 15:00
-    Сб/Вс:
-      - выплата во вторник 15:00 (время не важно)
-
-    Возвращает datetime в UTC для хранения в БД.
+    Ближайший момент выплаты по `payout_day` / `payout_time` из `deal_schedule_json` (админка)
+    относительно локального времени инвестиции (Europe/Chisinau). Возвращает UTC.
     """
     invest_datetime_utc = invest_datetime_utc or dt.datetime.now(dt.timezone.utc)
     if invest_datetime_utc.tzinfo is None:
@@ -221,7 +234,7 @@ def calculate_payout_at(invest_datetime_utc: Optional[dt.datetime] = None, sched
 
     local_dt = invest_datetime_utc.astimezone(PAYOUT_TZ)
     schedule = _normalized_schedule(schedule_raw)
-    rule = schedule.get(str(local_dt.weekday()), DEFAULT_WEEKLY_DEAL_SCHEDULE[str(local_dt.weekday())])
+    rule = _rule_for_weekday(schedule, local_dt.weekday())
     payout_day = int(rule.get("payout_day", (local_dt.weekday() + 2) % 7))
     payout_time = str(rule.get("payout_time", "15:00"))
     payout_local = _next_weekday_time_after(local_dt, payout_day, payout_time)
@@ -234,7 +247,7 @@ def calculate_payout_at_for_deal_start(start_at_utc: Optional[dt.datetime], sche
         base_utc = base_utc.replace(tzinfo=dt.timezone.utc)
     local_start = base_utc.astimezone(PAYOUT_TZ)
     schedule = _normalized_schedule(schedule_raw)
-    rule = schedule.get(str(local_start.weekday()), DEFAULT_WEEKLY_DEAL_SCHEDULE[str(local_start.weekday())])
+    rule = _rule_for_weekday(schedule, local_start.weekday())
     payout_day = int(rule.get("payout_day", (local_start.weekday() + 2) % 7))
     payout_time = str(rule.get("payout_time", "15:00"))
     payout_local = _next_weekday_time_after(local_start, payout_day, payout_time)
@@ -329,6 +342,9 @@ async def participate_in_deal(
     if current_balance < amount:
         raise ValueError("Недостаточно средств для участия")
 
+    settings = await get_system_settings(db)
+    schedule_raw = getattr(settings, "deal_schedule_json", None)
+
     tx = LedgerTransaction(
         user_id=user_locked.id,
         type=LEDGER_TYPE_INVEST,
@@ -342,7 +358,7 @@ async def participate_in_deal(
         user_id=user_locked.id,
         amount=amount,
         status=PARTICIPATION_STATUS_ACTIVE,
-        payout_at=calculate_payout_at_for_deal_start(deal.start_at),
+        payout_at=calculate_payout_at_for_deal_start(deal.start_at, schedule_raw=schedule_raw),
     )
     db.add(participation)
     await db.flush()
@@ -494,7 +510,7 @@ async def process_pending_payouts(db: AsyncSession) -> int:
     """
     Обработка всех инвестиций в статусе in_progress_payout:
     — зачисляем тело + прибыль на баланс (PROFIT ledger entry)
-    — статус → completed, payout_at = по расписанию (15:00)
+    — статус → completed, payout_at по deal_schedule_json
     — отправляем персональное уведомление каждому пользователю.
     Вызывается перед открытием новой сделки.
     Возвращает кол-во обработанных записей.
@@ -666,10 +682,11 @@ async def process_due_deals(db: AsyncSession) -> int:
     Возвращает количество обработанных сделок.
     Транзакция управляется вызывающим кодом (scheduler); не вызывать db.begin() здесь,
     т.к. первый db.execute() уже запускает autobegin.
+    В субботу (Europe/Chisinau) автоматическое закрытие не выполняется.
     """
     now = dt.datetime.now(dt.timezone.utc)
-    now_local = now.astimezone(SCHEDULE_TZ)
-    if now_local.weekday() in (5, 6):  # Sat/Sun
+    if _is_saturday_chisinau(now):
+        logger.debug("process_due_deals: skip — Saturday Chisinau")
         return 0
     result = await db.execute(
         select(Deal).where(
@@ -695,10 +712,38 @@ async def send_referral_bonus_reminders_for_active_deal(db: AsyncSession) -> int
     Найти текущую активную сделку и разослать напоминания пользователям,
     у которых уже накопилась потенциальная реферальная прибыль по этой сделке,
     но которые ещё не участвуют.
-    Возвращает количество отправленных напоминаний.
+
+    Отправка только один раз на сделку и только в окне ~55–65 минут до end_at,
+    чтобы текст совпадал с реальным временем до закрытия (не «через час» при закрытии в понедельник).
+    В субботу (Europe/Chisinau) не шлём.
     """
-    deal = await get_active_deal(db)
-    if not deal:
+    now = dt.datetime.now(dt.timezone.utc)
+    if _is_saturday_chisinau(now):
+        return 0
+
+    locked = await db.execute(
+        select(Deal)
+        .where(
+            Deal.status == DEAL_STATUS_ACTIVE,
+            Deal.start_at.isnot(None),
+            Deal.end_at.isnot(None),
+            Deal.start_at <= now,
+            Deal.end_at > now,
+        )
+        .order_by(Deal.start_at.desc())
+        .limit(1)
+        .with_for_update()
+    )
+    deal = locked.scalar_one_or_none()
+    if not deal or not deal.end_at:
+        return 0
+
+    if deal.referral_preclose_reminder_sent:
+        return 0
+
+    secs_left = (deal.end_at - now).total_seconds()
+    # Окно ~1 час до закрытия (планировщик тикает каждые 5 мин).
+    if not (3300 <= secs_left <= 3900):
         return 0
 
     # Считаем потенциальные бонусы по этой сделке.
@@ -731,6 +776,9 @@ async def send_referral_bonus_reminders_for_active_deal(db: AsyncSession) -> int
         if ok:
             sent += 1
 
+    deal.referral_preclose_reminder_sent = True
+    await db.flush()
+
     logger.info(
         "send_referral_bonus_reminders_for_active_deal: deal_id=%s number=%s sent=%s",
         deal.id,
@@ -746,9 +794,12 @@ async def close_active_deal_by_schedule(db: AsyncSession, *, force: bool = False
     Идемпотентно: если активной сделки нет — False.
     Если force=False, закрывает только сделку, у которой end_at <= now.
     Если force=True, закрывает активную сделку досрочно (для админки).
+    В субботу (Europe/Chisinau) при force=False закрытие не выполняется.
     Транзакция управляется вызывающим кодом (scheduler); не вызывать db.begin() здесь.
     """
     now = dt.datetime.now(dt.timezone.utc)
+    if not force and _is_saturday_chisinau(now):
+        return False
     filters = [Deal.status == DEAL_STATUS_ACTIVE]
     if not force:
         filters.append(Deal.end_at <= now)
@@ -778,6 +829,12 @@ async def open_new_deal_by_schedule(
     Перед открытием обрабатываются все отложенные выплаты (in_progress_payout).
     Защита от дублей: если уже есть active сделка, перекрывающая now — не создаём новую.
     """
+    await acquire_deal_open_advisory_lock(db)
+
+    if _is_saturday_chisinau(start_at):
+        logger.info("open_new_deal_by_schedule: skipped — start falls on Saturday (Chisinau)")
+        return None
+
     now = dt.datetime.now(dt.timezone.utc)
 
     # Сначала обрабатываем отложенные выплаты предыдущих сделок.

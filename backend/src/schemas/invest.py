@@ -35,3 +35,12 @@ class DealParticipationItem(BaseModel):
 class MyDealsResponse(BaseModel):
     active_deals: list[DealParticipationItem]
     completed_deals: list[DealParticipationItem]
+
+
+class PendingPayoutInfo(BaseModel):
+    """Ожидание выплаты по закрытому сбору (время из deal_schedule_json админки)."""
+
+    pending: bool = False
+    deal_number: int | None = None
+    payout_at: datetime | None = None
+    amount_usdt: Decimal | None = None

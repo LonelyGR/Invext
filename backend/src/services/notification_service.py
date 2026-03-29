@@ -190,6 +190,8 @@ async def broadcast_deal_opened(
     if not telegram_ids:
         return
 
+    telegram_ids = list(dict.fromkeys(telegram_ids))
+
     close_time_human = format_time_chisinau(close_at) if close_at else "—"
 
     text = (
@@ -343,17 +345,21 @@ async def send_referral_bonus_reminder(
     close_at: Optional[dt.datetime],
 ) -> bool:
     """
-    Напоминание за час до закрытия сбора: у пользователя есть потенциальная
-    реферальная прибыль, если он успеет поучаствовать.
+    Напоминание незадолго до закрытия сбора: потенциальная реферальная прибыль,
+    если пользователь успеет поучаствовать. Текст использует фактический остаток времени до end_at.
     """
+    now = dt.datetime.now(dt.timezone.utc)
     close_human = format_time_chisinau(close_at) if close_at else "скоро"
+    remaining = (
+        format_remaining_until(close_at, now=now) if close_at else "скоро"
+    )
     text = (
-        f"⏰ Через час закроется сбор на сделку №{deal_number}.\n\n"
+        f"⏰ До закрытия сбора по сделке №{deal_number} осталось примерно {remaining}.\n\n"
         f"Если вы примете участие, вы сможете получить реферальную прибыль "
         f"примерно {bonus_amount:.2f} USDT.\n"
         "Если не войдёте в сбор до его закрытия, этот бонус сгорит.\n\n"
         "Зайдите в раздел «📈 Сделка» в боте и нажмите «Участвовать».\n\n"
-        f"Текущее время закрытия сбора: {close_human}."
+        f"Закрытие сбора: {close_human}."
     )
     reply_markup = {
         "inline_keyboard": [
