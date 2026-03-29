@@ -48,7 +48,7 @@ def _invest_deal_kb(with_participate: bool, fixed_amount: Decimal | None = None)
 
 
 def _format_payout_at(payout_at_iso: str | None) -> str:
-    """Текст времени выплаты по ISO из API (расписание админки → UTC → Кишинёв)."""
+    """Текст времени выплаты по ISO из API (дата и время в локальной зоне бота)."""
     if not payout_at_iso:
         return "не назначена"
     try:
@@ -56,7 +56,7 @@ def _format_payout_at(payout_at_iso: str | None) -> str:
         if dt_obj.tzinfo is None:
             dt_obj = dt_obj.replace(tzinfo=ZoneInfo("UTC"))
         dt_obj = dt_obj.astimezone(BOT_TZ)
-        return f"{dt_obj.strftime('%d.%m.%Y')} в {dt_obj.strftime('%H:%M')} (Кишинёв)"
+        return f"{dt_obj.strftime('%d.%m.%Y')} в {dt_obj.strftime('%H:%M')}"
     except Exception:
         return str(payout_at_iso)
 
