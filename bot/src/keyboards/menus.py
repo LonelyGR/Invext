@@ -127,10 +127,9 @@ def wallet_coin_kb() -> InlineKeyboardMarkup:
     )
 
 def partners_main_kb(share_url: str | None = None) -> InlineKeyboardMarkup:
-    """Партнёры: Моя команда, Реферальные бонусы, Поделиться ссылкой (нативный share), Назад."""
+    """Партнёры: Моя команда, Поделиться ссылкой (нативный share), Назад."""
     rows = [
         [InlineKeyboardButton(text="📊 Моя команда", callback_data="partners_team")],
-        [InlineKeyboardButton(text="🎁 Реферальные бонусы", callback_data="partners_bonuses")],
     ]
     if share_url:
         from urllib.parse import quote
@@ -141,20 +140,9 @@ def partners_main_kb(share_url: str | None = None) -> InlineKeyboardMarkup:
 
 
 def partners_team_kb() -> InlineKeyboardMarkup:
-    """Экран «Моя команда»: Бонусы по рефералам, Назад."""
+    """Экран «Моя команда»: Назад."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="🎁 Бонусы по рефералам", callback_data="partners_bonuses")],
-            [InlineKeyboardButton(text="◀️ Назад", callback_data="partners_back")],
-        ]
-    )
-
-
-def partners_bonuses_kb() -> InlineKeyboardMarkup:
-    """Экран «Реферальные бонусы»: Моя команда, Назад."""
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="📊 Моя команда", callback_data="partners_team")],
             [InlineKeyboardButton(text="◀️ Назад", callback_data="partners_back")],
         ]
     )

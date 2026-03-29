@@ -1,24 +1,18 @@
 """
-Партнеры: Партнёрская программа (ссылка + уровни), Моя команда, Реферальные бонусы.
+Партнеры: Партнёрская программа (ссылка + уровни), Моя команда.
 """
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.utils.deep_linking import create_start_link
 
 from src.api_client.client import api
-from src.keyboards.menus import partners_main_kb, partners_team_kb, partners_bonuses_kb
-from src.texts import (
-    make_partners_main_text,
-    make_partners_no_link_text,
-    make_partners_team_text,
-    make_partners_bonuses_text,
-)
+from src.keyboards.menus import partners_main_kb, partners_team_kb
+from src.texts import make_partners_main_text, make_partners_team_text
 
 router = Router(name="partners")
 
-REFERRAL_LEVELS = [
-    (0.5, f"{i} уровень (прибыль по сделке)") for i in range(1, 11)
-]
+# Проценты по уровням для экрана «Партнёры» (как в логике реф. бонусов по сделкам).
+REFERRAL_LEVELS: list[tuple[float, str]] = [(0.5, "") for _ in range(10)]
 
 
 async def _build_ref_link(bot, ref_code: str) -> str | None:
@@ -98,25 +92,4 @@ async def partners_team(callback: CallbackQuery):
         await callback.message.edit_text(text, reply_markup=partners_team_kb())
     except Exception:
         await callback.message.answer(text, reply_markup=partners_team_kb())
-    await callback.answer()
-
-
-@router.callback_query(F.data == "partners_bonuses")
-async def partners_bonuses(callback: CallbackQuery):
-    """Экран «Реферальные бонусы»."""
-    telegram_id = callback.from_user.id
-    try:
-        me = await api.get_me(telegram_id)
-    except Exception as e:
-        await callback.answer(str(e))
-        return
-    if not me:
-        await callback.answer("Пользователь не найден.")
-        return
-
-    text = make_partners_bonuses_text(me)
-    try:
-        await callback.message.edit_text(text, reply_markup=partners_bonuses_kb())
-    except Exception:
-        await callback.message.answer(text, reply_markup=partners_bonuses_kb())
     await callback.answer()

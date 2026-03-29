@@ -344,7 +344,23 @@ def make_invest_deals_dashboard_text(
 
 # === Партнёрка / команда / бонусы ===
 
+_PARTNERS_LEVEL_EMOJI = (
+    "1️⃣",
+    "2️⃣",
+    "3️⃣",
+    "4️⃣",
+    "5️⃣",
+    "6️⃣",
+    "7️⃣",
+    "8️⃣",
+    "9️⃣",
+    "🔟",
+)
+
+
 def make_partners_main_text(me: Mapping[str, Any], link: str | None, levels: list[tuple[float, str]]) -> str:
+    sep = "────────────────"
+
     def _level_count(level: int) -> int:
         value = me.get(f"referrals_level_{level}", 0)
         if level == 1 and not value:
@@ -352,18 +368,28 @@ def make_partners_main_text(me: Mapping[str, Any], link: str | None, levels: lis
         return int(value or 0)
 
     if link:
-        link_block = f"🔗 Ваша реферальная ссылка:\n{link}"
+        link_block = f"🔗 <b>Ваша ссылка</b>\n{link}"
     else:
-        link_block = "⚠️ Реферальная ссылка временно недоступна. Попробуйте позже."
+        link_block = "⚠️ Ссылка временно недоступна. Попробуйте позже."
 
     lines: list[str] = [
-        "<b>👥 Партнёрская программа</b>\n\n"
-        f"{link_block}\n\n"
-        "📊 <b>Уровни рефералов</b>"
+        "<b>👥 Партнёрская программа</b>",
+        "",
+        link_block,
+        "",
+        sep,
+        "",
+        "📊 <b>Уровни рефералов</b>",
+        "",
     ]
-    for i, (pct, label) in enumerate(levels):
+    n = min(len(levels), len(_PARTNERS_LEVEL_EMOJI))
+    for i in range(n):
+        pct, _label = levels[i]
         count = _level_count(i + 1)
-        lines.append(f"  • {label}: {count} чел. — {pct:.1f}%")
+        emoji = _PARTNERS_LEVEL_EMOJI[i]
+        lines.append(f"{emoji} {count} чел. • {pct:.1f}%")
+        if i == 4:
+            lines.append("")
     return "\n".join(lines)
 
 
@@ -380,24 +406,6 @@ def make_partners_team_text(me: Mapping[str, Any]) -> str:
         levels_lines.append(f"{level} уровень — {int(count or 0)}")
 
     return "<b>📊 Моя команда</b>\n\n" + "\n".join(levels_lines)
-
-
-def make_partners_bonuses_text(me: Mapping[str, Any]) -> str:
-    lines: list[str] = []
-    for level in range(1, 11):
-        count = me.get(f"referrals_level_{level}", 0)
-        if level == 1 and not count:
-            count = me.get("referrals_count", 0)
-        earned = _fmt_usdt(me.get(f"referral_earned_level_{level}_usdt", "0"))
-        lines.append(f"{level} уровень — {int(count or 0)} чел.\nЗаработано: {earned} USDT")
-
-    return (
-        "🎁 <b>Реферальные бонусы</b>\n\n"
-        + "\n".join(lines)
-        + "\n\n"
-        "📌 Бонус: 0.5% от прибыли реферала по сделке на каждом уровне\n"
-        "Начисляется, только если вы участвуете в той же сделке"
-    )
 
 
 # === Статистика ===
