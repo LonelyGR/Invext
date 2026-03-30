@@ -75,6 +75,44 @@ def currency_kb(callback_prefix: str) -> InlineKeyboardMarkup:
     )
 
 
+def withdraw_entry_kb(*, show_my_active: bool) -> InlineKeyboardMarkup:
+    """Старт вывода: валюта; при активных PENDING — ссылка на список заявок."""
+    rows: list[list[InlineKeyboardButton]] = [
+        [InlineKeyboardButton(text="USDT", callback_data="withdraw_USDT")],
+    ]
+    if show_my_active:
+        rows.append(
+            [InlineKeyboardButton(text="📋 Мои заявки на вывод", callback_data="wd_my_requests")]
+        )
+    rows.append([InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def withdraw_mid_flow_kb(*, show_my_active: bool) -> InlineKeyboardMarkup:
+    """Шаги ввода суммы/адреса: назад в меню; при PENDING — список заявок."""
+    rows: list[list[InlineKeyboardButton]] = []
+    if show_my_active:
+        rows.append(
+            [InlineKeyboardButton(text="📋 Мои заявки на вывод", callback_data="wd_my_requests")]
+        )
+    rows.append([InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def my_withdrawals_reply_kb(items: list) -> InlineKeyboardMarkup:
+    """Список заявок: отмена для PENDING, новая заявка, в меню."""
+    rows: list[list[InlineKeyboardButton]] = []
+    for it in items:
+        if str(it.get("status")) == "PENDING" and it.get("id") is not None:
+            wid = int(it["id"])
+            rows.append(
+                [InlineKeyboardButton(text=f"❌ Отменить №{wid}", callback_data=f"withdraw_cancel_{wid}")]
+            )
+    rows.append([InlineKeyboardButton(text="📤 Новая заявка", callback_data="wd_new_withdraw")])
+    rows.append([InlineKeyboardButton(text="◀️ В меню", callback_data="back_to_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def admin_menu_kb() -> InlineKeyboardMarkup:
     """Админка: заявки на вывод; токен для админ-сайта; финансовые настройки."""
     return InlineKeyboardMarkup(

@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Iterable, Mapping, Any
 
 
@@ -220,6 +221,44 @@ def make_withdraw_success_text(
         f"К получению на кошелёк: <b>{net}</b> {currency}\n\n"
         f"🆔 ID заявки: {req_id}"
     )
+
+
+def make_my_withdrawals_list_text(items: list) -> str:
+    """Текст экрана «мои заявки» (items — ответ /v1/withdrawals/my)."""
+    status_ru = {
+        "PENDING": "⏳ в обработке",
+        "APPROVED": "✅ одобрена",
+        "REJECTED": "❌ отклонена",
+        "CANCELLED": "🚫 отменена",
+    }
+    header = "📋 <b>Ваши заявки на вывод</b>\n\n"
+    if not items:
+        return header + "Пока заявок нет.\n\nНажмите «Новая заявка», чтобы создать."
+    lines: list[str] = [header]
+    for it in items[:30]:
+        wid = it.get("id")
+        cur = it.get("currency") or "—"
+        gross = it.get("amount")
+        net = it.get("net_amount", "—")
+        st = status_ru.get(str(it.get("status")), str(it.get("status")))
+        created = it.get("created_at")
+        created_s = ""
+        if created:
+            raw = str(created).replace("Z", "+00:00")
+            try:
+                d = datetime.fromisoformat(raw)
+                created_s = d.strftime("%d.%m.%Y %H:%M")
+            except Exception:
+                created_s = str(created)[:16]
+        lines.append(
+            f"🆔 <b>#{wid}</b> · {cur}\n"
+            f"   списание <b>{gross}</b> · к кошельку <b>{net}</b>\n"
+            f"   {st}"
+            + (f" · {created_s}" if created_s else "")
+        )
+    lines.append("")
+    lines.append("<i>Отменить можно только заявки «в обработке».</i>")
+    return "\n".join(lines)
 
 
 # === Инвестиции (раздел «Сделка») ===

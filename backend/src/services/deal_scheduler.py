@@ -1,7 +1,8 @@
 """
 Планировщик: периодическая проверка сделок с истёкшим end_at и закрытие их.
 Открытие сбора — по минутному интервалу и расписанию из админки (deal_schedule_json).
-Закрытие по календарю — через process_due_deals (end_at), без отдельного cron на 12:00.
+Закрытие и выплаты по payout_at — одна минутная задача (в :00 UTC): сначала закрытие сборов и коммит,
+затем отложенные выплаты (отдельная транзакция), чтобы порядок был предсказуемый и выплаты не откатывали закрытие.
 """
 from __future__ import annotations
 
@@ -9,6 +10,7 @@ import datetime as dt
 import logging
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from src.services.deal_service import (
@@ -26,21 +28,36 @@ logger = logging.getLogger(__name__)
 
 def init_deal_scheduler(scheduler: AsyncIOScheduler, db_factory) -> None:
     """
-    Раз в минуту проверять сделки с end_at <= now и выполнять закрытие
-    (статус closed, реферальные начисления, уведомления).
+    Раз в минуту (в :00 UTC): закрыть сборы с истёкшим end_at, затем обработать выплаты с payout_at <= now.
+    Сначала коммит закрытия, потом выплаты — сбой второго шага не отменяет закрытие сделки.
+    Дополнительно payouts вызываются перед открытием новой сделки (open_new_deal_by_schedule).
     """
 
-    async def _job_process_due_deals():
-        logger.info("process_due_deals job started")
+    async def _job_deal_close_and_payouts():
+        logger.info("deal_close_and_payouts job started")
+        n_closed = 0
+        n_paid = 0
         async with db_factory() as db:
-            logger.debug("process_due_deals: session created")
             try:
-                count = await process_due_deals(db)
+                n_closed = await process_due_deals(db)
                 await db.commit()
-                logger.info("process_due_deals job finished, processed=%s", count)
             except Exception as e:
                 await db.rollback()
-                logger.exception("process_due_deals job failed: %s", e)
+                logger.exception("deal_close_and_payouts: process_due_deals failed: %s", e)
+                return
+        async with db_factory() as db:
+            try:
+                n_paid = await process_pending_payouts(db)
+                await db.commit()
+            except Exception as e:
+                await db.rollback()
+                logger.exception("deal_close_and_payouts: process_pending_payouts failed: %s", e)
+                return
+        logger.info(
+            "deal_close_and_payouts finished closed=%s payouts=%s",
+            n_closed,
+            n_paid,
+        )
 
     async def _job_open_deal_1300():
         logger.info("open_deal_by_schedule job started")
@@ -74,22 +91,6 @@ def init_deal_scheduler(scheduler: AsyncIOScheduler, db_factory) -> None:
                 await db.rollback()
                 logger.exception("open_deal_1300 job failed: %s", e)
 
-    async def _job_process_pending_payouts():
-        """
-        Страховочный джоб отложенных выплат:
-        - нужен на случай, если контейнер/планировщик был недоступен в момент открытия новой сделки
-        - выплата не раньше чем через 1 час после закрытия сделки (фильтр внутри process_pending_payouts)
-        """
-        logger.info("process_pending_payouts job started")
-        async with db_factory() as db:
-            try:
-                count = await process_pending_payouts(db)
-                await db.commit()
-                logger.info("process_pending_payouts job finished, processed=%s", count)
-            except Exception as e:
-                await db.rollback()
-                logger.exception("process_pending_payouts job failed: %s", e)
-
     async def _job_process_broadcasts():
         logger.info("process_broadcasts job started")
         async with db_factory() as db:
@@ -114,15 +115,9 @@ def init_deal_scheduler(scheduler: AsyncIOScheduler, db_factory) -> None:
                 logger.exception("referral_preclose_reminder job failed: %s", e)
 
     scheduler.add_job(
-        _job_process_due_deals,
-        IntervalTrigger(minutes=1),
-        name="process_due_deals",
-    )
-    # Страховка: регулярно обрабатывать отложенные выплаты.
-    scheduler.add_job(
-        _job_process_pending_payouts,
-        IntervalTrigger(minutes=10),
-        name="process_pending_payouts",
+        _job_deal_close_and_payouts,
+        CronTrigger(minute="*", second="0", timezone="UTC"),
+        name="deal_close_and_payouts",
     )
     scheduler.add_job(
         _job_process_broadcasts,

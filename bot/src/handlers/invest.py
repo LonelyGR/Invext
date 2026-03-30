@@ -179,11 +179,8 @@ def _build_open_deal_dashboard(dash: dict) -> tuple[str, InlineKeyboardMarkup] |
     usdt = float(balances.get("USDT", 0) or 0)
     payout_block = _format_pending_payout_block(pending_payout if isinstance(pending_payout, dict) else {})
     deal_number = active["deal_number"]
-    # Сумма участия фиксированная (deal_amount_usdt), UI не предлагает ввод.
-    try:
-        participate_amount = Decimal(str(settings.get("deal_amount_usdt", "50")).replace(",", "."))
-    except Exception:
-        participate_amount = Decimal("50")
+    mode, min_invest, max_invest = _extract_invest_mode(settings)
+    participate_amount = min_invest if mode == "fixed" else None
     active_items = my_deals.get("active_deals") or []
     part_open = _participation_in_open_deal(
         deal_number, active_items if isinstance(active_items, list) else []
@@ -203,7 +200,7 @@ def _build_open_deal_dashboard(dash: dict) -> tuple[str, InlineKeyboardMarkup] |
     )
     kb = _invest_deal_kb(
         with_participate=not already,
-        fixed_amount=participate_amount if not already else None,
+        fixed_amount=participate_amount if not already and mode == "fixed" else None,
     )
     return text, kb
 
@@ -299,17 +296,24 @@ async def invest_participate(callback: CallbackQuery, state: FSMContext):
         await callback.answer()
         return
 
-    # Сумма участия фиксированная: берём из system settings (deal_amount_usdt), fallback 50.
-    try:
-        fixed_amount = Decimal(str(settings.get("deal_amount_usdt", "50")).replace(",", "."))
-    except Exception:
-        fixed_amount = Decimal("50")
+    mode, min_invest, max_invest = _extract_invest_mode(settings)
+
+    if mode == "range":
+        await state.set_state(InvestStates.entering_amount)
+        hint = f"Диапазон: от <b>{min_invest}</b> до <b>{max_invest}</b> USDT."
+        await callback.message.edit_text(
+            make_invest_enter_amount_text(hint),
+            reply_markup=_invest_deal_kb(with_participate=False),
+            parse_mode="HTML",
+        )
+        await callback.answer()
+        return
 
     if not await with_double_click_protection(callback, "invest"):
         return
     try:
         try:
-            result = await api.invest(telegram_id, fixed_amount)
+            result = await api.invest(telegram_id, float(min_invest))
         except Exception as e:
             err = str(e)
             if hasattr(e, "response") and getattr(e, "response", None) is not None:
@@ -345,20 +349,19 @@ async def invest_participate(callback: CallbackQuery, state: FSMContext):
             await callback.answer()
             return
 
-            new_balance = result.get("balance_usdt")
-            invested = result.get("invested_amount_usdt")
-            payout_hint = _format_payout_at(result.get("payout_at"))
-            success_text = make_invest_success_text(invested, new_balance, payout_hint=payout_hint)
-            await send_effect_message(
-                callback.message.bot,
-                callback.message.chat.id,
-                success_text,
-                effect_id=EFFECT_CELEBRATION,
-                reply_markup=_invest_deal_kb(with_participate=False),
-            )
-            await state.clear()
-            await callback.answer()
-            return
+        new_balance = result.get("balance_usdt")
+        invested = result.get("invested_amount_usdt")
+        payout_hint = _format_payout_at(result.get("payout_at"))
+        success_text = make_invest_success_text(invested, new_balance, payout_hint=payout_hint)
+        await send_effect_message(
+            callback.message.bot,
+            callback.message.chat.id,
+            success_text,
+            effect_id=EFFECT_CELEBRATION,
+            reply_markup=_invest_deal_kb(with_participate=False),
+        )
+        await state.clear()
+        await callback.answer()
     finally:
         await release_double_click_lock(telegram_id, "invest")
 
