@@ -5,7 +5,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import DateTime, ForeignKey, Numeric, String, Text
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -32,7 +32,8 @@ class WithdrawRequest(Base):
         nullable=False,
     )
     decided_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    decided_by: Mapped[Optional[int]] = mapped_column(nullable=True)  # telegram_id админа
+    # telegram_id (или id токена админки); Telegram ID может быть > 2^31 — только BigInteger.
+    decided_by: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
 
     user: Mapped["User"] = relationship("User", back_populates="withdraw_requests")
 
