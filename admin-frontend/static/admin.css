@@ -2160,6 +2160,14 @@ tbody tr:hover .row-actions {
   background: linear-gradient(135deg, #2563eb, #1d4ed8) !important;
 }
 
+.btn-bulk-debit {
+  grid-column: 1 / -1;
+  max-width: 220px;
+  margin-top: 4px !important;
+  background: linear-gradient(135deg, #d97706, #b45309) !important;
+  color: #fff !important;
+}
+
 .editor-toolbar {
   display: flex;
   gap: 8px;

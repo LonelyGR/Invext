@@ -3422,6 +3422,7 @@ async function loadSettings() {
           <label class="bulk-credit-label">Комментарий в ledger</label>
           <input type="text" id="bulk-credit-comment" class="settings-input bulk-credit-input" placeholder="Необязательно" />
           <button type="button" id="bulk-credit-btn" class="btn-bulk-credit">Зачислить всем</button>
+          <button type="button" id="bulk-debit-btn" class="btn-bulk-debit">Списать у всех</button>
           <button type="button" id="bulk-reset-btn" class="btn-reject">Обнулить баланс всем</button>
         </div>
       </div>
@@ -4026,6 +4027,59 @@ async function loadSettings() {
         } finally {
           bulkCreditBtn.disabled = false;
           bulkCreditBtn.textContent = "Зачислить всем";
+        }
+      };
+    }
+
+    const bulkDebitBtn = document.getElementById("bulk-debit-btn");
+    if (bulkDebitBtn) {
+      bulkDebitBtn.onclick = async () => {
+        const amtRaw = document.getElementById("bulk-credit-amount")?.value?.trim();
+        const comment = document.getElementById("bulk-credit-comment")?.value?.trim() ?? "";
+        const amt = parseFloat((amtRaw || "").replace(",", "."));
+        if (!amtRaw || Number.isNaN(amt) || amt <= 0) {
+          showToast("Укажите сумму больше 0", "error");
+          return;
+        }
+        const first = await openUxDialog({
+          title: "Массовое списание",
+          message: `С каждого пользователя, у кого достаточно средств, будет списано ${amt} USDT (ledger WITHDRAW). У кого баланс меньше — пользователь будет пропущен. Продолжить?`,
+          confirmText: "Продолжить",
+          cancelText: "Отмена",
+        });
+        if (!first.confirmed) return;
+        const phrase = await openUxDialog({
+          title: "Подтверждение",
+          message: "Введите код подтверждения: BULK_DEBIT",
+          confirmText: "Подтвердить",
+          cancelText: "Отмена",
+          inputPlaceholder: "BULK_DEBIT",
+        });
+        if (!phrase.confirmed || (phrase.value || "").trim().toUpperCase() !== "BULK_DEBIT") {
+          showToast("Операция отменена.", "info");
+          return;
+        }
+        try {
+          bulkDebitBtn.disabled = true;
+          bulkDebitBtn.textContent = "Обработка…";
+          const res = await apiRequest("/users/bulk-ledger-debit", {
+            method: "POST",
+            body: JSON.stringify({
+              amount_usdt: String(amt),
+              comment: comment || undefined,
+              confirm: "BULK_DEBIT",
+            }),
+          });
+          showToast(
+            `Списано у ${res.users_debited} польз. по ${res.amount_usdt} USDT (всего ${res.total_usdt_debited} USDT). Пропущено (мало средств): ${res.users_skipped_insufficient}`
+          );
+          loadSettings();
+          loadDashboard();
+        } catch (e) {
+          showToast(e.message || "Ошибка", "error");
+        } finally {
+          bulkDebitBtn.disabled = false;
+          bulkDebitBtn.textContent = "Списать у всех";
         }
       };
     }

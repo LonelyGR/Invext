@@ -1134,6 +1134,92 @@ async def bulk_ledger_credit_all_users(
     }
 
 
+@router.post("/users/bulk-ledger-debit")
+async def bulk_ledger_debit_all_users(
+    request: Request,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Списать одинаковую сумму USDT с баланса (ledger WITHDRAW) у всех, у кого хватает средств.
+    У кого баланс меньше суммы — пропуск (без ошибки), в ответе users_skipped_insufficient.
+    Требует confirm=\"BULK_DEBIT\".
+    """
+    admin_token_id, _ = await get_admin_context(request)
+    require_admin_role(request)
+
+    confirm = str(body.get("confirm", "")).strip().upper()
+    if confirm != "BULK_DEBIT":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail='Подтвердите операцию: передайте confirm="BULK_DEBIT"',
+        )
+
+    raw_amt = body.get("amount_usdt")
+    try:
+        amount = Decimal(str(raw_amt).replace(",", ".").strip())
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Некорректная сумма")
+    if amount <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Сумма должна быть больше 0",
+        )
+    if amount > Decimal("1000000"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Сумма слишком велика",
+        )
+
+    comment = (body.get("comment") or "").strip() or "Массовое списание с админки"
+
+    result = await db.execute(select(User.id))
+    user_ids = [row[0] for row in result.all()]
+
+    debited_ids: list[int] = []
+    skipped = 0
+    for uid in user_ids:
+        balance = await get_balance_usdt(db, uid)
+        if balance < amount:
+            skipped += 1
+            continue
+        tx = LedgerTransaction(
+            user_id=uid,
+            type=LEDGER_TYPE_WITHDRAW,
+            amount_usdt=amount,
+            provider="ADMIN_MANUAL",
+            metadata_json={
+                "comment": comment,
+                "bulk_debit": True,
+            },
+        )
+        db.add(tx)
+        debited_ids.append(uid)
+    await db.flush()
+
+    for uid in user_ids:
+        u = await db.get(User, uid)
+        if u:
+            u.balance_usdt = await get_balance_usdt(db, uid)
+
+    await log_admin_action(
+        db=db,
+        admin_token_id=admin_token_id,
+        action_type="BULK_LEDGER_DEBIT",
+        entity_type="SYSTEM",
+        entity_id=0,
+    )
+
+    total_debited = amount * Decimal(len(debited_ids))
+    return {
+        "ok": True,
+        "users_debited": len(debited_ids),
+        "users_skipped_insufficient": skipped,
+        "amount_usdt": str(amount),
+        "total_usdt_debited": str(total_debited),
+    }
+
+
 @router.post("/users/bulk-ledger-reset")
 async def bulk_ledger_reset_all_users(
     request: Request,
