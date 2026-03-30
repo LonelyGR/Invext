@@ -172,6 +172,13 @@ async def invest(
             detail="Участие в сделках временно недоступно по техническим причинам. Попробуйте позже.",
         )
     amount = body.amount_usdt.quantize(Decimal("0.01"))
+    # Бизнес-правило: сумма участия фиксированная (SystemSettings.deal_amount_usdt), отклоняем любые другие суммы.
+    fixed_amount = Decimal(str(getattr(sys_settings, "deal_amount_usdt", Decimal("50")))).quantize(Decimal("0.01"))
+    if amount != fixed_amount:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Сумма участия в сделке фиксированная — {fixed_amount} USDT.",
+        )
     if amount < sys_settings.min_invest_usdt:
         raise HTTPException(
             status_code=400,

@@ -179,8 +179,11 @@ def _build_open_deal_dashboard(dash: dict) -> tuple[str, InlineKeyboardMarkup] |
     usdt = float(balances.get("USDT", 0) or 0)
     payout_block = _format_pending_payout_block(pending_payout if isinstance(pending_payout, dict) else {})
     deal_number = active["deal_number"]
-    mode, min_invest, max_invest = _extract_invest_mode(settings)
-    participate_amount = min_invest if mode == "fixed" else None
+    # Сумма участия фиксированная (deal_amount_usdt), UI не предлагает ввод.
+    try:
+        participate_amount = Decimal(str(settings.get("deal_amount_usdt", "50")).replace(",", "."))
+    except Exception:
+        participate_amount = Decimal("50")
     active_items = my_deals.get("active_deals") or []
     part_open = _participation_in_open_deal(
         deal_number, active_items if isinstance(active_items, list) else []
@@ -296,48 +299,51 @@ async def invest_participate(callback: CallbackQuery, state: FSMContext):
         await callback.answer()
         return
 
-    mode, min_invest, max_invest = _extract_invest_mode(settings)
+    # Сумма участия фиксированная: берём из system settings (deal_amount_usdt), fallback 50.
+    try:
+        fixed_amount = Decimal(str(settings.get("deal_amount_usdt", "50")).replace(",", "."))
+    except Exception:
+        fixed_amount = Decimal("50")
 
-    if mode == "fixed" and min_invest is not None:
-        if not await with_double_click_protection(callback, "invest"):
-            return
+    if not await with_double_click_protection(callback, "invest"):
+        return
+    try:
         try:
-            try:
-                result = await api.invest(telegram_id, min_invest)
-            except Exception as e:
-                err = str(e)
-                if hasattr(e, "response") and getattr(e, "response", None) is not None:
-                    try:
-                        body = e.response.json()
-                        if isinstance(body, dict) and "detail" in body:
-                            err = body["detail"] if isinstance(body["detail"], str) else str(body["detail"])
-                    except Exception:
-                        pass
-                if _is_already_in_deal_api_error(err):
-                    try:
-                        dash = await get_invest_dashboard(telegram_id)
-                        built = _build_open_deal_dashboard(dash)
-                        if built:
-                            t, kb = built
-                            await callback.message.edit_text(t, reply_markup=kb)
-                            await state.clear()
-                            await callback.answer()
-                            return
-                    except Exception:
-                        pass
-                    await callback.message.edit_text(
-                        "✅ Вы уже участвуете в этой сделке.\n\n"
-                        "В одном сборе доступно только одно участие.",
-                        reply_markup=_invest_deal_kb(with_participate=False),
-                    )
-                else:
-                    await callback.message.edit_text(
-                        f"Ошибка инвестирования: {err}",
-                        reply_markup=_invest_deal_kb(with_participate=False),
-                    )
-                await state.clear()
-                await callback.answer()
-                return
+            result = await api.invest(telegram_id, fixed_amount)
+        except Exception as e:
+            err = str(e)
+            if hasattr(e, "response") and getattr(e, "response", None) is not None:
+                try:
+                    body = e.response.json()
+                    if isinstance(body, dict) and "detail" in body:
+                        err = body["detail"] if isinstance(body["detail"], str) else str(body["detail"])
+                except Exception:
+                    pass
+            if _is_already_in_deal_api_error(err):
+                try:
+                    dash = await get_invest_dashboard(telegram_id)
+                    built = _build_open_deal_dashboard(dash)
+                    if built:
+                        t, kb = built
+                        await callback.message.edit_text(t, reply_markup=kb)
+                        await state.clear()
+                        await callback.answer()
+                        return
+                except Exception:
+                    pass
+                await callback.message.edit_text(
+                    "✅ Вы уже участвуете в этой сделке.\n\n"
+                    "В одном сборе доступно только одно участие.",
+                    reply_markup=_invest_deal_kb(with_participate=False),
+                )
+            else:
+                await callback.message.edit_text(
+                    f"Ошибка инвестирования: {err}",
+                    reply_markup=_invest_deal_kb(with_participate=False),
+                )
+            await state.clear()
+            await callback.answer()
+            return
 
             new_balance = result.get("balance_usdt")
             invested = result.get("invested_amount_usdt")
@@ -353,19 +359,8 @@ async def invest_participate(callback: CallbackQuery, state: FSMContext):
             await state.clear()
             await callback.answer()
             return
-        finally:
-            await release_double_click_lock(telegram_id, "invest")
-
-    await state.set_state(InvestStates.entering_amount)
-
-    hint = f"Минимальная сумма: {min_invest} USDT" if min_invest is not None else "Введите сумму инвестиций."
-    await callback.message.edit_text(
-        make_invest_enter_amount_text(hint),
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_menu")]]
-        ),
-    )
-    await callback.answer()
+    finally:
+        await release_double_click_lock(telegram_id, "invest")
 
 
 @router.callback_query(F.data == "open_invest")

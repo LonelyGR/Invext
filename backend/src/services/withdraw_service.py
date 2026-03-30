@@ -53,7 +53,9 @@ async def create_withdraw_request(
     и статусе PENDING возвращает уже существующую заявку.
     """
     settings = await get_system_settings(db)
-    _validate_amount(amount, float(settings.min_withdraw_usdt), float(settings.max_withdraw_usdt))
+    # Бизнес-правило: минимальная сумма вывода 50 USDT (даже если настройки меньше).
+    effective_min = max(Decimal(str(settings.min_withdraw_usdt)), Decimal("50"))
+    _validate_amount(amount, float(effective_min), float(settings.max_withdraw_usdt))
 
     _, net = withdraw_fee_and_net(amount)
     if net <= 0:
@@ -186,3 +188,35 @@ async def reject_withdraw(
     req.decided_at = datetime.now(timezone.utc)
     req.decided_by = decided_by_telegram_id
     return req
+
+
+async def cancel_withdraw_request(db: AsyncSession, telegram_id: int, withdraw_id: int) -> WithdrawRequest:
+    """
+    Отмена вывода пользователем.
+
+    Важно: в текущей бухгалтерской логике средства списываются только при APPROVE
+    (создание WalletTransaction WITHDRAW). Поэтому для статуса PENDING достаточно
+    сменить статус на CANCELLED — баланс возвращать не нужно.
+    """
+    async with db.begin():
+        # Найдём пользователя и залочим заявку.
+        result = await db.execute(select(User).where(User.telegram_id == telegram_id))
+        user = result.scalar_one_or_none()
+        if not user:
+            raise ValueError("User not found")
+
+        req_result = await db.execute(
+            select(WithdrawRequest).where(WithdrawRequest.id == withdraw_id).with_for_update()
+        )
+        req = req_result.scalar_one_or_none()
+        if not req or req.user_id != user.id:
+            raise ValueError("Withdraw request not found")
+        if req.status == "CANCELLED":
+            return req
+        if req.status != "PENDING":
+            raise ValueError("Нельзя отменить: заявка уже обработана.")
+        req.status = "CANCELLED"
+        req.decided_at = datetime.now(timezone.utc)
+        req.decided_by = telegram_id
+        await db.flush()
+        return req

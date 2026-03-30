@@ -146,6 +146,15 @@ class BackendClient:
             r.raise_for_status()
             return r.json()
 
+    async def cancel_withdraw_request(self, telegram_id: int, withdraw_id: int) -> Dict[str, Any]:
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            r = await client.post(
+                self._url(f"/v1/withdrawals/{withdraw_id}/cancel"),
+                params={"telegram_id": telegram_id},
+            )
+            r.raise_for_status()
+            return r.json()
+
     # --- NOWPayments deposits (invoice-based) ---
     async def create_deposit_invoice(
         self,

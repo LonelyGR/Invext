@@ -199,7 +199,7 @@ async def broadcast_deal_opened(
         "Вы можете инвестировать USDT в разделе:\n"
         "📈 Сделка\n\n"
         f"⏳ Регистрация открыта до:\n{close_time_human}\n\n"
-        "Для участия нажмите «Сделка» и затем «Участвовать» в нашем Telegram боте."
+        "Для участия нажмите «Сделка» и затем «Участвовать» в нашем Telegram-бот."
     )
 
     sent = 0
@@ -259,7 +259,7 @@ async def broadcast_deal_closed(
         lines.append(f"⏰ {next_open_human}")
         lines.append(f"До открытия: {next_open_in_human}.")
         lines.append("")
-        lines.append("Для участия используйте нашего Telegram бота.")
+        lines.append("Для участия используйте нашего Telegram-бот.")
 
         text = "\n".join(lines)
         effect_id = None

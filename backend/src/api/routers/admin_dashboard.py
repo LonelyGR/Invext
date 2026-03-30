@@ -1754,7 +1754,7 @@ async def force_close_deal(
 ):
     """
     Создать запрос на досрочное закрытие активной сделки.
-    Фактическое закрытие выполняется после подтверждения админом в Telegram-боте.
+    Фактическое закрытие выполняется после подтверждения админом в Telegram-бот.
     """
     admin_token_id, _ = await get_admin_context(request)
     require_admin_role(request)

@@ -3,7 +3,7 @@
 """
 from decimal import Decimal, InvalidOperation
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
@@ -59,7 +59,12 @@ async def withdraw_currency_chosen(callback: CallbackQuery, state: FSMContext):
     max_wd = "100000"
     try:
         settings = await api.get_system_settings()
-        min_wd = settings.get("min_withdraw_usdt", min_wd)
+        # Бизнес-правило: минимум 50.
+        try:
+            min_wd_val = Decimal(str(settings.get("min_withdraw_usdt", min_wd)).replace(",", "."))
+        except Exception:
+            min_wd_val = Decimal(str(min_wd))
+        min_wd = str(max(min_wd_val, Decimal("50")))
         max_wd = settings.get("max_withdraw_usdt", max_wd)
     except Exception:
         pass
@@ -124,6 +129,10 @@ async def withdraw_address_entered(message: Message, state: FSMContext):
             return
 
         req_id = result.get("id", "—")
+        try:
+            req_id_int = int(req_id)
+        except Exception:
+            req_id_int = None
         await message.answer(
             make_withdraw_success_text(
                 req_id,
@@ -132,10 +141,44 @@ async def withdraw_address_entered(message: Message, state: FSMContext):
                 net=result.get("net_amount", "—"),
                 currency=currency,
             ),
-            reply_markup=main_menu_kb(),
+            reply_markup=(
+                InlineKeyboardMarkup(
+                    inline_keyboard=[
+                        [InlineKeyboardButton(text="❌ Отменить вывод", callback_data=f"withdraw_cancel_{req_id_int}")],
+                        [InlineKeyboardButton(text="◀️ В меню", callback_data="back_to_menu")],
+                    ]
+                )
+                if req_id_int is not None
+                else main_menu_kb()
+            ),
         )
         await state.clear()
         await state.set_data({})
         logger.info("user %s created withdraw request id=%s amount=%s %s", telegram_id, req_id, amount, currency)
     finally:
         await release_double_click_lock(telegram_id, "withdraw")
+
+
+@router.callback_query(F.data.startswith("withdraw_cancel_"))
+async def withdraw_cancel(callback: CallbackQuery):
+    telegram_id = callback.from_user.id
+    try:
+        withdraw_id = int(callback.data.replace("withdraw_cancel_", ""))
+    except Exception:
+        await callback.answer("Некорректная заявка", show_alert=True)
+        return
+    try:
+        await api.cancel_withdraw_request(telegram_id, withdraw_id)
+    except Exception as e:
+        err = str(e)
+        if hasattr(e, "response") and getattr(e, "response", None) is not None:
+            try:
+                body = e.response.json()
+                if isinstance(body, dict) and "detail" in body:
+                    err = body["detail"] if isinstance(body["detail"], str) else str(body["detail"])
+            except Exception:
+                pass
+        await callback.answer(f"Не удалось отменить: {err}", show_alert=True)
+        return
+    await callback.message.edit_text("✅ Заявка на вывод отменена.")
+    await callback.answer()

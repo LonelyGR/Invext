@@ -367,6 +367,11 @@ def make_partners_main_text(me: Mapping[str, Any], link: str | None, levels: lis
             value = me.get("referrals_count", 0)
         return int(value or 0)
 
+    def _level_earned(level: int) -> str:
+        # Источник: backend отдаёт агрегаты в /v1/telegram/me (referral_earned_level_{N}_usdt).
+        key = f"referral_earned_level_{level}_usdt"
+        return _fmt_usdt(me.get(key, "0"))
+
     if link:
         link_block = f"🔗 <b>Ваша ссылка</b>\n{link}"
     else:
@@ -384,10 +389,10 @@ def make_partners_main_text(me: Mapping[str, Any], link: str | None, levels: lis
     ]
     n = min(len(levels), len(_PARTNERS_LEVEL_EMOJI))
     for i in range(n):
-        pct, _label = levels[i]
         count = _level_count(i + 1)
         emoji = _PARTNERS_LEVEL_EMOJI[i]
-        lines.append(f"{emoji} {count} чел. • {pct:.1f}%")
+        earned = _level_earned(i + 1)
+        lines.append(f"{emoji} {count} чел. • заработано: {earned} USDT")
         if i == 4:
             lines.append("")
     return "\n".join(lines)

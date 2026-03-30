@@ -1726,7 +1726,7 @@ async function loadMessages(page = 1) {
 
     section.innerHTML = `
       <h1>Сообщения</h1>
-      <p class="section-desc">Массовые рассылки всем пользователям через Telegram-бота.</p>
+      <p class="section-desc">Массовые рассылки всем пользователям через Telegram-бот.</p>
       <div class="kpi-row">
         <div class="kpi-card">
           <div class="kpi-title">Кампаний</div>

@@ -9,7 +9,7 @@ from src.db.session import get_db
 from src.models import User
 from src.schemas.withdraw import WithdrawRequestIn, WithdrawRequestResponse
 from src.services.settings_service import get_system_settings
-from src.services.withdraw_service import create_withdraw_request, get_my_withdrawals
+from src.services.withdraw_service import create_withdraw_request, get_my_withdrawals, cancel_withdraw_request
 
 router = APIRouter(prefix="/v1/withdrawals", tags=["withdrawals"])
 
@@ -47,3 +47,17 @@ async def my_withdrawals(
     """Список заявок на вывод текущего пользователя."""
     items = await get_my_withdrawals(db, telegram_id)
     return [WithdrawRequestResponse.model_validate(r) for r in items]
+
+
+@router.post("/{withdraw_id}/cancel", response_model=WithdrawRequestResponse)
+async def cancel_withdrawal(
+    withdraw_id: int,
+    telegram_id: int = Query(..., description="Telegram ID пользователя"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Отменить свою заявку на вывод (только PENDING)."""
+    try:
+        req = await cancel_withdraw_request(db, telegram_id, withdraw_id)
+        return WithdrawRequestResponse.model_validate(req)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
