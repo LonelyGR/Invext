@@ -56,8 +56,9 @@ async def acquire_deal_open_advisory_lock(db: AsyncSession) -> None:
 # Единый календарь сделок (окно сбора) — то же, что в планировщике и админке.
 SCHEDULE_TZ = PAYOUT_TZ
 
-# Python weekday: пн=0 … вс=6. Суббота (Europe/Chisinau) — без автооткрытия, без автозакрытия, без реф. «за час».
+# Python weekday: пн=0 … вс=6.
 WEEKDAY_SATURDAY = 5
+WEEKDAY_SUNDAY = 6
 
 
 def _chisinau_local(utc_dt: dt.datetime) -> dt.datetime:
@@ -69,6 +70,13 @@ def _chisinau_local(utc_dt: dt.datetime) -> dt.datetime:
 def _is_saturday_chisinau(utc_dt: Optional[dt.datetime] = None) -> bool:
     utc_dt = utc_dt or dt.datetime.now(dt.timezone.utc)
     return _chisinau_local(utc_dt).weekday() == WEEKDAY_SATURDAY
+
+
+def _is_weekend_chisinau(utc_dt: Optional[dt.datetime] = None) -> bool:
+    """Суббота или воскресенье по Europe/Chisinau — для запрета открытия нового сбора."""
+    utc_dt = utc_dt or dt.datetime.now(dt.timezone.utc)
+    wd = _chisinau_local(utc_dt).weekday()
+    return wd in (WEEKDAY_SATURDAY, WEEKDAY_SUNDAY)
 
 
 # Проценты реферального бонуса по уровням (1–10)
@@ -171,11 +179,11 @@ def scheduled_collection_window_1300_chisinau(
     """
     Окно автоматического открытия сбора: только если для сегодняшнего дня в админ-расписании `enabled`,
     и локальное время совпадает с полем `open` (по умолчанию 13:00). Конец окна — по `close_*` из JSON.
-    В субботу (Europe/Chisinau) не открываем, даже если день включён в JSON.
+    В субботу и воскресенье (Europe/Chisinau) не открываем, даже если день включён в JSON.
     Возвращает (start_at UTC, end_at UTC).
     """
     now_local = now_utc.astimezone(SCHEDULE_TZ)
-    if now_local.weekday() == WEEKDAY_SATURDAY:
+    if now_local.weekday() in (WEEKDAY_SATURDAY, WEEKDAY_SUNDAY):
         return None
     schedule = _normalized_schedule(schedule_raw)
     today_rule = schedule.get(str(now_local.weekday()))
@@ -210,7 +218,7 @@ def next_scheduled_open_1300_chisinau(
     schedule = _normalized_schedule(schedule_raw)
     for delta_days in range(0, 14):
         day_dt = local_now + dt.timedelta(days=delta_days)
-        if day_dt.weekday() == WEEKDAY_SATURDAY:
+        if day_dt.weekday() in (WEEKDAY_SATURDAY, WEEKDAY_SUNDAY):
             continue
         rule = schedule.get(str(day_dt.weekday()))
         if not rule or not bool(rule.get("enabled", True)):
@@ -510,16 +518,13 @@ async def process_pending_payouts(db: AsyncSession) -> int:
     """
     Обработка всех инвестиций в статусе in_progress_payout:
     — зачисляем тело + прибыль на баланс (PROFIT ledger entry)
-    — статус → completed, payout_at по deal_schedule_json
+    — статус → completed; payout_at участия не меняем (зафиксирован при входе в сделку)
     — отправляем персональное уведомление каждому пользователю.
     Вызывается перед открытием новой сделки.
     Возвращает кол-во обработанных записей.
     """
-    # Для новой бизнес-логики:
-    # — выплата происходит строго по рассчитанному payout_at по расписанию.
+    # Выплата по сохранённому payout_at участия (фиксируется при входе в сделку), не пересчитываем из JSON.
     now = dt.datetime.now(dt.timezone.utc)
-    settings = await get_system_settings(db)
-    schedule_raw = getattr(settings, "deal_schedule_json", None)
 
     # Важно для идемпотентности при нескольких воркерах:
     # лочим строки и пропускаем уже залоченные (чтобы не выплатить дважды).
@@ -551,18 +556,6 @@ async def process_pending_payouts(db: AsyncSession) -> int:
                 if deal_obj:
                     deal_cache[p.deal_id] = deal_obj
             deal = deal_cache.get(p.deal_id)
-
-            # На случай старых записей: пересчитаем payout_at по дате/времени участия,
-            # чтобы убрать зависимость от deal.closed_at + 24h.
-            desired_payout_at = calculate_payout_at_for_deal_start(
-                deal.start_at if deal else p.created_at,
-                schedule_raw=schedule_raw,
-            )
-            if desired_payout_at > now:
-                # Обновим scheduled time, чтобы в следующих прогонах джобы не пытаться
-                # обработать это участие раньше времени.
-                p.payout_at = desired_payout_at
-                continue
 
             profit = p.profit_amount or Decimal("0")
 
@@ -616,7 +609,7 @@ async def process_pending_payouts(db: AsyncSession) -> int:
                     rw.status = STATUS_PAID
 
             p.status = PARTICIPATION_STATUS_COMPLETED
-            p.payout_at = desired_payout_at
+            # payout_at оставляем как зафиксированный момент выплаты (не перезаписываем из deal_schedule_json)
             affected_user_ids.add(p.user_id)
             processed += 1
 
@@ -682,12 +675,9 @@ async def process_due_deals(db: AsyncSession) -> int:
     Возвращает количество обработанных сделок.
     Транзакция управляется вызывающим кодом (scheduler); не вызывать db.begin() здесь,
     т.к. первый db.execute() уже запускает autobegin.
-    В субботу (Europe/Chisinau) автоматическое закрытие не выполняется.
+    Закрытие выполняется в любой день недели (в т.ч. выходные), если end_at уже наступил.
     """
     now = dt.datetime.now(dt.timezone.utc)
-    if _is_saturday_chisinau(now):
-        logger.debug("process_due_deals: skip — Saturday Chisinau")
-        return 0
     result = await db.execute(
         select(Deal).where(
             Deal.status == DEAL_STATUS_ACTIVE,
@@ -794,12 +784,9 @@ async def close_active_deal_by_schedule(db: AsyncSession, *, force: bool = False
     Идемпотентно: если активной сделки нет — False.
     Если force=False, закрывает только сделку, у которой end_at <= now.
     Если force=True, закрывает активную сделку досрочно (для админки).
-    В субботу (Europe/Chisinau) при force=False закрытие не выполняется.
     Транзакция управляется вызывающим кодом (scheduler); не вызывать db.begin() здесь.
     """
     now = dt.datetime.now(dt.timezone.utc)
-    if not force and _is_saturday_chisinau(now):
-        return False
     filters = [Deal.status == DEAL_STATUS_ACTIVE]
     if not force:
         filters.append(Deal.end_at <= now)
@@ -831,8 +818,8 @@ async def open_new_deal_by_schedule(
     """
     await acquire_deal_open_advisory_lock(db)
 
-    if _is_saturday_chisinau(start_at):
-        logger.info("open_new_deal_by_schedule: skipped — start falls on Saturday (Chisinau)")
+    if _is_weekend_chisinau(start_at):
+        logger.info("open_new_deal_by_schedule: skipped — start falls on weekend (Chisinau)")
         return None
 
     now = dt.datetime.now(dt.timezone.utc)

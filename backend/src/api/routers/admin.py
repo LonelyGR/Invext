@@ -22,18 +22,19 @@ from src.services.ledger_service import (
     get_balance_usdt,
 )
 from src.services.withdraw_service import (
-    get_pending_withdrawals_with_users,
     approve_withdraw,
+    get_pending_withdrawals_with_users,
     reject_withdraw,
+    withdraw_fee_and_net,
 )
 from src.services.deal_service import (
     acquire_deal_open_advisory_lock,
+    collection_end_local_for_start,
     get_active_deal,
     open_new_deal,
     process_pending_payouts,
-    collection_end_local_for_start,
 )
-from src.services.withdraw_service import withdraw_fee_and_net
+from src.services.settings_service import get_system_settings
 from src.services.notification_service import broadcast_deal_opened
 
 router = APIRouter(prefix="/v1/admin", tags=["admin"], dependencies=[Depends(require_admin_key)])
@@ -285,7 +286,8 @@ async def admin_open_deal_now(
     if now_local.weekday() in (5, 6):
         raise HTTPException(status_code=400, detail="В выходные открытие нового сбора отключено.")
     start_local = now_local
-    close_local = collection_end_local_for_start(start_local)
+    settings = await get_system_settings(db)
+    close_local = collection_end_local_for_start(start_local, schedule_raw=settings.deal_schedule_json)
     start_at = start_local.astimezone(dt.timezone.utc)
     end_at = close_local.astimezone(dt.timezone.utc)
 

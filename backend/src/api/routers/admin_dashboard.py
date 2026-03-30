@@ -100,7 +100,7 @@ from src.services.deal_service import (
 from src.services.withdraw_service import withdraw_fee_and_net
 from src.services.notification_service import broadcast_deal_opened, send_telegram_message, send_telegram_photo
 from src.core.config import get_settings
-from src.services.settings_service import invalidate_system_settings_cache
+from src.services.settings_service import get_system_settings, invalidate_system_settings_cache
 from src.services.broadcast_service import enqueue_broadcast, retry_failed_deliveries
 from src.models.broadcast_message import BROADCAST_STATUS_IN_PROGRESS
 
@@ -1784,7 +1784,9 @@ async def open_deal_now(
             detail="В субботу и воскресенье открытие нового сбора отключено. Дождитесь понедельника.",
         )
     start_local = now_local
-    close_local = collection_end_local_for_start(start_local)
+    settings = await get_system_settings(db)
+    schedule_raw = settings.deal_schedule_json
+    close_local = collection_end_local_for_start(start_local, schedule_raw=schedule_raw)
     start_at = start_local.astimezone(dt.timezone.utc)
     end_at = close_local.astimezone(dt.timezone.utc)
 

@@ -2,7 +2,7 @@
 Планировщик: периодическая проверка сделок с истёкшим end_at и закрытие их.
 Открытие сбора — по минутному интервалу и расписанию из админки (deal_schedule_json).
 Закрытие и выплаты по payout_at — одна минутная задача (в :00 UTC): сначала закрытие сборов и коммит,
-затем отложенные выплаты (отдельная транзакция), чтобы порядок был предсказуемый и выплаты не откатывали закрытие.
+затем отложенные выплаты (отдельная транзакция). Ошибка закрытия не блокирует попытку выплат в ту же минуту.
 """
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 def init_deal_scheduler(scheduler: AsyncIOScheduler, db_factory) -> None:
     """
     Раз в минуту (в :00 UTC): закрыть сборы с истёкшим end_at, затем обработать выплаты с payout_at <= now.
-    Сначала коммит закрытия, потом выплаты — сбой второго шага не отменяет закрытие сделки.
+    Два шага в разных сессиях: сбой закрытия не блокирует попытку выплат; сбой выплат не откатывает уже закрытые сделки.
     Дополнительно payouts вызываются перед открытием новой сделки (open_new_deal_by_schedule).
     """
 
@@ -44,7 +44,6 @@ def init_deal_scheduler(scheduler: AsyncIOScheduler, db_factory) -> None:
             except Exception as e:
                 await db.rollback()
                 logger.exception("deal_close_and_payouts: process_due_deals failed: %s", e)
-                return
         async with db_factory() as db:
             try:
                 n_paid = await process_pending_payouts(db)

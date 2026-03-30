@@ -78,7 +78,7 @@ async def _invest_ledger_proof_pairs(
 async def _pending_payout_for_user(db: AsyncSession, internal_user_id: int) -> PendingPayoutInfo:
     """
     Ожидание выплаты: участие in_progress_payout по последнему закрытому сбору пользователя.
-    Время выплаты пересчитывается из deal_schedule_json (админка), как в participate_in_deal.
+    Время выплаты — из сохранённого participation.payout_at; для старых записей без даты — расчёт из расписания.
     """
     rows_result = await db.execute(
         select(DealParticipation, Deal)
@@ -112,11 +112,14 @@ async def _pending_payout_for_user(db: AsyncSession, internal_user_id: int) -> P
         return PendingPayoutInfo(pending=False)
 
     p, deal = chosen
-    settings = await get_system_settings(db)
-    payout_at = calculate_payout_at_for_deal_start(
-        deal.start_at,
-        getattr(settings, "deal_schedule_json", None),
-    )
+    if p.payout_at is not None:
+        payout_at = p.payout_at
+    else:
+        settings = await get_system_settings(db)
+        payout_at = calculate_payout_at_for_deal_start(
+            deal.start_at,
+            getattr(settings, "deal_schedule_json", None),
+        )
     return PendingPayoutInfo(
         pending=True,
         deal_number=deal.number,
