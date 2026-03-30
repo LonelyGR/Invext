@@ -82,23 +82,20 @@ async def withdraw_currency_chosen(callback: CallbackQuery, state: FSMContext):
         return
     await state.update_data(currency=currency)
     await state.set_state(WithdrawStates.entering_amount)
-    # Получаем актуальные лимиты для текста (валидация на бэкенде).
+    # Минимум для текста (верхняя граница только на бэкенде).
     min_wd = "10"
-    max_wd = "100000"
     try:
         settings = await api.get_system_settings()
-        # Бизнес-правило: минимум 50.
         try:
             min_wd_val = Decimal(str(settings.get("min_withdraw_usdt", min_wd)).replace(",", "."))
         except Exception:
             min_wd_val = Decimal(str(min_wd))
         min_wd = str(max(min_wd_val, Decimal("50")))
-        max_wd = settings.get("max_withdraw_usdt", max_wd)
     except Exception:
         pass
     show_my = await _has_pending_withdrawals(callback.from_user.id)
     await callback.message.edit_text(
-        make_withdraw_enter_amount_text(currency, min_wd, max_wd),
+        make_withdraw_enter_amount_text(currency, min_wd),
         reply_markup=withdraw_mid_flow_kb(show_my_active=show_my),
     )
     await callback.answer()

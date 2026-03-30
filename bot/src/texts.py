@@ -187,12 +187,11 @@ def make_withdraw_choose_currency_text() -> str:
     )
 
 
-def make_withdraw_enter_amount_text(currency: str, min_wd: Any, max_wd: Any) -> str:
+def make_withdraw_enter_amount_text(currency: str, min_wd: Any) -> str:
     return (
         f"💸 <b>Вывод средств ({currency})</b>\n\n"
         "Введите сумму <b>списания с баланса</b> (полную сумму заявки):\n\n"
-        f"Минимум — {min_wd}\n"
-        f"Максимум — {max_wd}\n\n"
+        f"Минимум — {min_wd}\n\n"
         "Комиссия — <b>10%</b> от этой суммы; на указанный адрес уйдёт <b>90%</b>."
     )
 
