@@ -28,6 +28,16 @@ import logging
 router = Router(name="withdraw")
 logger = logging.getLogger(__name__)
 
+# Telegram: answerCallbackQuery text макс. 200 символов.
+_CALLBACK_ALERT_LIMIT = 190
+
+
+def _callback_alert_text(text: str, limit: int = _CALLBACK_ALERT_LIMIT) -> str:
+    t = (text or "").strip()
+    if len(t) <= limit:
+        return t
+    return t[: limit - 1] + "…"
+
 
 async def _has_pending_withdrawals(telegram_id: int) -> bool:
     try:
@@ -246,7 +256,11 @@ async def withdraw_cancel(callback: CallbackQuery, state: FSMContext):
                     err = body["detail"] if isinstance(body["detail"], str) else str(body["detail"])
             except Exception:
                 pass
-        await callback.answer(f"Не удалось отменить: {err}", show_alert=True)
+        logger.warning("withdraw_cancel failed user=%s id=%s: %s", telegram_id, withdraw_id, err)
+        await callback.answer(
+            _callback_alert_text(f"Не удалось отменить: {err}"),
+            show_alert=True,
+        )
         return
     await state.clear()
     try:
