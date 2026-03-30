@@ -2,104 +2,117 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Invext Admin</title>
-  <link rel="stylesheet" href="/database/admin.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/database/admin.css" />
 </head>
 <body class="dark">
   <div id="app">
     <div id="login-view" class="view">
-      <h1>Invext Admin</h1>
-      <form id="login-form">
-        <label for="token">Одноразовый токен</label>
-        <input id="token" name="token" type="text" required />
-        <label for="otp-code">2FA код (если включен)</label>
-        <input id="otp-code" name="otp-code" type="text" placeholder="123456" />
-        <button type="submit">Войти</button>
-      </form>
-      <div id="login-error" class="error"></div>
+      <div class="ds-login">
+        <div class="ds-login__brand">
+          <div class="sidebar-logo-mark" style="margin: 0 auto var(--ds-space-4);">IV</div>
+          <h1 class="ds-login__title">Invext Admin</h1>
+          <p class="ds-login__hint">Операторский доступ по одноразовому токену</p>
+        </div>
+        <form id="login-form">
+          <label for="token">Одноразовый токен</label>
+          <input id="token" class="ds-input" name="token" type="text" required autocomplete="one-time-code" />
+          <label for="otp-code">2FA код (если включен)</label>
+          <input id="otp-code" class="ds-input" name="otp-code" type="text" placeholder="123456" inputmode="numeric" autocomplete="one-time-code" />
+          <button type="submit" class="ds-btn ds-btn--primary" style="width: 100%; margin-top: var(--ds-space-4);">Войти</button>
+        </form>
+        <div id="login-error" class="error"></div>
+      </div>
     </div>
 
     <div id="main-view" class="view hidden">
-      <aside class="sidebar">
-        <div class="sidebar-header">
-          <div class="sidebar-logo-mark">IV</div>
-          <div class="sidebar-title-block">
-            <h2>Invext</h2>
-            <div class="sidebar-subtitle">Admin Control Center</div>
-          </div>
-        </div>
-        <nav>
-          <div class="sidebar-group-label">Управление</div>
-          <a href="#dashboard" data-section="dashboard">
-            <span class="nav-icon">📊</span>
-            <span class="nav-label">Дашборд</span>
-          </a>
-          <a href="#users" data-section="users">
-            <span class="nav-icon">👤</span>
-            <span class="nav-label">Пользователи</span>
-          </a>
-          <a href="#deals" data-section="deals">
-            <span class="nav-icon">📈</span>
-            <span class="nav-label">Сделки</span>
-          </a>
-          <a href="#deal-schedule" data-section="deal-schedule">
-            <span class="nav-icon">🗓️</span>
-            <span class="nav-label">Расписание сделок</span>
-          </a>
-          <a href="#messages" data-section="messages">
-            <span class="nav-icon">📣</span>
-            <span class="nav-label">Сообщения</span>
-          </a>
-          <div class="sidebar-group-label">Финансы</div>
-          <a href="#deposits" data-section="deposits">
-            <span class="nav-icon">💰</span>
-            <span class="nav-label">Пополнения</span>
-          </a>
-          <a href="#withdrawals" data-section="withdrawals">
-            <span class="nav-icon">📤</span>
-            <span class="nav-label">Выводы</span>
-          </a>
-          <div class="sidebar-group-label">Система</div>
-          <a href="#logs" data-section="logs">
-            <span class="nav-icon">🧾</span>
-            <span class="nav-label">Логи</span>
-          </a>
-          <a href="#settings" data-section="settings">
-            <span class="nav-icon">⚙️</span>
-            <span class="nav-label">Настройки</span>
-          </a>
-        </nav>
-        <div class="sidebar-footer">
-          <div class="sidebar-admin-avatar">A</div>
-          <div class="sidebar-admin-meta">
-            <div class="sidebar-admin-name">Admin</div>
-            <div class="sidebar-admin-status">
-              <span class="sidebar-status-dot"></span>
-              Online
+      <div class="app-shell">
+        <aside class="sidebar app-shell__sidebar" aria-label="Основная навигация">
+          <div class="sidebar-header">
+            <div class="sidebar-logo-mark">IV</div>
+            <div class="sidebar-title-block">
+              <h2>Invext</h2>
+              <div class="sidebar-subtitle">Operations</div>
             </div>
           </div>
-        </div>
-      </aside>
-      <main class="content">
-        <div id="page-chrome" class="page-chrome">
-          <div id="breadcrumbs" class="breadcrumbs">Дашборд</div>
-          <div id="page-actions" class="page-actions"></div>
-          <div class="global-search-wrap">
-            <input id="global-search-input" type="text" placeholder="Глобальный поиск: пользователи, сделки, транзакции ( / )" />
-            <div id="global-search-results" class="global-search-results hidden"></div>
+          <nav>
+            <div class="sidebar-group-label">Управление</div>
+            <a href="#dashboard" data-section="dashboard">
+              <span class="nav-icon"><i data-lucide="layout-dashboard" class="icon icon--sm"></i></span>
+              <span class="nav-label">Дашборд</span>
+            </a>
+            <a href="#users" data-section="users">
+              <span class="nav-icon"><i data-lucide="users" class="icon icon--sm"></i></span>
+              <span class="nav-label">Пользователи</span>
+            </a>
+            <a href="#deals" data-section="deals">
+              <span class="nav-icon"><i data-lucide="trending-up" class="icon icon--sm"></i></span>
+              <span class="nav-label">Сделки</span>
+            </a>
+            <a href="#deal-schedule" data-section="deal-schedule">
+              <span class="nav-icon"><i data-lucide="calendar-days" class="icon icon--sm"></i></span>
+              <span class="nav-label">Расписание сделок</span>
+            </a>
+            <a href="#messages" data-section="messages">
+              <span class="nav-icon"><i data-lucide="megaphone" class="icon icon--sm"></i></span>
+              <span class="nav-label">Сообщения</span>
+            </a>
+            <div class="sidebar-group-label">Финансы</div>
+            <a href="#deposits" data-section="deposits">
+              <span class="nav-icon"><i data-lucide="wallet" class="icon icon--sm"></i></span>
+              <span class="nav-label">Пополнения</span>
+            </a>
+            <a href="#withdrawals" data-section="withdrawals">
+              <span class="nav-icon"><i data-lucide="arrow-up-right" class="icon icon--sm"></i></span>
+              <span class="nav-label">Выводы</span>
+            </a>
+            <div class="sidebar-group-label">Система</div>
+            <a href="#logs" data-section="logs">
+              <span class="nav-icon"><i data-lucide="scroll-text" class="icon icon--sm"></i></span>
+              <span class="nav-label">Логи</span>
+            </a>
+            <a href="#settings" data-section="settings">
+              <span class="nav-icon"><i data-lucide="settings" class="icon icon--sm"></i></span>
+              <span class="nav-label">Настройки</span>
+            </a>
+          </nav>
+          <div class="sidebar-footer">
+            <div class="sidebar-admin-avatar" aria-hidden="true">A</div>
+            <div class="sidebar-admin-meta">
+              <div class="sidebar-admin-name">Admin</div>
+              <div class="sidebar-admin-status">
+                <span class="sidebar-status-dot" aria-hidden="true"></span>
+                Online
+              </div>
+            </div>
           </div>
-        </div>
-        <section id="dashboard-section" class="section"></section>
-        <section id="users-section" class="section hidden"></section>
-        <section id="user-section" class="section hidden"></section>
-        <section id="deals-section" class="section hidden"></section>
-        <section id="deal-schedule-section" class="section hidden"></section>
-        <section id="messages-section" class="section hidden"></section>
-        <section id="deposits-section" class="section hidden"></section>
-        <section id="withdrawals-section" class="section hidden"></section>
-        <section id="logs-section" class="section hidden"></section>
-        <section id="settings-section" class="section hidden"></section>
-      </main>
+        </aside>
+        <main class="content app-shell__main">
+          <div id="page-chrome" class="page-chrome app-topbar" role="region" aria-label="Панель страницы">
+            <div id="breadcrumbs" class="breadcrumbs" aria-live="polite">Дашборд</div>
+            <div id="page-actions" class="page-actions"></div>
+            <div class="global-search-wrap">
+              <span class="global-search-icon" aria-hidden="true"><i data-lucide="search" class="icon icon--sm icon-muted"></i></span>
+              <input id="global-search-input" type="search" placeholder="Поиск: пользователи, сделки, транзакции ( / )" autocomplete="off" />
+              <div id="global-search-results" class="global-search-results hidden"></div>
+            </div>
+          </div>
+          <section id="dashboard-section" class="section"></section>
+          <section id="users-section" class="section hidden"></section>
+          <section id="user-section" class="section hidden"></section>
+          <section id="deals-section" class="section hidden"></section>
+          <section id="deal-schedule-section" class="section hidden"></section>
+          <section id="messages-section" class="section hidden"></section>
+          <section id="deposits-section" class="section hidden"></section>
+          <section id="withdrawals-section" class="section hidden"></section>
+          <section id="logs-section" class="section hidden"></section>
+          <section id="settings-section" class="section hidden"></section>
+        </main>
+      </div>
       <div id="deposit-detail-modal" class="modal-overlay hidden" aria-hidden="true">
         <div class="modal-content">
           <div class="modal-header">
@@ -112,7 +125,8 @@
     </div>
   </div>
 
+  <script src="https://unpkg.com/lucide@0.469.0/dist/umd/lucide.min.js" crossorigin="anonymous"></script>
+  <script src="/database/admin-ui.js"></script>
   <script src="/database/admin.js"></script>
 </body>
 </html>
-

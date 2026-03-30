@@ -14,7 +14,22 @@ const DASHBOARD_LIVE_KEY = "invext_admin_dashboard_live";
 const BROADCAST_TEMPLATES_KEY = "invext_admin_broadcast_templates";
 
 let dashboardAutoRefreshTimer = null;
+/** Timestamp label timer on #dashboard (single instance per tab). */
+let dashboardUpdatedAtTimerId = null;
+/** Обратный отсчёт до закрытия — только на #deals, один interval. */
+let dealsCountdownIntervalId = null;
 let authRedirectInProgress = false;
+
+// Dashboard hysteresis state is intentionally per-tab (in-memory), not shared across tabs.
+// It resets on page reload by design.
+let dashboardQueueHysteresisState = { level: "ok", candidate: null, candidateCount: 0 };
+
+function clearDashboardUpdatedAtTimer() {
+  if (dashboardUpdatedAtTimerId != null) {
+    clearInterval(dashboardUpdatedAtTimerId);
+    dashboardUpdatedAtTimerId = null;
+  }
+}
 
 class UnauthorizedError extends Error {
   constructor(message = "Unauthorized") {
@@ -200,6 +215,9 @@ function showLoginView() {
 function showMainView() {
   document.getElementById("login-view").classList.add("hidden");
   document.getElementById("main-view").classList.remove("hidden");
+  if (typeof AdminUI !== "undefined" && typeof AdminUI.initShell === "function") {
+    AdminUI.initShell();
+  }
 }
 
 function updateBreadcrumbs(hash) {
@@ -231,7 +249,7 @@ function setPageActions(hash) {
   const addBtn = (label, onClick) => {
     const btn = document.createElement("button");
     btn.type = "button";
-    btn.className = "page-action-btn";
+    btn.className = "ds-btn ds-btn--secondary ds-btn--sm";
     btn.textContent = label;
     btn.onclick = onClick;
     wrap.appendChild(btn);
@@ -260,7 +278,7 @@ function setPageActions(hash) {
       loadWithdrawals();
     });
   } else if (hash === "#settings") {
-    addBtn("Кнопка Сохранить ↓", () => {
+    addBtn("Перейти к сохранению", () => {
       document.getElementById("settings-save-btn")?.scrollIntoView({ behavior: "smooth", block: "center" });
     });
   } else if (hash === "#deal-schedule") {
@@ -363,7 +381,7 @@ function ensureMessagesNavAndSection() {
     link.href = "#messages";
     link.setAttribute("data-section", "messages");
     link.innerHTML = `
-      <span class="nav-icon">📣</span>
+      <span class="nav-icon"><i data-lucide="megaphone" class="icon icon--sm"></i></span>
       <span class="nav-label">Сообщения</span>
     `;
     if (dealsLink && dealsLink.nextSibling) {
@@ -378,7 +396,7 @@ function ensureMessagesNavAndSection() {
     link.href = "#deal-schedule";
     link.setAttribute("data-section", "deal-schedule");
     link.innerHTML = `
-      <span class="nav-icon">🗓️</span>
+      <span class="nav-icon"><i data-lucide="calendar-days" class="icon icon--sm"></i></span>
       <span class="nav-label">Расписание сделок</span>
     `;
     if (dealsLink && dealsLink.nextSibling) {
@@ -483,6 +501,7 @@ async function loadDashboard() {
         : { text: "OK", cls: "status-paid" };
     const recentEventsHtml = (logsData.items || []).length
       ? (logsData.items || [])
+          .slice(0, 5)
           .map(
             (l) => `
           <li class="event-feed-item">
@@ -522,19 +541,93 @@ async function loadDashboard() {
     const topReferrers = ext?.top_referrers || [];
     const dau24h = Number(ext?.dau_24h || 0);
     const anomalyAlerts = ext?.anomaly_alerts || [];
-    const systemIssues = [];
-    if (data.pending_withdrawals_count > 30) {
-      systemIssues.push(`Высокая очередь выводов: ${data.pending_withdrawals_count}`);
-    }
+    const attentionItems = [];
+    const infoItems = [];
+    const pendingW = Number(data.pending_withdrawals_count || 0);
+
+    // Очередь выводов: гистерезис + дебаунс (per-tab, in-memory), чтобы статус не "дёргался" у порогов.
+    const readQueueState = () => dashboardQueueHysteresisState;
+    const writeQueueState = (s) => {
+      dashboardQueueHysteresisState = s;
+    };
+
+    // Гистерезис (вход/выход разные пороги)
+    const queueLevelHysteresis = (count, prevLevel) => {
+      // вход: watch>=10, action>=30; выход: action<25, watch<8
+      if (prevLevel === "action") return count >= 25 ? "action" : count >= 10 ? "watch" : "ok";
+      if (prevLevel === "watch") return count >= 30 ? "action" : count >= 8 ? "watch" : "ok";
+      // prev ok
+      return count >= 30 ? "action" : count >= 10 ? "watch" : "ok";
+    };
+
+    // Debounce: Action подтверждаем 1 раз, Watch/OK — 2 подряд.
+    const stabilizeQueueLevel = (nextLevel) => {
+      const s = readQueueState();
+      if (nextLevel === s.level) {
+        writeQueueState({ ...s, candidate: null, candidateCount: 0 });
+        return s.level;
+      }
+      if (s.candidate === nextLevel) {
+        const nextCount = (s.candidateCount || 0) + 1;
+        const required = nextLevel === "action" ? 1 : 2;
+        if (nextCount >= required) {
+          const committed = { level: nextLevel, candidate: null, candidateCount: 0 };
+          writeQueueState(committed);
+          return committed.level;
+        }
+        writeQueueState({ ...s, candidateCount: nextCount });
+        return s.level;
+      }
+      writeQueueState({ ...s, candidate: nextLevel, candidateCount: 1 });
+      return s.level;
+    };
+
+    const prevQueueState = readQueueState();
+    const queueLevelNext = queueLevelHysteresis(pendingW, prevQueueState.level);
+    const queueLevel = stabilizeQueueLevel(queueLevelNext);
+
+    if (queueLevel === "action")
+      attentionItems.push({
+        level: "action",
+        text: `Очередь выводов высокая: ${pendingW}`,
+        cta: { href: "#withdrawals", label: "Выводы" },
+      });
+    else if (queueLevel === "watch")
+      attentionItems.push({
+        level: "watch",
+        text: `Очередь выводов растёт: ${pendingW}`,
+        cta: { href: "#withdrawals", label: "Выводы" },
+      });
+
     for (const a of anomalyAlerts) {
       const msg = String(a?.message || "").trim();
-      if (msg) systemIssues.push(msg);
+      if (!msg) continue;
+      const sev = String(a?.severity || "").toLowerCase();
+      const level = sev === "high" ? "action" : sev === "medium" ? "watch" : "info";
+      const item = { level, text: msg, cta: { href: "#logs", label: "Детали" } };
+      if (level === "info") infoItems.push(item);
+      else attentionItems.push(item);
     }
-    const uniqueSystemIssues = [...new Set(systemIssues)];
-    const computedSystemStatus =
-      uniqueSystemIssues.length > 0
-        ? { text: "Проблемы", cls: "status-expired" }
-        : systemStatus;
+
+    const dedup = new Set();
+    const uniqueAttention = attentionItems.filter((x) => {
+      const key = `${x.level}:${x.text}`;
+      if (dedup.has(key)) return false;
+      dedup.add(key);
+      return true;
+    });
+
+    const attentionLevel = uniqueAttention.some((x) => x.level === "action")
+      ? "action"
+      : uniqueAttention.length
+        ? "watch"
+        : "ok";
+    const attentionBadge =
+      attentionLevel === "action"
+        ? { text: "Action", cls: "status-expired" }
+        : attentionLevel === "watch"
+          ? { text: "Watch", cls: "status-pending" }
+          : { text: "OK", cls: "status-paid" };
     const labels = buildDateSeries(dayCount);
     const allLogRows = [...(logsCurrent.items || []), ...(logsPrev.items || []), ...(logsData.items || [])];
     const heatmapBuckets = {};
@@ -579,8 +672,91 @@ async function loadDashboard() {
     const eventsMax = Math.max(1, ...eventsSeries);
     const depMax = Math.max(1, ...createdSeries, ...paidSeries);
 
+    const heartbeatText = data.active_deal_number
+      ? `Активная сделка #${data.active_deal_number} · окно до ${activeDealCloseText}`
+      : "Активной сделки нет — откройте панель «Сделки»: там пост-закрытие последней сделки или подсказка, как открыть новую.";
+
+    const updatedAtMs = Date.now();
+    const formatUpdatedAt = (tsMs) => {
+      const elapsed = Date.now() - tsMs;
+      const withSeconds = elapsed <= 60_000;
+      return new Date(tsMs).toLocaleTimeString("ru-RU", {
+        hour: "2-digit",
+        minute: "2-digit",
+        ...(withSeconds ? { second: "2-digit" } : {}),
+      });
+    };
+    const updatedAtLabel = formatUpdatedAt(updatedAtMs);
+    const attentionSummaryText =
+      attentionLevel === "action"
+        ? "Action — требуется внимание оператора."
+        : attentionLevel === "watch"
+          ? "Watch — стоит проверить сигналы."
+          : "OK — срочных действий не требуется.";
+
+    const attentionListHtml = uniqueAttention.length
+      ? `<ul class="dash-attention-list">${uniqueAttention
+          .slice(0, 3)
+          .map((x) => {
+            const cta = x.cta?.href
+              ? `<a class="dash-attention-cta" href="${escapeHtmlAttr(x.cta.href)}">${escapeHtmlAttr(
+                  x.cta.label || "Детали"
+                )}</a>`
+              : "";
+            return `<li class="dash-attention-item dash-attention-item--${x.level}"><span class="dash-attention-text">${escapeHtmlAttr(
+              x.text
+            )}</span>${cta}</li>`;
+          })
+          .join("")}</ul>`
+      : `<p class="dash-attention-empty">Срочных сигналов нет</p>`;
+    const infoLimit = 3;
+    const infoHiddenCount = Math.max(0, infoItems.length - infoLimit);
+    const infoListHtml =
+      infoItems.length > 0
+        ? `<div class="dash-info-block"><div class="dash-info-title">Info</div><ul class="dash-info-list">${infoItems
+            .slice(0, infoLimit)
+            .map((x) => {
+              const cta = x.cta?.href
+                ? `<a class="dash-attention-cta" href="${escapeHtmlAttr(x.cta.href)}">${escapeHtmlAttr(
+                    x.cta.label || "Детали"
+                  )}</a>`
+                : "";
+              return `<li class="dash-info-item"><span class="dash-attention-text">${escapeHtmlAttr(x.text)}</span>${cta}</li>`;
+            })
+            .join("")}${infoHiddenCount ? `<li class="dash-info-more">+ ещё ${infoHiddenCount}</li>` : ""}</ul></div>`
+        : "";
+
     section.innerHTML = `
       <h1>Дашборд</h1>
+      <div class="dashboard-attention panel-card">
+        <div class="dashboard-attention__head">
+          <h2 class="dashboard-attention__title">Operational Health</h2>
+          <div class="dashboard-attention__meta">
+            <span class="dashboard-attention__updated" id="dashboard-updated-at" data-updated-ms="${updatedAtMs}">Обновлено: ${updatedAtLabel}</span>
+            <span class="status-badge ${attentionBadge.cls}">${attentionBadge.text}</span>
+          </div>
+        </div>
+        <div class="dashboard-attention__body">
+          <p class="dashboard-attention__summary">${attentionSummaryText}</p>
+          ${attentionListHtml}
+          ${infoListHtml}
+          <div class="dashboard-attention__actions">
+            <a href="#withdrawals" class="ds-btn ds-btn--secondary ds-btn--sm">Выводы</a>
+            <a href="#deals" class="ds-btn ds-btn--secondary ds-btn--sm">Сделки</a>
+            <a href="#logs" class="ds-btn ds-btn--ghost ds-btn--sm">Логи</a>
+          </div>
+        </div>
+      </div>
+
+      <div class="dashboard-deal-heartbeat panel-card">
+        <div class="dashboard-deal-heartbeat__row">
+          <div class="dashboard-deal-heartbeat__text">
+            <span class="dashboard-deal-heartbeat__label">Сделки</span>
+            <span class="dashboard-deal-heartbeat__value">${escapeHtmlAttr(heartbeatText)}</span>
+          </div>
+          <a href="#deals" class="ds-btn ds-btn--secondary ds-btn--sm">Панель сделок</a>
+        </div>
+      </div>
       <div class="toolbar dashboard-range-toolbar">
         <div class="range-segment">
           <button type="button" class="range-btn ${range === "1d" ? "active" : ""}" data-range="1d">День</button>
@@ -647,11 +823,27 @@ async function loadDashboard() {
       </div>
       <div class="dashboard-panels">
         <div class="panel-card">
-          <h3 class="dashboard-panel-title">Алерты аномалий</h3>
+          <h3 class="dashboard-panel-title">Operational · очереди и внимание</h3>
+          <ul class="compact-metrics">
+            <li><span class="compact-metrics__k">Очередь выводов</span><span class="compact-metrics__v">${pendingW}</span></li>
+            <li><span class="compact-metrics__k">Система</span><span class="compact-metrics__v"><span class="status-badge ${attentionBadge.cls}">${attentionBadge.text}</span></span></li>
+          </ul>
+          <div class="dashboard-compact-events">
+            <div class="dashboard-compact-events__head">
+              <span class="dashboard-compact-events__title">Recent events</span>
+              <a href="#logs" class="dashboard-compact-events__more">все логи →</a>
+            </div>
+            <ul class="event-feed event-feed--compact">${recentEventsHtml}</ul>
+          </div>
+        </div>
+
+        <div class="panel-card">
+          <h3 class="dashboard-panel-title">Сигналы (anomaly)</h3>
           <ul class="alerts-list">
             ${
               anomalyAlerts.length
                 ? anomalyAlerts
+                    .slice(0, 6)
                     .map((a) => `<li class="alert-item ${a.severity === "high" ? "high" : a.severity === "medium" ? "medium" : "low"}">${escapeHtmlAttr(a.message || "")}</li>`)
                     .join("")
                 : `<li class="event-feed-empty">Аномалий не обнаружено</li>`
@@ -701,9 +893,9 @@ async function loadDashboard() {
             <div class="mini-chart-legend">Диапазон: ${labels[0]} → ${labels[labels.length - 1]} · max: ${eventsMax}</div>
           </div>
         </div>
-        <div class="panel-card">
+        <div class="panel-card panel-card--muted">
           <h3 class="dashboard-panel-title">Heatmap активности (день/час)</h3>
-          <div class="activity-heatmap">
+          <div class="activity-heatmap activity-heatmap--muted">
             ${heatmapRows
               .map((dow) => {
                 const rowCells = Array.from({ length: 24 })
@@ -717,7 +909,7 @@ async function loadDashboard() {
               })
               .join("")}
           </div>
-          <div class="mini-chart-legend">Интенсивность: 0 → ${heatmapMax} событий в слоте часа</div>
+          <div class="mini-chart-legend">Интенсивность: 0 → ${heatmapMax} событий/час</div>
         </div>
         <div class="panel-card">
           <h3 class="dashboard-panel-title">График депозитов (создано / оплачено)</h3>
@@ -740,45 +932,22 @@ async function loadDashboard() {
           </div>
         </div>
       </div>
-      <div class="dashboard-panels">
-        <div class="panel-card">
-          <h3 class="dashboard-panel-title">Быстрые действия</h3>
-          <div class="quick-actions-grid">
-            <button type="button" class="quick-action-btn" data-target="#users">Пользователи</button>
-            <button type="button" class="quick-action-btn" data-target="#deals">Сделки</button>
-            <button type="button" class="quick-action-btn" data-target="#deposits">Пополнения</button>
-            <button type="button" class="quick-action-btn" data-target="#withdrawals">Выводы</button>
-          </div>
-        </div>
-        <div class="panel-card">
-          <h3 class="dashboard-panel-title">Состояние системы</h3>
-          <ul class="health-list">
-            <li>Статус: <span class="status-badge ${computedSystemStatus.cls}">${computedSystemStatus.text}</span></li>
-            <li>Активная сделка: <strong>${data.active_deal_number ? "да" : "нет"}</strong></li>
-            <li>Закрытие текущей сделки: <strong>${activeDealCloseText}</strong></li>
-            <li>Ожидают вывода: <strong>${data.pending_withdrawals_count}</strong></li>
-            ${
-              uniqueSystemIssues.length
-                ? `<li>Причины: <strong>${uniqueSystemIssues.map((x) => escapeHtmlAttr(x)).join(" • ")}</strong></li>`
-                : ""
-            }
-          </ul>
-        </div>
-        <div class="panel-card">
-          <h3 class="dashboard-panel-title">Последние события</h3>
-          <ul class="event-feed">${recentEventsHtml}</ul>
-        </div>
-      </div>
     `;
 
-    section.querySelectorAll(".quick-action-btn").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const target = btn.getAttribute("data-target");
-        if (target) {
-          location.hash = target;
+    // Timestamp polish: после 60с убираем секунды без перерендера.
+    clearDashboardUpdatedAtTimer();
+    if ((location.hash || "#dashboard") === "#dashboard") {
+      dashboardUpdatedAtTimerId = setInterval(() => {
+        if ((location.hash || "#dashboard") !== "#dashboard") {
+          clearDashboardUpdatedAtTimer();
+          return;
         }
-      });
-    });
+        const el = document.getElementById("dashboard-updated-at");
+        const ms = Number(el?.getAttribute("data-updated-ms") || 0);
+        if (!el || !Number.isFinite(ms) || ms <= 0) return;
+        el.textContent = `Обновлено: ${formatUpdatedAt(ms)}`;
+      }, 1000);
+    }
     section.querySelectorAll(".range-btn").forEach((btn) => {
       btn.addEventListener("click", () => {
         const next = btn.getAttribute("data-range");
@@ -828,7 +997,7 @@ async function loadUsers() {
     <div class="panel-card">
       <div class="toolbar users-toolbar">
         <div class="search-field">
-          <span class="search-field-icon">🔍</span>
+          <span class="search-field-icon"><i data-lucide="search" class="icon icon--xs icon-muted" aria-hidden="true"></i></span>
           <input id="users-search" type="text" placeholder="Поиск по username / Telegram ID" value="${escapeHtmlAttr(usersListState.search)}" />
         </div>
         <button type="button" id="users-search-btn">Искать</button>
@@ -920,7 +1089,7 @@ async function loadUsers() {
       <div class="panel-card">
         <div class="toolbar users-toolbar">
           <div class="search-field">
-            <span class="search-field-icon">🔍</span>
+            <span class="search-field-icon"><i data-lucide="search" class="icon icon--xs icon-muted" aria-hidden="true"></i></span>
             <input id="users-search" type="text" placeholder="Поиск по username / Telegram ID" value="${escapeHtmlAttr(usersListState.search)}" />
           </div>
           <button type="button" id="users-search-btn">Искать</button>
@@ -1114,6 +1283,12 @@ function switchSection(hash) {
     clearInterval(dashboardAutoRefreshTimer);
     dashboardAutoRefreshTimer = null;
   }
+  if ((hash || "#dashboard") !== "#dashboard") {
+    clearDashboardUpdatedAtTimer();
+  }
+  if ((hash || "#dashboard") !== "#deals") {
+    clearDealsCountdown();
+  }
   updateBreadcrumbs(hash || "#dashboard");
   setPageActions(hash || "#dashboard");
   const sections = ["dashboard", "users", "deals", "deal-schedule", "messages", "deposits", "withdrawals", "logs", "settings", "user"];
@@ -1165,26 +1340,292 @@ function switchSection(hash) {
   }
 }
 
+function dealTimeLeftLabel(deal) {
+  const end = deal?.end_at ? new Date(deal.end_at).getTime() : null;
+  if (end == null || !Number.isFinite(end)) return "—";
+  const leftMs = Math.max(0, end - Date.now());
+  const h = Math.floor(leftMs / 3600000);
+  const m = Math.floor((leftMs % 3600000) / 60000);
+  return `${h}ч ${m}м`;
+}
+
+function clearDealsCountdown() {
+  if (dealsCountdownIntervalId != null) {
+    clearInterval(dealsCountdownIntervalId);
+    dealsCountdownIntervalId = null;
+  }
+}
+
+function parseDealEndAtValid(deal) {
+  const raw = deal?.end_at;
+  if (raw == null || String(raw).trim() === "") return null;
+  const t = new Date(raw).getTime();
+  if (!Number.isFinite(t)) return null;
+  return t;
+}
+
+function getLatestClosedDealForPostClose(deals) {
+  const closed = (deals || []).filter((d) => String(d.status || "").toLowerCase() === "closed");
+  if (!closed.length) return null;
+  return closed
+    .slice()
+    .sort((a, b) => {
+      const tb = b.closed_at ? new Date(b.closed_at).getTime() : 0;
+      const ta = a.closed_at ? new Date(a.closed_at).getTime() : 0;
+      if (tb !== ta) return tb - ta;
+      return (b.number || 0) - (a.number || 0);
+    })[0];
+}
+
+function resolveDealsControlPhase(activeDealFull, deals) {
+  if (!activeDealFull) {
+    const postClose = getLatestClosedDealForPostClose(deals);
+    if (postClose) return { phase: "D3", postCloseDeal: postClose };
+    return { phase: "D0", postCloseDeal: null };
+  }
+  const endMs = parseDealEndAtValid(activeDealFull);
+  if (endMs == null) {
+    return { phase: "DA", postCloseDeal: null };
+  }
+  if (Date.now() < endMs) return { phase: "D1", postCloseDeal: null };
+  return { phase: "D2", postCloseDeal: null };
+}
+
+function startDealsCountdownForDeal(deal) {
+  clearDealsCountdown();
+  const tick = () => {
+    if (location.hash !== "#deals") {
+      clearDealsCountdown();
+      return;
+    }
+    const el = document.getElementById("deal-phase-countdown");
+    if (!el) return;
+    const endMs = parseDealEndAtValid(deal);
+    if (endMs == null) {
+      el.textContent = "—";
+      return;
+    }
+    el.textContent = dealTimeLeftLabel(deal);
+  };
+  tick();
+  dealsCountdownIntervalId = setInterval(tick, 60_000);
+}
+
+function formatDealUsdtVolume(value) {
+  const n = Number(value || 0);
+  return `${n.toLocaleString("ru-RU", { maximumFractionDigits: 2 })} USDT`;
+}
+
+function formatDealDateShort(iso) {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleString("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function formatDealWindowRow(d) {
+  const a = d.start_at ? formatDealDateShort(d.start_at) : "—";
+  const b = d.end_at ? formatDealDateShort(d.end_at) : "—";
+  return `${a} — ${b}`;
+}
+
+function dealRiskSignalRow(iconName, dealNumber, messageText) {
+  const ic = escapeHtmlAttr(iconName || "alert-triangle");
+  const dn = escapeHtmlAttr(String(dealNumber));
+  const msg = escapeHtmlAttr(messageText);
+  return `<span class="ds-alert-line"><i data-lucide="${ic}" class="icon icon--xs icon-muted" aria-hidden="true"></i><span>Сделка #${dn} — ${msg}</span></span>`;
+}
+
+function collectDealRiskUiLines(dealsList, statsByDealId) {
+  const seen = new Set();
+  const lines = [];
+  for (const d of dealsList) {
+    const s = statsByDealId[String(d.id)] || {};
+    const codes = Array.isArray(s.risk_alerts) ? s.risk_alerts : [];
+    const n = d.number;
+    const vol = Number(s.total_invested_usdt || 0);
+    const pc = Number(s.participants_count || 0);
+    const add = (key, html) => {
+      if (seen.has(key)) return;
+      seen.add(key);
+      lines.push(html);
+    };
+    for (const code of codes) {
+      if (code === "LOW_PARTICIPANTS_NEAR_CLOSE")
+        add(`lowp-${n}`, dealRiskSignalRow("users", n, "мало участников"));
+      else if (code === "NO_PARTICIPANTS")
+        add(`noinv-${n}`, dealRiskSignalRow("user-x", n, "нет активности"));
+      else if (code === "HIGH_RISK_LEVEL")
+        add(`hirisk-${n}`, dealRiskSignalRow("shield", n, "высокий уровень риска"));
+    }
+    if (vol > 0 && vol < 100 && pc >= 1 && !codes.includes("NO_PARTICIPANTS")) {
+      add(`lowvol-${n}`, dealRiskSignalRow("trending-down", n, "низкий объём"));
+    }
+  }
+  return lines;
+}
+
+function dealRiskBadgeHtml(level) {
+  const l = (level || "").toLowerCase();
+  if (!l) return `<span class="deal-risk-badge deal-risk-badge--empty">—</span>`;
+  return `<span class="deal-risk-badge deal-risk-badge--${l}">${escapeHtmlAttr(l)}</span>`;
+}
+
+function closeDealEditSidePanel() {
+  document.querySelectorAll(".deal-side-backdrop").forEach((el) => el.remove());
+}
+
+function openDealEditSidePanel(deal, { onSaved }) {
+  closeDealEditSidePanel();
+  const isReadonly = deal.status !== "active";
+  const backdrop = document.createElement("div");
+  backdrop.className = "deal-side-backdrop";
+  const panel = document.createElement("aside");
+  panel.className = "deal-side-panel";
+  const roi = Number(deal.profit_percent ?? deal.percent ?? 0);
+  panel.innerHTML = `
+    <div class="deal-side-header">
+      <h2 class="deal-side-title">Параметры · сделка #${deal.number}</h2>
+      <button type="button" class="deal-side-close" aria-label="Закрыть">&times;</button>
+    </div>
+    <div class="deal-side-body">
+      ${
+        isReadonly
+          ? `<p class="deal-side-locked-msg">Параметры зафиксированы после закрытия сделки</p>`
+          : ""
+      }
+      <div class="deal-side-section">
+        <h3 class="deal-side-section-title">Доходность</h3>
+        <label class="deal-side-label">Доходность, %</label>
+        <input type="number" step="0.01" min="0" class="deal-side-input" data-field="profit_percent" value="${roi}" ${
+    isReadonly ? "disabled" : ""
+  } />
+      </div>
+      <div class="deal-side-section">
+        <h3 class="deal-side-section-title">Лимиты</h3>
+        <label class="deal-side-label">Мин. участие (USDT)</label>
+        <input type="number" step="0.01" min="0" class="deal-side-input" data-field="min_participation_usdt" value="${
+          deal.min_participation_usdt ?? ""
+        }" placeholder="—" ${isReadonly ? "disabled" : ""} />
+        <label class="deal-side-label">Макс. участие (USDT)</label>
+        <input type="number" step="0.01" min="0" class="deal-side-input" data-field="max_participation_usdt" value="${
+          deal.max_participation_usdt ?? ""
+        }" placeholder="—" ${isReadonly ? "disabled" : ""} />
+        <label class="deal-side-label">Лимит участников</label>
+        <input type="number" step="1" min="1" class="deal-side-input" data-field="max_participants" value="${
+          deal.max_participants ?? ""
+        }" placeholder="—" ${isReadonly ? "disabled" : ""} />
+      </div>
+      <div class="deal-side-section">
+        <h3 class="deal-side-section-title">Риск</h3>
+        <label class="deal-side-label">Уровень риска</label>
+        <select class="deal-side-input" data-field="risk_level" ${isReadonly ? "disabled" : ""}>
+          <option value="" ${!deal.risk_level ? "selected" : ""}>—</option>
+          <option value="low" ${deal.risk_level === "low" ? "selected" : ""}>low</option>
+          <option value="medium" ${deal.risk_level === "medium" ? "selected" : ""}>medium</option>
+          <option value="high" ${deal.risk_level === "high" ? "selected" : ""}>high</option>
+        </select>
+        <label class="deal-side-label">Примечание (risk_note)</label>
+        <input type="text" class="deal-side-input" data-field="risk_note" value="${escapeHtmlAttr(
+          deal.risk_note || ""
+        )}" placeholder="—" ${isReadonly ? "disabled" : ""} />
+      </div>
+    </div>
+    <div class="deal-side-footer">
+      <button type="button" class="deal-cp-btn deal-cp-btn--secondary" data-action="cancel">Отмена</button>
+      ${
+        isReadonly
+          ? ""
+          : `<button type="button" class="deal-cp-btn deal-cp-btn--primary" data-action="save">Сохранить</button>`
+      }
+    </div>
+  `;
+  backdrop.appendChild(panel);
+  document.body.appendChild(backdrop);
+  const close = () => {
+    backdrop.remove();
+  };
+  panel.querySelector(".deal-side-close").onclick = close;
+  panel.querySelector('[data-action="cancel"]').onclick = close;
+  backdrop.addEventListener("click", (e) => {
+    if (e.target === backdrop) close();
+  });
+  const saveBtn = panel.querySelector('[data-action="save"]');
+  if (saveBtn) {
+    saveBtn.onclick = async () => {
+      const profitEl = panel.querySelector('[data-field="profit_percent"]');
+      const value = parseFloat((profitEl?.value || "").replace(",", "."));
+      if (Number.isNaN(value)) {
+        showToast("Введите корректное значение процента", "error");
+        return;
+      }
+      const payload = { profit_percent: value };
+      const minEl = panel.querySelector('[data-field="min_participation_usdt"]');
+      const maxEl = panel.querySelector('[data-field="max_participation_usdt"]');
+      const maxPartEl = panel.querySelector('[data-field="max_participants"]');
+      const riskEl = panel.querySelector('[data-field="risk_level"]');
+      const noteEl = panel.querySelector('[data-field="risk_note"]');
+      if (minEl?.value.trim()) payload.min_participation_usdt = Number(minEl.value.replace(",", "."));
+      if (maxEl?.value.trim()) payload.max_participation_usdt = Number(maxEl.value.replace(",", "."));
+      if (maxPartEl?.value.trim()) payload.max_participants = Number(maxPartEl.value.trim());
+      if (riskEl) payload.risk_level = riskEl.value || "";
+      if (noteEl) payload.risk_note = noteEl.value || "";
+      try {
+        await apiRequest(`/deals/${deal.id}`, { method: "PATCH", body: JSON.stringify(payload) });
+        showToast("Параметры сделки обновлены", "success");
+        close();
+        if (onSaved) onSaved();
+      } catch (e) {
+        showToast(e.message || "Ошибка обновления", "error");
+      }
+    };
+  }
+}
+
+async function openDealHistoryView(dealId, deals, statsByDealId) {
+  const d = deals.find((x) => String(x.id) === String(dealId));
+  if (!d) return;
+  let stats = statsByDealId[String(d.id)];
+  if (!stats) {
+    try {
+      stats = await apiRequest(`/deals/${d.id}/stats`);
+    } catch (_) {
+      stats = {};
+    }
+  }
+  const roi = Number(d.profit_percent ?? d.percent ?? 0);
+  const vol = Number(stats?.total_invested_usdt || 0);
+  const pc = Number(stats?.participants_count || 0);
+  await openUxDialog({
+    title: `Сделка #${d.number}`,
+    message: [
+      `Статус: ${d.status}`,
+      `Окно: ${formatDealWindowRow(d)}`,
+      `Доходность: ${roi.toFixed(2)}%`,
+      `Участники: ${pc}`,
+      `Объём: ${formatDealUsdtVolume(vol)}`,
+      d.risk_level ? `Риск: ${d.risk_level}` : "",
+      d.risk_note ? `Примечание: ${d.risk_note}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n"),
+    confirmText: "OK",
+  });
+}
+
 async function loadDeals() {
   const section = document.getElementById("deals-section");
   section.innerHTML = `<h1>Сделки</h1><div class="panel-card"><div class="skeleton-line" style="width:72%;"></div><div class="skeleton-line" style="width:88%; margin-top:12px;"></div></div>`;
   try {
+    clearDealsCountdown();
     const [deals, statusRes] = await Promise.all([
       apiRequest("/deals"),
       apiRequest("/deals/status").catch(() => ({ active_deal: null })),
     ]);
-    const nowTs = Date.now();
-    const calcDealProgress = (deal) => {
-      const start = deal?.start_at ? new Date(deal.start_at).getTime() : null;
-      const end = deal?.end_at ? new Date(deal.end_at).getTime() : null;
-      if (!start || !end || end <= start) return { percent: 0, leftMs: null, label: "—" };
-      const percent = Math.max(0, Math.min(100, ((nowTs - start) / (end - start)) * 100));
-      const leftMs = Math.max(0, end - nowTs);
-      const h = Math.floor(leftMs / 3600000);
-      const m = Math.floor((leftMs % 3600000) / 60000);
-      return { percent, leftMs, label: `${h}ч ${m}м` };
-    };
-    const calcRoiClass = (value) => (Number(value || 0) >= 0 ? "kpi-positive" : "kpi-negative");
     const statsList = await Promise.all(
       deals.map((d) => apiRequest(`/deals/${d.id}/stats`).catch(() => null))
     );
@@ -1192,162 +1633,241 @@ async function loadDeals() {
     statsList.forEach((s) => {
       if (s?.deal_id) statsByDealId[String(s.deal_id)] = s;
     });
-    const dealRiskAlerts = deals
-      .map((d) => {
-        const s = statsByDealId[String(d.id)] || {};
-        const alerts = Array.isArray(s.risk_alerts) ? s.risk_alerts : [];
-        if (!alerts.length) return null;
-        return {
-          dealNumber: d.number,
-          alerts,
-          riskLevel: s.risk_level || d.risk_level || "",
-          riskNote: s.risk_note || d.risk_note || "",
-        };
-      })
-      .filter(Boolean);
     const activeDeal = statusRes.active_deal;
+    const activeId = activeDeal ? String(activeDeal.id) : null;
+    const activeDealFull = activeDeal
+      ? deals.find((d) => String(d.id) === activeId) || activeDeal
+      : null;
+    const { phase, postCloseDeal } = resolveDealsControlPhase(activeDealFull, deals);
 
-    const statusBlock =
-      activeDeal == null
-        ? `<div class="deal-status-card"><h3>Статус сделки</h3><p class="deal-status-none">Нет активной сделки</p><p class="deal-status-hint">Уведомление можно отправить только при активной сделке.</p></div>`
-        : `
-        <div class="deal-status-card">
-          <h3>Статус сделки</h3>
-          <div class="deal-status-fields">
-            <div class="deal-status-row"><span class="deal-status-label">Сделка:</span> #${activeDeal.number} · ${activeDeal.status}</div>
-            <div class="deal-status-row"><span class="deal-status-label">Окно:</span> ${activeDeal.start_at ? new Date(activeDeal.start_at).toLocaleString() : "—"} — ${activeDeal.end_at ? new Date(activeDeal.end_at).toLocaleString() : "—"}</div>
-            <div class="deal-status-row"><span class="deal-status-label">До закрытия:</span> ${calcDealProgress(activeDeal).label}</div>
-            <div class="deal-status-row"><span class="deal-status-label">Прогресс:</span> ${Math.round(calcDealProgress(activeDeal).percent)}%</div>
-            <div class="deal-progress-track"><div class="deal-progress-fill" style="width:${calcDealProgress(activeDeal).percent}%;"></div></div>
-            <div class="deal-status-row"><span class="deal-status-label">Уведомление о закрытии отправлено:</span> ${activeDeal.close_notification_sent ? "Да" : "Нет"}</div>
-          </div>
-          <div class="toolbar deal-status-toolbar">
-            <button type="button" id="deal-send-notifications-btn">Отправить уведомления о сделке</button>
-            <button type="button" id="deal-force-close-btn">Закрыть сделку досрочно</button>
-          </div>
-        </div>`;
+    const historyExclude = new Set();
+    if (activeId) historyExclude.add(activeId);
+    if (phase === "D3" && postCloseDeal) historyExclude.add(String(postCloseDeal.id));
+    const historyDeals = deals
+      .filter((d) => !historyExclude.has(String(d.id)))
+      .slice()
+      .sort((a, b) => b.number - a.number);
 
-    const rows = deals
-      .map(
-        (d) => {
-          const p = calcDealProgress(d);
-          const roi = Number(d.profit_percent ?? d.percent ?? 0);
-          const stats = statsByDealId[String(d.id)] || {};
-          return `
-      <tr data-deal-id="${d.id}">
-        <td>${d.number}</td>
-        <td>${d.status}</td>
-        <td>${p.label}</td>
-        <td>
-          <div class="deal-progress-track"><div class="deal-progress-fill" style="width:${p.percent}%;"></div></div>
-          <div class="mini-hint">${Math.round(p.percent)}%</div>
-        </td>
-        <td>
-          <input type="number" step="0.01" min="0" value="${d.profit_percent ?? d.percent ?? 0}" class="deal-percent-input" />
-        </td>
-        <td>
-          <input type="number" step="0.01" min="0" value="${d.min_participation_usdt ?? ""}" class="deal-min-input" placeholder="min" />
-          <input type="number" step="0.01" min="0" value="${d.max_participation_usdt ?? ""}" class="deal-max-input" placeholder="max" style="margin-top:6px;" />
-        </td>
-        <td>
-          <input type="number" step="1" min="1" value="${d.max_participants ?? ""}" class="deal-max-participants-input" placeholder="—" />
-        </td>
-        <td>
-          <select class="deal-risk-level-input">
-            <option value="" ${!d.risk_level ? "selected" : ""}>—</option>
-            <option value="low" ${d.risk_level === "low" ? "selected" : ""}>low</option>
-            <option value="medium" ${d.risk_level === "medium" ? "selected" : ""}>medium</option>
-            <option value="high" ${d.risk_level === "high" ? "selected" : ""}>high</option>
-          </select>
-          <input type="text" value="${escapeHtmlAttr(d.risk_note || "")}" class="deal-risk-note-input" placeholder="risk note" style="margin-top:6px;" />
+    const riskUiLines = collectDealRiskUiLines(deals, statsByDealId);
+
+    const activeStats = activeDealFull ? statsByDealId[String(activeDealFull.id)] || {} : {};
+    const activeVol = Number(activeStats.total_invested_usdt || 0);
+    const activeParticipants = Number(activeStats.participants_count || 0);
+    const activeRoi = Number(activeDealFull?.profit_percent ?? activeDealFull?.percent ?? 0);
+
+    const phaseBadge =
+      phase === "D1"
+        ? `<span class="deal-status-badge deal-status-badge--phase-d1">СБОР</span>`
+        : phase === "D2"
+          ? `<span class="deal-status-badge deal-status-badge--phase-d2">ОЖИДАНИЕ ЗАКРЫТИЯ</span>`
+          : phase === "DA"
+            ? `<span class="deal-status-badge deal-status-badge--phase-da">АКТИВНА</span>`
+            : `<span class="deal-status-badge deal-status-badge--active">ACTIVE</span>`;
+
+    const countdownRow =
+      phase === "D1"
+        ? `<div class="deal-cp-countdown">До закрытия: <span id="deal-phase-countdown">${dealTimeLeftLabel(activeDealFull)}</span></div>`
+        : phase === "D2"
+          ? `<div class="deal-cp-countdown deal-cp-countdown--phase-d2">
+          <p class="deal-cp-phase-d2-lead">Окно сбора завершено. Система ожидает штатное закрытие сделки — это не фаза обратного отсчёта.</p>
+          <p class="deal-cp-phase-d2-meta">Край срока окна по данным сделки: <strong>${formatDealDateShort(activeDealFull.end_at)}</strong></p>
+        </div>`
+          : phase === "DA"
+            ? `<div class="deal-cp-countdown deal-cp-countdown--fallback">Не удалось определить время закрытия сделки</div>`
+            : "";
+
+    const d2NotifyTitle =
+      ' title="В фазе ожидания закрытия рассылка по сбору недоступна — используйте штатные уведомления системы при закрытии"';
+    const d2EditTitle =
+      ' title="Параметры недоступны в фазе ожидания закрытия; при необходимости обратитесь к расписанию или поддержке"';
+    const notifyAttrs = phase === "D2" ? ` disabled${d2NotifyTitle}` : "";
+    const editAttrs = phase === "D2" ? ` disabled${d2EditTitle}` : "";
+
+    const activeBlock =
+      phase === "D0"
+        ? `
+      <div class="deal-empty-active panel-card">
+        <h2 class="deal-empty-active-title">Нет активной сделки</h2>
+        <p class="deal-empty-active-hint">Откройте новую сделку по расписанию или вручную. Закрытых сделок пока нет.</p>
+        <button type="button" id="deal-open-now-btn" class="deal-cp-btn deal-cp-btn--primary">Открыть новую</button>
+      </div>`
+        : phase === "D3" && postCloseDeal
+          ? (() => {
+              const d = postCloseDeal;
+              const st = statsByDealId[String(d.id)] || {};
+              const vol = Number(st.total_invested_usdt || 0);
+              const pc = Number(st.participants_count || 0);
+              const roi = Number(d.profit_percent ?? d.percent ?? 0);
+              return `
+      <div class="deal-control-panel deal-control-panel--postclose panel-card">
+        <div class="deal-cp-header">
+          <div class="deal-cp-title-row">
+            <h2 class="deal-cp-title">Ориентир: №${d.number} · закрыта</h2>
+            <span class="deal-status-badge deal-status-badge--phase-d3">ПОСТ-ЗАКРЫТИЕ</span>
+          </div>
+          <p class="deal-cp-postclose-hint">Ориентир — последняя сделка со статусом «closed» из ответа API. Это сводка по данным API: не утверждаем, что «выплаты сейчас идут именно по ней», и не трактуем объём как «очередь».</p>
+        </div>
+        <div class="deal-cp-kpi">
+          <div class="deal-cp-kpi-item deal-cp-kpi-item--volume">
+            <span class="deal-cp-kpi-label">ОБЪЁМ СДЕЛКИ</span>
+            <span class="deal-cp-kpi-value deal-cp-kpi-value--hero">${formatDealUsdtVolume(vol)}</span>
+          </div>
+          <div class="deal-cp-kpi-item">
+            <span class="deal-cp-kpi-label">ДОХОДНОСТЬ</span>
+            <span class="deal-cp-kpi-value">${roi.toFixed(2)}%</span>
+          </div>
+          <div class="deal-cp-kpi-item">
+            <span class="deal-cp-kpi-label">УЧАСТНИКИ</span>
+            <span class="deal-cp-kpi-value">${pc}</span>
+          </div>
+          <div class="deal-cp-kpi-item">
+            <span class="deal-cp-kpi-label">ОКНО СДЕЛКИ</span>
+            <span class="deal-cp-kpi-value deal-cp-kpi-value--date">${escapeHtmlAttr(formatDealWindowRow(d))}</span>
+          </div>
+        </div>
+        <div class="deal-cp-actions">
+          <a href="#deal-schedule" class="deal-cp-btn deal-cp-btn--secondary">Расписание сделок</a>
+        </div>
+      </div>`;
+            })()
+          : activeDealFull
+            ? `
+      <div class="deal-control-panel panel-card">
+        <div class="deal-cp-header">
+          <div class="deal-cp-title-row">
+            <h2 class="deal-cp-title">Сделка #${activeDealFull.number}</h2>
+            ${phaseBadge}
+          </div>
+          ${countdownRow}
+        </div>
+        <div class="deal-cp-kpi">
+          <div class="deal-cp-kpi-item deal-cp-kpi-item--volume">
+            <span class="deal-cp-kpi-label">ОБЪЁМ СДЕЛКИ</span>
+            <span class="deal-cp-kpi-value deal-cp-kpi-value--hero">${formatDealUsdtVolume(activeVol)}</span>
+          </div>
+          <div class="deal-cp-kpi-item">
+            <span class="deal-cp-kpi-label">ДОХОДНОСТЬ</span>
+            <span class="deal-cp-kpi-value">${activeRoi.toFixed(2)}%</span>
+          </div>
+          <div class="deal-cp-kpi-item">
+            <span class="deal-cp-kpi-label">УЧАСТНИКИ</span>
+            <span class="deal-cp-kpi-value">${activeParticipants}</span>
+          </div>
+          <div class="deal-cp-kpi-item">
+            <span class="deal-cp-kpi-label">ДАТА ЗАКРЫТИЯ</span>
+            <span class="deal-cp-kpi-value deal-cp-kpi-value--date">${phase === "DA" ? "—" : formatDealDateShort(activeDealFull.end_at)}</span>
+          </div>
+        </div>
+        <div class="deal-cp-meta">
+          <span class="deal-cp-meta-item">Мин: <strong>${
+            activeDealFull.min_participation_usdt != null ? formatDealUsdtVolume(activeDealFull.min_participation_usdt) : "—"
+          }</strong></span>
+          <span class="deal-cp-meta-item">Макс: <strong>${
+            activeDealFull.max_participation_usdt != null ? formatDealUsdtVolume(activeDealFull.max_participation_usdt) : "—"
+          }</strong></span>
+          <span class="deal-cp-meta-item">Лимит уч.: <strong>${
+            activeDealFull.max_participants != null ? activeDealFull.max_participants : "—"
+          }</strong></span>
+          <span class="deal-cp-meta-item">Риск: ${dealRiskBadgeHtml(activeDealFull.risk_level)}</span>
           ${
-            (stats.risk_alerts || []).length
-              ? `<div class="mini-hint kpi-negative">${escapeHtmlAttr((stats.risk_alerts || []).join(", "))}</div>`
+            activeDealFull.risk_note
+              ? `<span class="deal-cp-meta-note">${escapeHtmlAttr(activeDealFull.risk_note)}</span>`
               : ""
           }
-        </td>
-        <td class="${calcRoiClass(roi)}">${roi.toFixed(2)}%</td>
-        <td>${Number(stats.participants_count || 0)}</td>
-        <td>${Number(stats.total_invested_usdt || 0).toLocaleString("ru-RU", { maximumFractionDigits: 2 })}</td>
-        <td>${d.opened_at ? new Date(d.opened_at).toLocaleString() : ""}</td>
-        <td>${d.closed_at ? new Date(d.closed_at).toLocaleString() : ""}</td>
-        <td>${d.finished_at ? new Date(d.finished_at).toLocaleString() : ""}</td>
-        <td>
-          <div class="row-actions">
-            <button class="deal-save-btn">Сохранить %</button>
-            <button class="deal-clone-btn">Клонировать</button>
-            <button class="deal-simulate-btn">Симуляция</button>
-          </div>
-        </td>
+        </div>
+        <div class="deal-cp-meta-hint">Уведомление о закрытии отправлено: <strong>${
+          activeDealFull.close_notification_sent ? "да" : "нет"
+        }</strong></div>
+        <div class="deal-cp-actions">
+          <button type="button" id="deal-send-notifications-btn" class="deal-cp-btn deal-cp-btn--secondary"${notifyAttrs}>Отправить уведомление</button>
+          <button type="button" id="deal-edit-params-btn" class="deal-cp-btn deal-cp-btn--primary"${editAttrs}>Редактировать параметры</button>
+          <button type="button" id="deal-force-close-btn" class="deal-cp-btn deal-cp-btn--danger">Закрыть сделку</button>
+        </div>
+      </div>`
+            : "";
+
+    const historyRows = historyDeals
+      .map((d) => {
+        const roi = Number(d.profit_percent ?? d.percent ?? 0);
+        const stats = statsByDealId[String(d.id)] || {};
+        const vol = Number(stats.total_invested_usdt || 0);
+        const pc = Number(stats.participants_count || 0);
+        const closedish = d.status !== "active";
+        return `
+      <tr class="deals-history-row ${closedish ? "deals-history-row--muted" : ""}" data-deal-id="${d.id}">
+        <td><span class="deals-history-num">#${d.number}</span></td>
+        <td><span class="deals-history-status">${escapeHtmlAttr(d.status)}</span></td>
+        <td class="deals-history-window">${escapeHtmlAttr(formatDealWindowRow(d))}</td>
+        <td class="deals-history-roi">${roi.toFixed(2)}%</td>
+        <td>${pc}</td>
+        <td class="deals-history-vol">${formatDealUsdtVolume(vol)}</td>
+        <td><button type="button" class="deal-cp-btn deal-cp-btn--ghost deal-history-view-btn" data-deal-id="${d.id}">Просмотр</button></td>
       </tr>`;
-        }
-      )
+      })
       .join("");
 
     section.innerHTML = `
-      <h1>Сделки</h1>
-      <p class="section-desc">Текущие и завершённые сделки, управление доходностью.</p>
-      ${statusBlock}
-      <div class="panel-card">
-        <h2>Риск-уведомления по сделкам</h2>
+      <header class="ds-page-header">
+        <h1 class="ds-page-header__title">Сделки</h1>
+        <p class="ds-page-header__desc">Панель оператора: одна активная сделка и история.</p>
+      </header>
+      ${activeBlock}
+      <div class="deal-alerts-card panel-card">
+        <h2 class="deal-alerts-title">Риск-сигналы</h2>
         ${
-          dealRiskAlerts.length
-            ? `<ul class="alerts-list">${dealRiskAlerts
-                .map(
-                  (a) =>
-                    `<li class="alert-item ${a.riskLevel === "high" ? "high" : a.riskLevel === "medium" ? "medium" : "low"}">
-                      <strong>Сделка #${a.dealNumber}</strong>: ${escapeHtmlAttr(a.alerts.join(", "))}
-                      ${a.riskNote ? `<div class="mini-hint">${escapeHtmlAttr(a.riskNote)}</div>` : ""}
-                    </li>`
-                )
-                .join("")}</ul>`
-            : `<div class="empty-state"><strong>Аномалий не найдено</strong><span>Риск-алерты появятся автоматически при проблемных сделках.</span></div>`
+          riskUiLines.length
+            ? `<ul class="deal-alerts-list ds-alert-list">${riskUiLines.map((t) => `<li>${t}</li>`).join("")}</ul>`
+            : `<p class="deal-alerts-empty">Критических сигналов нет</p>`
         }
       </div>
       <div class="panel-card">
-        <div class="toolbar">
-          <button id="deal-open-now-btn">Открыть новую сделку</button>
+        <h2 class="deals-history-heading">История сделок</h2>
+        ${
+          phase === "D1" || phase === "D2" || phase === "DA"
+            ? `<p class="deals-history-note">Активная сделка #${activeDealFull.number} показана выше и не дублируется в таблице.</p>`
+            : phase === "D3" && postCloseDeal
+              ? `<p class="deals-history-note">Сделка #${postCloseDeal.number} (ориентир по последней closed в списке) показана выше и не дублируется в таблице.</p>`
+              : ""
+        }
+        <div class="toolbar deals-history-toolbar">
+          <button type="button" id="deal-open-now-btn-footer" class="deal-cp-btn deal-cp-btn--secondary">Открыть новую сделку</button>
         </div>
         <div class="table-wrapper">
           <div class="table-wrapper-inner">
-            <table>
+            <table class="deals-history-table">
               <thead>
                 <tr>
                   <th>№</th>
                   <th>Статус</th>
-                  <th>До закрытия</th>
-                  <th>Прогресс</th>
-                  <th>% дохода</th>
-                  <th>Ограничения (USDT)</th>
-                  <th>Лимит участн.</th>
-                  <th>Риск</th>
-                  <th>ROI</th>
-                  <th>Участн.</th>
-                  <th>Инвест., USDT</th>
-                  <th>Открыта</th>
-                  <th>Закрыта</th>
-                  <th>Завершена</th>
+                  <th>Окно сделки</th>
+                  <th>Доходность</th>
+                  <th>Участники</th>
+                  <th>Объём</th>
                   <th></th>
                 </tr>
               </thead>
-              <tbody>${rows}</tbody>
+              <tbody>${historyRows}</tbody>
             </table>
           </div>
         </div>
       </div>
     `;
 
-    const openBtn = document.getElementById("deal-open-now-btn");
-    if (openBtn) {
-      openBtn.onclick = async () => {
+    const reload = () => loadDeals();
+
+    const bindOpenNow = (el) => {
+      if (!el) return;
+      el.onclick = async () => {
         try {
           await apiRequest("/deals/open-now", { method: "POST" });
-          loadDeals();
+          reload();
         } catch (e) {
           showToast(e.message || "Ошибка открытия сделки", "error");
         }
       };
-    }
+    };
+    bindOpenNow(document.getElementById("deal-open-now-btn"));
+    bindOpenNow(document.getElementById("deal-open-now-btn-footer"));
 
     const sendNotifBtn = document.getElementById("deal-send-notifications-btn");
     if (sendNotifBtn) {
@@ -1355,113 +1875,62 @@ async function loadDeals() {
         try {
           const res = await apiRequest("/deals/send-notifications", { method: "POST" });
           showToast(`Уведомления отправлены: ${res.sent_count} получателей.`, "success");
-          loadDeals();
+          reload();
         } catch (e) {
           showToast(e.message || "Ошибка отправки уведомлений", "error");
         }
       };
     }
 
+    const editBtn = document.getElementById("deal-edit-params-btn");
+    if (editBtn && activeDealFull) {
+      editBtn.onclick = () => {
+        openDealEditSidePanel(activeDealFull, { onSaved: reload });
+      };
+    }
+
     const forceCloseBtn = document.getElementById("deal-force-close-btn");
-    if (forceCloseBtn) {
+    if (forceCloseBtn && activeDealFull) {
       forceCloseBtn.onclick = async () => {
         const forceCloseConfirm = await openUxDialog({
-          title: "Досрочное закрытие",
-          message: "Вы уверены, что хотите досрочно закрыть текущую активную сделку?",
-          confirmText: "Закрыть",
+          title: "Закрыть сделку",
+          message: [
+            `Текущий объём: ${formatDealUsdtVolume(activeVol)}`,
+            `Участников: ${activeParticipants}`,
+            "",
+            "Закрытие необратимо для текущего окна сбора. Участникам будут отправлены уведомления по текущей логике системы.",
+            "",
+            "Продолжить?",
+          ].join("\n"),
+          confirmText: "Закрыть сделку",
           cancelText: "Отмена",
         });
-        if (!forceCloseConfirm.confirmed) {
-          return;
-        }
+        if (!forceCloseConfirm.confirmed) return;
         try {
           await apiRequest("/deals/force-close", { method: "POST" });
           showToast("Сделка досрочно закрыта. Участникам отправлены уведомления.", "success");
-          loadDeals();
+          reload();
         } catch (e) {
           showToast(e.message || "Ошибка досрочного закрытия сделки", "error");
         }
       };
     }
 
-    section.querySelectorAll("button.deal-save-btn").forEach((btn) => {
-      btn.onclick = async () => {
-        const row = btn.closest("tr");
-        if (!row) return;
-        const dealId = row.getAttribute("data-deal-id");
-        const input = row.querySelector("input.deal-percent-input");
-        const minInput = row.querySelector("input.deal-min-input");
-        const maxInput = row.querySelector("input.deal-max-input");
-        const maxParticipantsInput = row.querySelector("input.deal-max-participants-input");
-        const riskLevelInput = row.querySelector("select.deal-risk-level-input");
-        const riskNoteInput = row.querySelector("input.deal-risk-note-input");
-        if (!dealId || !input) return;
-        const value = parseFloat(input.value.replace(",", "."));
-        if (Number.isNaN(value)) {
-          showToast("Введите корректное значение процента", "error");
-          return;
-        }
-        const minVal = Number((minInput?.value || "").replace(",", "."));
-        const maxVal = Number((maxInput?.value || "").replace(",", "."));
-        const maxParticipantsVal = Number((maxParticipantsInput?.value || "").trim());
-        const payload = { profit_percent: value };
-        if (minInput && minInput.value.trim()) payload.min_participation_usdt = minVal;
-        if (maxInput && maxInput.value.trim()) payload.max_participation_usdt = maxVal;
-        if (maxParticipantsInput && maxParticipantsInput.value.trim()) payload.max_participants = maxParticipantsVal;
-        if (riskLevelInput) payload.risk_level = riskLevelInput.value || "";
-        if (riskNoteInput) payload.risk_note = riskNoteInput.value || "";
-        try {
-          await apiRequest(`/deals/${dealId}`, {
-            method: "PATCH",
-            body: JSON.stringify(payload),
-          });
-          showToast("Параметры сделки обновлены", "success");
-          loadDeals();
-        } catch (e) {
-          showToast(e.message || "Ошибка обновления доходности", "error");
-        }
-      };
+    section.querySelectorAll(".deal-history-view-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const id = btn.getAttribute("data-deal-id");
+        if (id) openDealHistoryView(id, deals, statsByDealId);
+      });
     });
-    section.querySelectorAll("button.deal-clone-btn").forEach((btn) => {
-      btn.onclick = async () => {
-        const row = btn.closest("tr");
-        const dealId = row?.getAttribute("data-deal-id");
-        if (!dealId) return;
-        try {
-          await apiRequest(`/deals/${dealId}/clone`, { method: "POST" });
-          showToast("Сделка клонирована в draft", "success");
-          loadDeals();
-        } catch (e) {
-          showToast(e.message || "Ошибка клонирования сделки", "error");
-        }
-      };
-    });
-    section.querySelectorAll("button.deal-simulate-btn").forEach((btn) => {
-      btn.onclick = async () => {
-        const row = btn.closest("tr");
-        const dealId = row?.getAttribute("data-deal-id");
-        if (!dealId) return;
-        const d = deals.find((x) => String(x.id) === String(dealId));
-        const roi = Number(d?.profit_percent ?? d?.percent ?? 0);
-        const r = await openUxDialog({
-          title: "Симуляция сделки",
-          message: `Введите сумму участия (USDT), ROI = ${roi.toFixed(2)}%`,
-          inputPlaceholder: "100",
-          confirmText: "Рассчитать",
-          cancelText: "Отмена",
-        });
-        if (!r.confirmed) return;
-        const amount = Number(String(r.value || "").replace(",", "."));
-        if (!Number.isFinite(amount) || amount <= 0) return showToast("Введите сумму больше 0", "error");
-        const profit = (amount * roi) / 100;
-        const total = amount + profit;
-        await openUxDialog({
-          title: `Предпросмотр прибыли по сделке #${d?.number || dealId}`,
-          message: `Сумма участия: ${amount.toFixed(2)} USDT\nОжидаемая прибыль: ${profit.toFixed(2)} USDT\nИтого к выплате: ${total.toFixed(2)} USDT`,
-          confirmText: "OK",
-        });
-      };
-    });
+
+    if (
+      location.hash === "#deals" &&
+      phase === "D1" &&
+      activeDealFull &&
+      parseDealEndAtValid(activeDealFull) != null
+    ) {
+      startDealsCountdownForDeal(activeDealFull);
+    }
   } catch (e) {
     section.innerHTML = `<h1>Сделки</h1><div class="error">${e.message}</div>`;
   }
@@ -2431,6 +2900,44 @@ document.getElementById("deposit-detail-modal")?.addEventListener("click", (e) =
   if (e.target.id === "deposit-detail-modal") closeDepositModal();
 });
 
+function computeUserDetailOperationalContext(u, detail) {
+  const withdrawals = Array.isArray(detail?.withdrawals) ? detail.withdrawals : [];
+  const pending = withdrawals.filter((w) => String(w.status || "").toUpperCase() === "PENDING");
+  const mismatch = Number(u.balance_usdt) !== Number(u.ledger_balance_usdt);
+  const hasRiskyPending = pending.some((w) => getWithdrawalRiskFlags(w).length > 0);
+  const hasActionPending = pending.some((w) => classifyWithdrawalSignals(w).level === "action");
+
+  let level = "ok";
+  if (u.is_blocked) {
+    level = "watch";
+    if (mismatch || hasRiskyPending || hasActionPending) level = "action";
+  } else {
+    if (hasActionPending) level = "action";
+    else if (mismatch || hasRiskyPending) level = "watch";
+  }
+
+  let firstCheck = "Критичных сигналов нет";
+  if (mismatch) firstCheck = "Проверить расхождение balance / ledger";
+  else if (hasRiskyPending || hasActionPending) firstCheck = "Проверить открытые выводы";
+  else if (u.is_blocked) firstCheck = "Проверить причину блокировки";
+
+  return {
+    level,
+    firstCheck,
+    mismatch,
+    hasRiskyPending,
+    hasActionPending,
+    pending,
+    withdrawals,
+  };
+}
+
+function userDetailSignalBadgeHtml(level) {
+  if (level === "action") return `<span class="withdrawal-signal withdrawal-signal--action">Action</span>`;
+  if (level === "watch") return `<span class="withdrawal-signal withdrawal-signal--watch">Watch</span>`;
+  return `<span class="withdrawal-signal withdrawal-signal--ok">OK</span>`;
+}
+
 async function loadUserDetail(userId) {
   const section = document.getElementById("user-section");
   section.innerHTML = "<h1>Пользователь</h1><p>Загрузка...</p>";
@@ -2468,9 +2975,12 @@ async function loadUserDetail(userId) {
         </tr>`
       )
       .join("");
-    const wRows = detail.withdrawals
-      .map(
-        (w) => `
+    const opCtx = computeUserDetailOperationalContext(u, detail);
+    const moneySnapClass = opCtx.mismatch ? "user-money-snapshot--watch" : "user-money-snapshot--ok";
+    const moneySnapText = opCtx.mismatch
+      ? "Баланс (users.balance_usdt) и баланс по ledger не совпадают."
+      : "Баланс (users.balance_usdt) и баланс по ledger совпадают.";
+    const mapWithdrawalRow = (w) => `
         <tr>
           <td>${w.id}</td>
           <td class="num-cell">${w.amount}</td>
@@ -2480,9 +2990,25 @@ async function loadUserDetail(userId) {
           <td class="cell-address">${escapeHtmlAttr(w.address || "")} <button type="button" class="btn-secondary-small copy-address-btn" data-address="${escapeHtmlAttr(w.address || "")}">Копировать</button></td>
           <td>${w.status}</td>
           <td>${new Date(w.created_at).toLocaleString()}</td>
-        </tr>`
-      )
-      .join("");
+        </tr>`;
+    const pendingList = opCtx.pending;
+    const pendingShown = pendingList.slice(0, 3);
+    const pendingMoreCount = Math.max(0, pendingList.length - pendingShown.length);
+    const pendingTreasuryRows = pendingShown.map(mapWithdrawalRow).join("");
+    const pendingTreasuryTail =
+      pendingMoreCount > 0
+        ? `<tr><td colspan="8" class="user-pending-more-row">+ ещё ${pendingMoreCount}</td></tr>`
+        : "";
+    const pendingTbody =
+      pendingList.length === 0
+        ? `<tr><td colspan="8"><div class="empty-state"><strong>Открытых заявок нет</strong><span>Статус PENDING отсутствует в выборке.</span></div></td></tr>`
+        : `${pendingTreasuryRows}${pendingTreasuryTail}`;
+    const withdrawalsNonPending = (Array.isArray(detail.withdrawals) ? detail.withdrawals : []).filter(
+      (w) => String(w.status || "").toUpperCase() !== "PENDING"
+    );
+    const wRows =
+      withdrawalsNonPending.map(mapWithdrawalRow).join("") ||
+      `<tr><td colspan="8"><div class="empty-state"><strong>Нет заявок вне PENDING</strong><span>Открытые заявки перечислены выше (до 3 строк + счётчик).</span></div></td></tr>`;
     const referralsRows = (detail.referrals_preview || [])
       .map(
         (r) => `
@@ -2525,51 +3051,66 @@ async function loadUserDetail(userId) {
       })
       .join("");
 
-    const mismatch =
-      Number(u.balance_usdt) !== Number(u.ledger_balance_usdt)
-        ? `<div class="warning">Кэш баланса != ledger</div>`
-        : "";
-
     section.innerHTML = `
       <h1>Пользователь #${u.id}</h1>
-      <p class="section-desc">Карточка пользователя, его операции и заявки на вывод.</p>
-      <div class="panel-card">
-        <div class="toolbar">
-          <div>
-            <div>Telegram ID: <strong>${u.telegram_id}</strong></div>
-            <div>Username: <strong>${u.username || ""}</strong></div>
-            <div>Статус: <strong>${u.is_blocked ? "Заблокирован" : "Активен"}</strong>${u.blocked_reason ? ` · ${escapeHtmlAttr(u.blocked_reason)}` : ""}</div>
-            <div>Referrer: <strong>${detail.referrer ? `#${detail.referrer.id} (${detail.referrer.telegram_id})` : "—"}</strong></div>
-            <div>Referrals count: <strong>${detail.referrals_count || 0}</strong></div>
-            <div class="user-balance-split">
-              <div class="user-balance-tile">
-                <div class="user-balance-title">Баланс (users.balance_usdt)</div>
-                <div class="user-balance-value" id="user-balance-usdt">${u.balance_usdt}</div>
-              </div>
-              <div class="user-balance-tile">
-                <div class="user-balance-title">Баланс по ledger</div>
-                <div class="user-balance-value" id="user-ledger-balance">${u.ledger_balance_usdt}</div>
-              </div>
-            </div>
-            ${mismatch}
+      <p class="section-desc">Операционный профиль: сигналы, деньги, открытые выводы и история.</p>
+      <div class="user-detail-operational panel-card">
+        <div class="user-detail-operational-row">
+          <div class="user-detail-operational-signals">
+            ${userDetailSignalBadgeHtml(opCtx.level)}
+            <span class="user-detail-first-check">${opCtx.firstCheck}</span>
           </div>
-          <div class="toolbar-actions">
-            <div class="balance-adjust-form">
-              <label>
-                Коррекция баланса (USDT)
-                <input type="number" id="balance-adjust-amount" step="0.01" />
-              </label>
-              <label>
-                Комментарий
-                <input type="text" id="balance-adjust-comment" placeholder="Причина корректировки" />
-              </label>
-              <button type="button" id="balance-adjust-apply-btn">Начислить / списать</button>
-              <button type="button" id="user-block-toggle-btn" class="btn-secondary-small">${u.is_blocked ? "Разблокировать" : "Заблокировать"}</button>
+          <div class="user-detail-operational-cta">
+            <button type="button" id="user-cta-deposits" class="btn-secondary user-cta-deposits-btn">Пополнения пользователя</button>
+            <button type="button" id="user-cta-withdrawals" class="btn-secondary-small">Общий список выводов</button>
+          </div>
+        </div>
+        <p class="user-detail-api-note mini-hint">Фильтр выводов по user_id в API списка нет — открытые заявки смотрите в блоке ниже; общий экран «Выводы» — вручную.</p>
+      </div>
+      <div class="panel-card">
+        <div class="user-detail-identity">
+          <div>Telegram ID: <strong>${u.telegram_id}</strong></div>
+          <div>Username: <strong>${u.username || ""}</strong></div>
+          <div>Статус: <strong>${u.is_blocked ? "Заблокирован" : "Активен"}</strong>${u.blocked_reason ? ` · ${escapeHtmlAttr(u.blocked_reason)}` : ""}</div>
+          <div>Referrer: <strong>${detail.referrer ? `#${detail.referrer.id} (${detail.referrer.telegram_id})` : "—"}</strong></div>
+          <div>Referrals count: <strong>${detail.referrals_count || 0}</strong></div>
+        </div>
+        <div class="user-money-snapshot ${moneySnapClass}">
+          <div class="user-money-snapshot-head">
+            <span class="user-money-snapshot-title">Сверка баланса</span>
+            ${opCtx.mismatch ? `<span class="withdrawal-signal withdrawal-signal--watch">Watch</span>` : `<span class="withdrawal-signal withdrawal-signal--ok">OK</span>`}
+          </div>
+          <div class="user-balance-split">
+            <div class="user-balance-tile">
+              <div class="user-balance-title">Баланс (users.balance_usdt)</div>
+              <div class="user-balance-value" id="user-balance-usdt">${u.balance_usdt}</div>
             </div>
-            <div class="toolbar" style="gap:8px;">
-              <button id="ledger-export-btn">Экспорт CSV</button>
-              <button id="ledger-export-xls-btn" class="btn-secondary-small">Экспорт Excel</button>
+            <div class="user-balance-tile">
+              <div class="user-balance-title">Баланс по ledger</div>
+              <div class="user-balance-value" id="user-ledger-balance">${u.ledger_balance_usdt}</div>
             </div>
+          </div>
+          <p class="user-money-snapshot-note">${moneySnapText}</p>
+        </div>
+        <h2>Открытые выводы (PENDING)</h2>
+        <p class="section-desc mini-hint">До 3 строк; остаток — «+ ещё N».</p>
+        <div class="table-wrapper">
+          <div class="table-wrapper-inner">
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Списание</th>
+                  <th>Комиссия 10%</th>
+                  <th>К выплате</th>
+                  <th>Валюта</th>
+                  <th>Кошелёк</th>
+                  <th>Статус</th>
+                  <th>Создано</th>
+                </tr>
+              </thead>
+              <tbody>${pendingTbody}</tbody>
+            </table>
           </div>
         </div>
         <h2>Ledger</h2>
@@ -2636,8 +3177,8 @@ async function loadUserDetail(userId) {
             </table>
           </div>
         </div>
-        <h2>Заявки на вывод</h2>
-        <p class="section-desc mini-hint">Списание — с баланса; комиссия 10%; к выплате — на адрес пользователя.</p>
+        <h2>Выводы не в статусе PENDING</h2>
+        <p class="section-desc mini-hint">Списание — с баланса; комиссия 10%; к выплате — на адрес пользователя. Открытые заявки не дублируем — см. блок выше.</p>
         <div class="table-wrapper">
           <div class="table-wrapper-inner">
             <table>
@@ -2699,7 +3240,7 @@ async function loadUserDetail(userId) {
               </select>
             </label>
             <div class="search-field">
-              <span class="search-field-icon">🔍</span>
+              <span class="search-field-icon"><i data-lucide="search" class="icon icon--xs icon-muted" aria-hidden="true"></i></span>
               <input id="referrals-search" type="text" placeholder="Поиск по username" />
             </div>
             <button type="button" id="referrals-search-btn" class="btn-secondary-small">Найти</button>
@@ -2744,6 +3285,30 @@ async function loadUserDetail(userId) {
           </div>
         </div>
       </div>
+      <div class="panel-card user-detail-admin-actions">
+        <h2>Администрирование</h2>
+        <p class="section-desc mini-hint">Коррекция баланса, блокировка и экспорт ledger — отдельно от операционной зоны.</p>
+        <div class="user-detail-admin-forms">
+          <div class="balance-adjust-form">
+            <label>
+              Коррекция баланса (USDT)
+              <input type="number" id="balance-adjust-amount" step="0.01" />
+            </label>
+            <label>
+              Комментарий
+              <input type="text" id="balance-adjust-comment" placeholder="Причина корректировки" />
+            </label>
+            <div class="user-detail-admin-actions-row">
+              <button type="button" id="balance-adjust-apply-btn">Начислить / списать</button>
+              <button type="button" id="user-block-toggle-btn" class="btn-secondary-small">${u.is_blocked ? "Разблокировать" : "Заблокировать"}</button>
+            </div>
+          </div>
+          <div class="user-detail-admin-export toolbar" style="gap:8px; margin-top:12px;">
+            <button type="button" id="ledger-export-btn">Экспорт CSV (ledger)</button>
+            <button type="button" id="ledger-export-xls-btn" class="btn-secondary-small">Экспорт Excel (ledger)</button>
+          </div>
+        </div>
+      </div>
     `;
 
     const exportBtn = document.getElementById("ledger-export-btn");
@@ -2757,6 +3322,33 @@ async function loadUserDetail(userId) {
       exportXlsBtn.onclick = () => {
         window.location.href = `${API_BASE}/ledger/${userId}/export?format=xls`;
       };
+    }
+
+    const ctaDeposits = document.getElementById("user-cta-deposits");
+    if (ctaDeposits) {
+      ctaDeposits.addEventListener("click", () => {
+        const defaults = {
+          status_filter: "",
+          date_from: "",
+          date_to: "",
+          sort: "created_at_desc",
+          order_id_search: "",
+          external_id_search: "",
+          user_id_filter: "",
+          amount_min: "",
+          amount_max: "",
+          currency_filter: "",
+        };
+        const prev = loadSavedState(DEPOSITS_FILTERS_KEY, defaults);
+        saveState(DEPOSITS_FILTERS_KEY, { ...prev, user_id_filter: String(u.id) });
+        location.hash = "#deposits";
+      });
+    }
+    const ctaWithdrawals = document.getElementById("user-cta-withdrawals");
+    if (ctaWithdrawals) {
+      ctaWithdrawals.addEventListener("click", () => {
+        location.hash = "#withdrawals";
+      });
     }
 
     const adjustBtn = document.getElementById("balance-adjust-apply-btn");
@@ -3006,6 +3598,9 @@ async function loadUserDetail(userId) {
       applyInvFilter();
     }
 
+    if (typeof AdminUI !== "undefined" && typeof AdminUI.refreshIcons === "function") {
+      AdminUI.refreshIcons();
+    }
   } catch (e) {
     section.innerHTML = `<h1>Пользователь</h1><div class="error">${e.message}</div>`;
   }
@@ -3031,6 +3626,310 @@ function getWithdrawalRiskFlags(w) {
   return flags;
 }
 
+/** SLA: >15 мин Watch, >45 мин Action (только при валидном created_at). */
+const WITHDRAWAL_SLA_WATCH_MIN = 15;
+const WITHDRAWAL_SLA_ACTION_MIN = 45;
+
+function withdrawalQueueAgeMinutes(w) {
+  if (!w?.created_at) return null;
+  const t = new Date(w.created_at).getTime();
+  if (!Number.isFinite(t)) return null;
+  return Math.floor((Date.now() - t) / 60000);
+}
+
+/** HIGH_AMOUNT: всегда risk approve (не запрет). Запрет только адрес / mismatch.
+ *  Нет времени / user_id не поднимают до Action сами по себе — только слабый unknown. */
+function classifyWithdrawalSignals(w) {
+  const flags = getWithdrawalRiskFlags(w);
+  const ageMin = withdrawalQueueAgeMinutes(w);
+  const missingUser = !w?.user_id;
+  const missingTime = ageMin === null;
+  const insufficientData = missingUser || missingTime;
+
+  const blockApprove = flags.includes("ADDRESS_FORMAT") || flags.includes("SHORT_ADDRESS");
+  const requiresRiskApprove =
+    !blockApprove && (flags.includes("HIGH_AMOUNT") || (ageMin != null && ageMin > WITHDRAWAL_SLA_ACTION_MIN));
+
+  let level = "ok";
+  if (blockApprove) level = "action";
+  else if (flags.includes("HIGH_AMOUNT")) level = "action";
+  if (ageMin != null) {
+    if (ageMin > WITHDRAWAL_SLA_ACTION_MIN) level = level === "ok" ? "action" : level;
+    else if (ageMin > WITHDRAWAL_SLA_WATCH_MIN && level === "ok") level = "watch";
+  }
+  if (level === "ok" && (missingTime || missingUser)) level = "unknown";
+
+  const rank = level === "action" ? 4 : level === "watch" ? 3 : level === "ok" ? 2 : 1;
+  return {
+    flags,
+    ageMin,
+    missingUser,
+    missingTime,
+    insufficientData,
+    blockApprove,
+    requiresRiskApprove,
+    level,
+    rank,
+  };
+}
+
+function withdrawalSignalBadgeHtml(level) {
+  if (level === "action") return `<span class="withdrawal-signal withdrawal-signal--action">Action</span>`;
+  if (level === "watch") return `<span class="withdrawal-signal withdrawal-signal--watch">Watch</span>`;
+  if (level === "unknown")
+    return `<span class="withdrawal-signal withdrawal-signal--unknown">Нет данных</span>`;
+  return `<span class="withdrawal-signal withdrawal-signal--ok">OK</span>`;
+}
+
+function withdrawalSlaCellLabel(ageMin) {
+  if (ageMin == null) return "—";
+  if (ageMin < 60) return `${ageMin} мин`;
+  const h = Math.floor(ageMin / 60);
+  const m = ageMin % 60;
+  return `${h}ч ${m}м`;
+}
+
+function closeWithdrawalDecisionBackdrop() {
+  document.querySelectorAll(".withdrawal-decision-backdrop").forEach((el) => el.remove());
+}
+
+async function openWithdrawalDecisionMode(withdrawalId, { onDone }) {
+  closeWithdrawalDecisionBackdrop();
+  let w;
+  try {
+    w = await apiRequest(`/withdrawals/${withdrawalId}`);
+  } catch (e) {
+    showToast(e.message || "Ошибка загрузки заявки", "error");
+    return;
+  }
+
+  const meta = classifyWithdrawalSignals(w);
+
+  const buildContextText = (userCtxLine) =>
+    [
+      `Сигнал: ${meta.level.toUpperCase()} · в очереди: ${withdrawalSlaCellLabel(meta.ageMin)}`,
+      `Флаги: ${meta.flags.length ? meta.flags.join(", ") : "—"}`,
+      userCtxLine,
+      meta.missingTime
+        ? "Время создания неизвестно — SLA не считается, это не аварийный уровень сигнала."
+        : "",
+      meta.missingUser ? "Нет user_id в заявке — сверка balance/ledger недоступна." : "",
+      "",
+      `ID: ${w.id} · статус: ${w.status}`,
+      `Пользователь: ${w.user_id ?? "—"} · ${w.telegram_id}${w.username ? ` @${w.username}` : ""}`,
+      `Списание: ${w.amount} ${w.currency} · комиссия: ${w.fee_amount ?? "—"} · к выплате: ${w.net_amount ?? "—"}`,
+      `Адрес: ${w.address || "—"}`,
+      "",
+      `Создано: ${w.created_at ? new Date(w.created_at).toLocaleString() : "—"}`,
+      `Решение: ${w.decided_at ? new Date(w.decided_at).toLocaleString() : "—"}`,
+    ]
+      .filter((line) => line !== "")
+      .join("\n");
+
+  if (w.status !== "PENDING") {
+    let balanceMismatch = false;
+    let userCtx = "";
+    if (w.user_id) {
+      try {
+        const u = await apiRequest(`/users/${w.user_id}`);
+        balanceMismatch = Number(u.balance_usdt) !== Number(u.ledger_balance_usdt);
+        userCtx = balanceMismatch
+          ? "ВНИМАНИЕ: balance_usdt ≠ ledger у пользователя."
+          : "Контекст пользователя: balance/ledger согласованы.";
+      } catch (_) {
+        userCtx = "Контекст пользователя: не удалось загрузить.";
+      }
+    } else {
+      userCtx = "Контекст пользователя: user_id нет.";
+    }
+    await openUxDialog({ title: `Вывод #${w.id}`, message: buildContextText(userCtx), confirmText: "Закрыть" });
+    return;
+  }
+
+  let balanceMismatch = false;
+  /** loading | ok | error | skipped */
+  let userContextState = w.user_id ? "loading" : "skipped";
+
+  const backdrop = document.createElement("div");
+  backdrop.className = "withdrawal-decision-backdrop";
+  backdrop.innerHTML = `
+    <aside class="withdrawal-decision-panel" role="dialog" aria-modal="true" aria-labelledby="withdrawal-decision-title">
+      <div class="withdrawal-decision-head">
+        <h2 id="withdrawal-decision-title" class="withdrawal-decision-title">Решение · вывод #${w.id}</h2>
+        <button type="button" class="withdrawal-decision-close" aria-label="Закрыть">&times;</button>
+      </div>
+      <div class="withdrawal-decision-body">
+        <div class="withdrawal-decision-signal-row">${withdrawalSignalBadgeHtml(meta.level)}</div>
+        <pre class="withdrawal-decision-context"></pre>
+        <p class="withdrawal-decision-block-msg withdrawal-decision-dynamic-msg is-hidden"></p>
+        <p class="withdrawal-decision-hint withdrawal-decision-dynamic-hint"></p>
+      </div>
+      <div class="withdrawal-decision-footer">
+        <button type="button" class="ds-btn ds-btn--ghost withdrawal-decision-btn-reject">Отклонить</button>
+        <button type="button" class="ds-btn ds-btn--primary withdrawal-decision-btn-approve" disabled>Подтвердить</button>
+      </div>
+    </aside>`;
+  document.body.appendChild(backdrop);
+  const preEl = backdrop.querySelector(".withdrawal-decision-context");
+  const msgEl = backdrop.querySelector(".withdrawal-decision-dynamic-msg");
+  const hintEl = backdrop.querySelector(".withdrawal-decision-dynamic-hint");
+  const approveBtn = backdrop.querySelector(".withdrawal-decision-btn-approve");
+
+  const userCtxLine = () => {
+    if (userContextState === "loading" && w.user_id)
+      return "Контекст пользователя: загрузка balance/ledger… Кнопка «Подтвердить» временно недоступна.";
+    if (userContextState === "skipped") return "Контекст пользователя: user_id нет — проверка balance/ledger не выполнялась.";
+    if (userContextState === "error")
+      return "Контекст пользователя: ошибка загрузки — без сверки balance/ledger подтвердить нельзя.";
+    return balanceMismatch
+      ? "ВНИМАНИЕ: balance_usdt ≠ ledger у пользователя — approve заблокирован до разбора."
+      : "Контекст пользователя: balance/ledger согласованы.";
+  };
+
+  const computeBlockApproveFinal = () => {
+    if (meta.blockApprove || balanceMismatch) return true;
+    if (w.user_id && userContextState === "loading") return true;
+    if (w.user_id && userContextState === "error") return true;
+    return false;
+  };
+
+  const syncPanel = () => {
+    const blockApproveFinal = computeBlockApproveFinal();
+    const riskPath = !blockApproveFinal && meta.requiresRiskApprove;
+    if (preEl) preEl.textContent = buildContextText(userCtxLine());
+    if (blockApproveFinal) {
+      msgEl.classList.remove("is-hidden");
+      msgEl.textContent =
+        meta.blockApprove
+          ? "Подтверждение заблокировано: проверьте адрес."
+          : balanceMismatch
+            ? "Подтверждение заблокировано: расхождение balance и ledger у пользователя."
+            : userContextState === "loading"
+              ? "Ожидайте завершения проверки пользователя…"
+              : userContextState === "error"
+                ? "Подтверждение заблокировано: не удалось загрузить пользователя для сверки баланса."
+                : "Подтверждение заблокировано.";
+      hintEl.textContent = "";
+    } else {
+      msgEl.classList.add("is-hidden");
+      msgEl.textContent = "";
+      hintEl.textContent = riskPath
+        ? `Риск-заявка: потребуется два шага подтверждения (факторы: HIGH_AMOUNT или SLA &gt; ${WITHDRAWAL_SLA_ACTION_MIN} мин).`
+        : "Стандартная заявка — одно подтверждение после проверки.";
+    }
+    approveBtn.disabled = blockApproveFinal;
+    approveBtn.title = blockApproveFinal
+      ? userContextState === "loading"
+        ? "Дождитесь проверки balance/ledger"
+        : "Нельзя подтвердить при текущих условиях"
+      : "";
+  };
+
+  syncPanel();
+
+  if (w.user_id) {
+    apiRequest(`/users/${w.user_id}`)
+      .then((u) => {
+        balanceMismatch = Number(u.balance_usdt) !== Number(u.ledger_balance_usdt);
+        userContextState = "ok";
+        syncPanel();
+      })
+      .catch(() => {
+        userContextState = "error";
+        syncPanel();
+      });
+  } else {
+    userContextState = "skipped";
+    syncPanel();
+  }
+
+  const remove = () => {
+    backdrop.remove();
+    if (onDone) onDone();
+  };
+  backdrop.querySelector(".withdrawal-decision-close").onclick = remove;
+  backdrop.addEventListener("click", (e) => {
+    if (e.target === backdrop) remove();
+  });
+  backdrop.querySelector(".withdrawal-decision-btn-reject").onclick = async () => {
+    const rj = await openUxDialog({
+      title: "Отклонить вывод",
+      message: `Отклонить заявку #${w.id} на ${w.amount} ${w.currency}?`,
+      confirmText: "Отклонить",
+      cancelText: "Отмена",
+    });
+    if (!rj.confirmed) return;
+    try {
+      await apiRequest(`/withdrawals/${w.id}/reject`, { method: "POST" });
+      showToast("Заявка отклонена", "success");
+      remove();
+    } catch (e) {
+      showToast(e.message || "Ошибка", "error");
+    }
+  };
+
+  approveBtn.onclick = async () => {
+    if (computeBlockApproveFinal()) return;
+    const blockApproveFinal = computeBlockApproveFinal();
+    const riskPath = !blockApproveFinal && meta.requiresRiskApprove;
+    const standardPath = !blockApproveFinal && !riskPath;
+
+    const summary = `Заявка #${w.id}: ${w.amount} ${w.currency} → ${w.address || "—"}`;
+    if (standardPath) {
+      const c1 = await openUxDialog({
+        title: "Подтвердить вывод",
+        message: `${summary}\n\nПодтверждаете выплату?`,
+        confirmText: "Подтвердить",
+        cancelText: "Отмена",
+      });
+      if (!c1.confirmed) return;
+    } else {
+      const riskFactors = [
+        meta.flags.includes("HIGH_AMOUNT") ? "HIGH_AMOUNT (повышенная сумма)" : "",
+        meta.ageMin != null && meta.ageMin > WITHDRAWAL_SLA_ACTION_MIN
+          ? `SLA: в очереди ${withdrawalSlaCellLabel(meta.ageMin)} (порог Action &gt; ${WITHDRAWAL_SLA_ACTION_MIN} мин)`
+          : "",
+      ]
+        .filter(Boolean)
+        .join("\n");
+      const c1 = await openUxDialog({
+        title: "Риск-заявка: следующий шаг",
+        message: `Требуется финальное подтверждение с повторной сверкой реквизитов.\n\nФакторы риска:\n${riskFactors || "—"}\n\nНажмите «Далее», только если готовы к последнему шагу с чеклистом.`,
+        confirmText: "Далее",
+        cancelText: "Отмена",
+      });
+      if (!c1.confirmed) return;
+      const c2 = await openUxDialog({
+        title: "Финальное подтверждение выплаты",
+        message: [
+          `Сумма списания: ${w.amount} ${w.currency}`,
+          `К выплате (нетто): ${w.net_amount ?? "—"} ${w.currency}`,
+          `Адрес: ${w.address || "—"}`,
+          "",
+          `Риск-контекст:\n${riskFactors || "—"}`,
+          "",
+          "Чек перед отправкой:",
+          "· Сумма совпадает с заявкой",
+          "· Адрес и сеть соответствуют ожиданиям",
+          "· Нет сомнений в корректности заявки",
+          "",
+          "Подтвердить выплату на указанный адрес?",
+        ].join("\n"),
+        confirmText: "Подтвердить выплату",
+        cancelText: "Отмена",
+      });
+      if (!c2.confirmed) return;
+    }
+    try {
+      await apiRequest(`/withdrawals/${w.id}/approve`, { method: "POST" });
+      showToast("Заявка подтверждена", "success");
+      remove();
+    } catch (e) {
+      showToast(e.message || "Ошибка", "error");
+    }
+  };
+}
+
 async function loadWithdrawals() {
   const section = document.getElementById("withdrawals-section");
   section.innerHTML = "<h1>Выводы</h1><p>Загрузка...</p>";
@@ -3046,36 +3945,89 @@ async function loadWithdrawals() {
     if (amountMax) wParams.set("amount_max", amountMax);
     if (currency) wParams.set("currency_filter", currency);
     const data = await apiRequest(`/withdrawals?${wParams.toString()}`);
-    const hasPending = (data.items || []).some((w) => w.status === "PENDING");
-    const rows = data.items
-      .map(
-        (w) => `
-      <tr>
-        <td>${w.status === "PENDING" ? `<input type="checkbox" class="withdrawal-select" value="${w.id}" title="Выбрать для массового действия" />` : ""}</td>
+    const rawItems = data.items || [];
+    const sortedItems =
+      statusParam === "PENDING"
+        ? [...rawItems].sort((a, b) => {
+            const ma = classifyWithdrawalSignals(a);
+            const mb = classifyWithdrawalSignals(b);
+            if (mb.rank !== ma.rank) return mb.rank - ma.rank;
+            const aa = ma.ageMin ?? -1;
+            const ab = mb.ageMin ?? -1;
+            return ab - aa;
+          })
+        : rawItems;
+
+    const pendingMetaList = sortedItems.filter((w) => w.status === "PENDING").map((w) => classifyWithdrawalSignals(w));
+    const countAction = pendingMetaList.filter((m) => m.level === "action").length;
+    const countWatch = pendingMetaList.filter((m) => m.level === "watch").length;
+    const countOk = pendingMetaList.filter((m) => m.level === "ok").length;
+    const escalationBanner =
+      statusParam === "PENDING" && countAction >= 3
+        ? `<div class="withdrawal-escalation panel-card">Много заявок Action (${countAction}). Рекомендуется обрабатывать по одной в режиме решения; массовое подтверждение отключено для не-OK.</div>`
+        : "";
+
+    const hasPending = sortedItems.some((w) => w.status === "PENDING");
+
+    const rows = sortedItems
+      .map((w) => {
+        const meta = classifyWithdrawalSignals(w);
+        const userCell = w.user_id
+          ? `<a href="#user-${w.user_id}" class="withdrawal-user-link">${w.telegram_id}<br><span class="mini-hint">user #${w.user_id}</span></a>`
+          : `${w.telegram_id}<br><span class="mini-hint">user —</span>`;
+        const flagsHtml = meta.flags.length
+          ? meta.flags.map((f) => `<span class="risk-flag">${f}</span>`).join(" ")
+          : '<span class="risk-flag risk-ok">—</span>';
+        return `
+      <tr class="withdrawal-row withdrawal-row--${meta.level}" data-withdrawal-id="${w.id}">
+        <td>${
+          w.status === "PENDING"
+            ? `<input type="checkbox" class="withdrawal-select" value="${w.id}" title="Выбрать для массового действия" />`
+            : ""
+        }</td>
+        <td>${withdrawalSignalBadgeHtml(meta.level)}</td>
+        <td>${withdrawalSlaCellLabel(meta.ageMin)}</td>
         <td>${w.id}</td>
-        <td>${w.telegram_id}</td>
-        <td>${w.username || ""}</td>
+        <td>${userCell}</td>
+        <td>${w.username || "—"}</td>
         <td class="amount-negative"><div>−${w.amount} ${w.currency}</div><div class="mini-hint">комиссия ${w.fee_amount ?? "—"} · к выплате ${w.net_amount ?? "—"}</div></td>
         <td class="cell-address">${escapeHtmlAttr(w.address || "")} <button type="button" class="btn-secondary-small copy-address-btn" data-address="${escapeHtmlAttr(w.address || "")}">Копировать</button></td>
         <td><span class="${withdrawalStatusBadge(w.status)}">${w.status}</span></td>
-        <td>${
-          getWithdrawalRiskFlags(w).length
-            ? getWithdrawalRiskFlags(w).map((f) => `<span class="risk-flag">${f}</span>`).join(" ")
-            : '<span class="risk-flag risk-ok">OK</span>'
-        }</td>
+        <td>${flagsHtml}</td>
         <td>
-          <button type="button" class="btn-secondary-small withdrawal-detail-btn" data-id="${w.id}">Подробнее</button>
-          ${w.status === "PENDING" ? `<button data-id="${w.id}" data-action="approve" class="btn-approve">Подтвердить</button> <button data-id="${w.id}" data-action="reject" class="btn-reject">Отклонить</button>` : ""}
+          ${
+            w.status === "PENDING"
+              ? `<button type="button" class="ds-btn ds-btn--primary ds-btn--sm withdrawal-decision-open" data-id="${w.id}">Решить</button>`
+              : `<button type="button" class="btn-secondary-small withdrawal-detail-btn" data-id="${w.id}">Просмотр</button>`
+          }
         </td>
-      </tr>`
-      )
+      </tr>`;
+      })
       .join("");
-    const rowsHtml = rows || `<tr><td colspan="9"><div class="empty-state"><strong>Нет заявок на вывод</strong><span>Смените статус в фильтре или зайдите позже.</span></div></td></tr>`;
+    const colCount = 11;
+    const rowsHtml =
+      rows ||
+      `<tr><td colspan="${colCount}"><div class="empty-state"><strong>Нет заявок на вывод</strong><span>Смените статус в фильтре или зайдите позже.</span></div></td></tr>`;
+
+    const byId = Object.fromEntries(sortedItems.map((w) => [String(w.id), w]));
+
     section.innerHTML = `
-      <h1>Выводы</h1>
-      <p class="section-desc">Управление заявками на вывод средств. С баланса списывается указанная сумма; комиссия 10%; на кошелёк пользователя — остаток (к выплате).</p>
+      <header class="ds-page-header">
+        <h1 class="ds-page-header__title">Treasury · выводы</h1>
+        <p class="ds-page-header__desc">Очередь на решение: сигнал OK/Watch/Action, время в очереди, режим «Решить» перед approve/reject.</p>
+      </header>
+      ${escalationBanner}
+      <div class="withdrawal-queue-summary panel-card">
+        <div class="withdrawal-queue-summary__title">Очередь (PENDING на экране)</div>
+        <div class="withdrawal-queue-summary__stats">
+          <span class="withdrawal-queue-stat">Action: <strong>${statusParam === "PENDING" ? countAction : "—"}</strong></span>
+          <span class="withdrawal-queue-stat">Watch: <strong>${statusParam === "PENDING" ? countWatch : "—"}</strong></span>
+          <span class="withdrawal-queue-stat">OK: <strong>${statusParam === "PENDING" ? countOk : "—"}</strong></span>
+        </div>
+        <p class="withdrawal-queue-summary__hint">SLA: Watch &gt; ${WITHDRAWAL_SLA_WATCH_MIN} мин, Action &gt; ${WITHDRAWAL_SLA_ACTION_MIN} мин (только при валидном времени). Нет времени/user_id — бейдж «Нет данных», не Action. HIGH_AMOUNT — risk approve, не запрет.</p>
+      </div>
       <div class="panel-card">
-        <div class="toolbar filters-toolbar">
+        <div class="toolbar filters-toolbar withdrawal-filters-toolbar">
           <label class="filter-label">
             Статус
             <select id="withdrawals-status-filter">
@@ -3102,22 +4054,28 @@ async function loadWithdrawals() {
             <input type="number" id="withdrawals-amount-max" min="0" step="0.01" value="${escapeHtmlAttr(amountMax)}" />
           </label>
           <button type="button" id="withdrawals-apply-filters" title="Обновить список по выбранному статусу">Применить</button>
-          ${hasPending ? `<button type="button" id="withdrawals-bulk-approve" class="btn-approve" title="Подтвердить выбранные заявки">Подтвердить выбранные</button>
-          <button type="button" id="withdrawals-bulk-reject" class="btn-reject" title="Отклонить выбранные заявки">Отклонить выбранные</button>` : ""}
+          ${
+            hasPending
+              ? `<button type="button" id="withdrawals-bulk-approve" class="btn-approve" title="Только если все выбранные OK и без risk-пути">Подтвердить выбранные</button>
+          <button type="button" id="withdrawals-bulk-reject" class="btn-reject" title="Отклонить выбранные">Отклонить выбранные</button>`
+              : ""
+          }
         </div>
         <div class="table-wrapper">
           <div class="table-wrapper-inner">
-            <table>
+            <table class="withdrawals-table">
               <thead>
                 <tr>
                   <th>✓</th>
+                  <th>Сигнал</th>
+                  <th>В очереди</th>
                   <th>ID</th>
-                  <th>Telegram ID</th>
+                  <th>Кто</th>
                   <th>Username</th>
-                  <th>Суммы (списание / комиссия / к выплате)</th>
-                  <th>Кошелек</th>
+                  <th>Суммы</th>
+                  <th>Кошелёк</th>
                   <th>Статус</th>
-                  <th>Риск</th>
+                  <th>Флаги</th>
                   <th>Действия</th>
                 </tr>
               </thead>
@@ -3147,44 +4105,66 @@ async function loadWithdrawals() {
       btn.addEventListener("click", async () => {
         const id = btn.getAttribute("data-id");
         if (!id) return;
-        try {
-          const w = await apiRequest(`/withdrawals/${id}`);
-          const flags = getWithdrawalRiskFlags(w);
-          const timeline = [
-            `Создано: ${w.created_at ? new Date(w.created_at).toLocaleString() : "—"}`,
-            `Статус: ${w.status}`,
-            `Решение: ${w.decided_at ? new Date(w.decided_at).toLocaleString() : "—"}`,
-          ].join("\n");
-          const body = [
-            `ID: ${w.id}`,
-            `User: ${w.user_id} (${w.telegram_id}${w.username ? ` @${w.username}` : ""})`,
-            `Списание с баланса: ${w.amount} ${w.currency}`,
-            `Комиссия 10%: ${w.fee_amount ?? "—"} ${w.currency}`,
-            `К выплате на адрес: ${w.net_amount ?? "—"} ${w.currency}`,
-            `Кошелек: ${w.address}`,
-            `Risk: ${flags.length ? flags.join(", ") : "OK"}`,
-            "",
-            timeline,
-          ].join("\n");
-          await openUxDialog({
-            title: `Вывод #${w.id}`,
-            message: body,
-            confirmText: "Закрыть",
-          });
-        } catch (e) {
-          showToast(e.message || "Ошибка загрузки вывода", "error");
-        }
+        openWithdrawalDecisionMode(id, { onDone: () => loadWithdrawals() });
       });
     });
+    section.querySelectorAll(".withdrawal-decision-open").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const id = btn.getAttribute("data-id");
+        if (!id) return;
+        openWithdrawalDecisionMode(id, { onDone: () => loadWithdrawals() });
+      });
+    });
+
     const runBulkWithdrawalAction = async (action) => {
       const selectedIds = Array.from(section.querySelectorAll(".withdrawal-select:checked")).map((el) => el.value);
       if (!selectedIds.length) {
         showToast("Выберите хотя бы одну заявку", "info");
         return;
       }
+      if (action === "approve") {
+        let bad = null;
+        for (const id of selectedIds) {
+          const w = byId[String(id)];
+          if (!w || w.status !== "PENDING") {
+            bad = "Только PENDING";
+            break;
+          }
+          const m = classifyWithdrawalSignals(w);
+          if (m.level !== "ok" || m.blockApprove || m.requiresRiskApprove || m.insufficientData) {
+            bad = "Массовое подтверждение только для OK без risk-пути и с полными данными.";
+            break;
+          }
+        }
+        if (bad) {
+          showToast(bad, "error");
+          return;
+        }
+      }
+
+      let bulkRejectWarn = "";
+      if (action === "reject") {
+        let anyAction = false;
+        let anyInsufficient = false;
+        for (const id of selectedIds) {
+          const w = byId[String(id)];
+          if (!w) {
+            anyInsufficient = true;
+            continue;
+          }
+          const m = classifyWithdrawalSignals(w);
+          if (m.level === "action") anyAction = true;
+          if (m.insufficientData) anyInsufficient = true;
+        }
+        if (anyAction || anyInsufficient) {
+          bulkRejectWarn =
+            "\n\nВнимание: в выборке есть заявки Action или с неполными данными — проверьте список перед массовым отклонением.";
+        }
+      }
+
       const check = await openUxDialog({
         title: "Массовое действие",
-        message: `${action === "approve" ? "Подтвердить" : "Отклонить"} выбранные заявки: ${selectedIds.length} шт.?`,
+        message: `${action === "approve" ? "Подтвердить" : "Отклонить"} выбранные заявки: ${selectedIds.length} шт.?${bulkRejectWarn}`,
         confirmText: action === "approve" ? "Подтвердить" : "Отклонить",
         cancelText: "Отмена",
       });
@@ -3223,20 +4203,6 @@ async function loadWithdrawals() {
     };
     document.getElementById("withdrawals-bulk-approve")?.addEventListener("click", () => runBulkWithdrawalAction("approve"));
     document.getElementById("withdrawals-bulk-reject")?.addEventListener("click", () => runBulkWithdrawalAction("reject"));
-    section.querySelectorAll("button[data-id]").forEach((btn) => {
-      btn.onclick = async () => {
-        const id = btn.getAttribute("data-id");
-        const action = btn.getAttribute("data-action");
-        try {
-          await apiRequest(`/withdrawals/${id}/${action}`, {
-            method: "POST",
-          });
-          loadWithdrawals();
-        } catch (e) {
-          showToast(e.message || "Ошибка обработки вывода", "error");
-        }
-      };
-    });
   } catch (e) {
     section.innerHTML = `<h1>Выводы</h1><div class="error">${e.message}</div>`;
   }
@@ -3428,7 +4394,7 @@ async function loadSettings() {
       </div>
       <div class="panel-card danger-zone-card">
         <div class="danger-zone-header">
-          <div class="danger-zone-icon">⚠️</div>
+          <div class="danger-zone-icon" aria-hidden="true"><i data-lucide="alert-triangle" class="icon icon--lg"></i></div>
           <div>
             <h2>Опасная зона</h2>
             <p class="section-desc">Необратимые действия. Перед запуском внимательно проверьте среду и последствия.</p>
@@ -4413,15 +5379,18 @@ function showToast(message, type = "success", action = null) {
   if (existing) {
     existing.remove();
   }
-  const icon = type === "error" ? "⚠️" : type === "info" ? "ℹ️" : "✅";
+  const iconName = type === "error" ? "alert-circle" : type === "info" ? "info" : "check-circle";
   const el = document.createElement("div");
-  el.className = "toast";
+  el.className = `toast toast--${type === "error" || type === "info" || type === "success" ? type : "success"}`;
   el.innerHTML = `
-    <span class="toast-icon">${icon}</span>
-    <span class="toast-message">${message}</span>
+    <span class="toast-icon"><i data-lucide="${iconName}" class="icon icon--sm" aria-hidden="true"></i></span>
+    <span class="toast-message">${escapeHtmlAttr(String(message || ""))}</span>
     ${action?.label ? `<button type="button" class="toast-action-btn">${escapeHtmlAttr(action.label)}</button>` : ""}
   `;
   document.body.appendChild(el);
+  if (typeof AdminUI !== "undefined" && typeof AdminUI.refreshIcons === "function") {
+    AdminUI.refreshIcons();
+  }
   if (action?.label && typeof action.onClick === "function") {
     el.querySelector(".toast-action-btn")?.addEventListener("click", () => {
       action.onClick();
