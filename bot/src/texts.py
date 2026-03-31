@@ -694,7 +694,7 @@ def make_admin_fin_settings_text(data: Mapping[str, Any]) -> str:
         f"Максимальный депозит: {data.get('max_deposit_usdt')} USDT\n\n"
         f"Минимальный вывод: {data.get('min_withdraw_usdt')} USDT\n"
         f"Максимальный вывод: {data.get('max_withdraw_usdt')} USDT\n"
-        "(лимиты по сумме списания с баланса; комиссия 10%, на кошелёк — 90%)\n\n"
+        "(лимиты по сумме списания с баланса; комиссия 10%)\n\n"
         f"Минимальная инвестиция: {data.get('min_invest_usdt')} USDT\n"
         f"Максимальная инвестиция: {data.get('max_invest_usdt')} USDT\n\n"
         f"Приветственный бонус 100 USDT: {bonus_line}"

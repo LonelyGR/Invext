@@ -17,7 +17,7 @@ class WithdrawRequestIn(BaseModel):
     amount: Decimal = Field(
         ...,
         gt=0,
-        description="Сумма списания с баланса; комиссия 10%, на кошелёк уходит 90%",
+        description="Сумма списания с баланса; комиссия 10%",
     )
     address: str = Field(..., min_length=1, max_length=512)
 
