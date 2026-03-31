@@ -448,8 +448,14 @@ async function handleLogin(event) {
       const data = await resp.json().catch(() => ({}));
       throw new Error(data.detail || "Ошибка входа");
     }
-    showMainView();
-    loadDashboard();
+    // После успешного логина полностью перезагружаем страницу,
+    // чтобы React‑дашборд и все данные инициализировались с новой сессией.
+    try {
+      showMainView();
+    } catch (_) {
+      // best-effort: если по какой-то причине DOM еще не готов, просто сделаем reload.
+    }
+    window.location.href = "/database/";
   } catch (e) {
     errorEl.textContent = e.message;
   }

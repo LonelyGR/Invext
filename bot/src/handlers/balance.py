@@ -54,9 +54,5 @@ async def welcome_bonus_claim(message: Message):
         return
 
     amount = result.get("amount") or 0
-    new_balance = result.get("new_balance") or 0
-    await message.answer(
-        f"✅ Приветственный бонус {amount} USDT начислен на ваш баланс.\n"
-        f"Текущий баланс: {new_balance} USDT"
-    )
+    await message.answer(f"✅ Приветственный бонус {amount} USDT начислен на ваш баланс.")
 
