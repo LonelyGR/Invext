@@ -208,13 +208,29 @@ async function apiRequest(path, options = {}) {
 }
 
 function showLoginView() {
-  document.getElementById("login-view").classList.remove("hidden");
-  document.getElementById("main-view").classList.add("hidden");
+  const login = document.getElementById("login-view");
+  const main = document.getElementById("main-view");
+  if (login) {
+    login.classList.remove("hidden");
+    login.style.display = "block";
+  }
+  if (main) {
+    main.classList.add("hidden");
+    main.style.display = "none";
+  }
 }
 
 function showMainView() {
-  document.getElementById("login-view").classList.add("hidden");
-  document.getElementById("main-view").classList.remove("hidden");
+  const login = document.getElementById("login-view");
+  const main = document.getElementById("main-view");
+  if (login) {
+    login.classList.add("hidden");
+    login.style.display = "none";
+  }
+  if (main) {
+    main.classList.remove("hidden");
+    main.style.display = "block";
+  }
   if (typeof AdminUI !== "undefined" && typeof AdminUI.initShell === "function") {
     AdminUI.initShell();
   }
