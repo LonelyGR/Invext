@@ -259,7 +259,7 @@ async def broadcast_deal_closed(
         lines.append(f"⏰ {next_open_human}")
         lines.append(f"До открытия: {next_open_in_human}.")
         lines.append("")
-        lines.append("Для участия используйте нашего Telegram-бот.")
+        lines.append("Используйте наш телеграм бот.")
 
         text = "\n".join(lines)
         effect_id = None

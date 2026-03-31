@@ -199,7 +199,7 @@ def make_withdraw_enter_amount_text(currency: str, min_wd: Any) -> str:
 def make_withdraw_enter_address_text() -> str:
     return (
         "🏦 <b>Адрес для вывода</b>\n\n"
-        "Введите адрес кошелька, на который поступит сумма после вычета комиссии 10%."
+        "Введите адрес кошелька в сети BEP20, на который поступит сумма после вычета комиссии 10%."
     )
 
 
