@@ -182,7 +182,7 @@ def make_deposit_balance_credited_text() -> str:
 def make_withdraw_choose_currency_text() -> str:
     return (
         "Выберите валюту вывода:\n\n"
-        "ℹ️ Укажите сумму <b>списания с баланса</b>. Комиссия <b>10%</b> от неё "
+        "ℹ️ Укажите сумму <b>списания с баланса</b>.\n\n Комиссия <b>10%</b> "
     )
 
 
