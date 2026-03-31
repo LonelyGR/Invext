@@ -556,15 +556,16 @@ def make_unknown_callback_text() -> str:
 
 def make_wallets_list_text(wallets: Iterable[Mapping[str, Any]], text_prefix: str = "") -> str:
     wallets_list = list(wallets)
+    bep20_note = "Сеть для всех операций: BEP20.\n\n"
     if not wallets_list:
-        return (text_prefix + "💼 <b>Ваши кошельки</b>\n\nУ вас нет сохранённых кошельков.").strip()
+        return (text_prefix + "💼 <b>Ваши кошельки</b>\n\n" + bep20_note + "У вас нет сохранённых кошельков.").strip()
 
     lines = []
     for w in wallets_list:
         addr = str(w.get("address", ""))
         addr_show = f"{addr[:24]}..." if len(addr) > 24 else addr
         lines.append(f"• {w.get('name', 'Без названия')} ({w.get('currency', 'USDT')}): <code>{addr_show}</code>")
-    return (text_prefix + "💼 <b>Ваши кошельки</b>\n\n" + "\n".join(lines)).strip()
+    return (text_prefix + "💼 <b>Ваши кошельки</b>\n\n" + bep20_note + "\n".join(lines)).strip()
 
 
 def make_wallets_load_error_text(error: Any) -> str:
