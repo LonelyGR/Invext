@@ -35,6 +35,7 @@ async def get_system_settings_admin(
         "allow_deposits": bool(row.allow_deposits),
         "allow_investments": bool(row.allow_investments),
         "allow_withdrawals": bool(getattr(row, "allow_withdrawals", True)),
+        "allow_welcome_bonus": bool(getattr(row, "allow_welcome_bonus", True)),
         "support_contact": getattr(row, "support_contact", None),
         "deal_schedule_json": getattr(row, "deal_schedule_json", None),
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
@@ -64,6 +65,7 @@ async def update_system_setting_field(
         "allow_deposits",
         "allow_investments",
         "allow_withdrawals",
+        "allow_welcome_bonus",
         "support_contact",
         "deal_schedule_json",
     }
@@ -77,7 +79,7 @@ async def update_system_setting_field(
         result = await db.execute(select(SystemSettings).limit(1).with_for_update())
         row = result.scalar_one()
 
-        if field in {"allow_deposits", "allow_investments", "allow_withdrawals"}:
+        if field in {"allow_deposits", "allow_investments", "allow_withdrawals", "allow_welcome_bonus"}:
             value_raw = payload.get("value")
             if isinstance(value_raw, bool):
                 bool_value = value_raw
@@ -96,8 +98,10 @@ async def update_system_setting_field(
                 row.allow_deposits = bool_value
             elif field == "allow_investments":
                 row.allow_investments = bool_value
-            else:
+            elif field == "allow_withdrawals":
                 row.allow_withdrawals = bool_value
+            else:
+                row.allow_welcome_bonus = bool_value
         elif field == "support_contact":
             row.support_contact = (str(payload.get("value") or "").strip()[:255] or None)
         elif field == "deal_schedule_json":

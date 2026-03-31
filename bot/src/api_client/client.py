@@ -120,6 +120,26 @@ class BackendClient:
                 "USDT": Decimal(str(data.get("USDT", 0))),
             }
 
+    async def get_welcome_bonus_status(self, telegram_id: int) -> Dict[str, Any]:
+        """Статус приветственного бонуса для пользователя."""
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            r = await client.get(
+                self._url("/v1/wallet/bonus/welcome-status"),
+                params={"telegram_id": telegram_id},
+            )
+            r.raise_for_status()
+            return r.json()
+
+    async def claim_welcome_bonus(self, telegram_id: int) -> Dict[str, Any]:
+        """Начислить приветственный бонус пользователю (однократно)."""
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            r = await client.post(
+                self._url("/v1/wallet/bonus/welcome-claim"),
+                params={"telegram_id": telegram_id},
+            )
+            r.raise_for_status()
+            return r.json()
+
     # --- Withdrawals ---
     async def create_withdraw_request(
         self, telegram_id: int, currency: str, amount: Decimal, address: str

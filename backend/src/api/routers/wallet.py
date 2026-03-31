@@ -1,14 +1,26 @@
 """
 Эндпоинт: балансы по валютам (ledger), список пополнений пользователя.
 """
+from decimal import Decimal
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.session import get_db
 from src.models import PaymentInvoice, User
-from src.schemas.wallet import BalancesResponse, InvoiceListItem, InvoicesListResponse
-from src.services.wallet_service import get_balances
+from src.schemas.wallet import (
+    BalancesResponse,
+    InvoiceListItem,
+    InvoicesListResponse,
+    WelcomeBonusStatusResponse,
+    WelcomeBonusClaimResponse,
+)
+from src.services.wallet_service import (
+    get_balances,
+    get_welcome_bonus_status,
+    apply_welcome_bonus,
+)
 
 router = APIRouter(prefix="/v1/wallet", tags=["wallet"])
 
@@ -60,3 +72,41 @@ async def get_my_invoices(
         for inv in invoices
     ]
     return InvoicesListResponse(items=items)
+
+
+WELCOME_BONUS_AMOUNT = Decimal("100")
+
+
+@router.get(
+    "/bonus/welcome-status",
+    response_model=WelcomeBonusStatusResponse,
+    summary="Статус приветственного бонуса для пользователя",
+)
+async def welcome_bonus_status(
+    telegram_id: int = Query(..., description="Telegram ID пользователя"),
+    db: AsyncSession = Depends(get_db),
+):
+    data = await get_welcome_bonus_status(db, telegram_id, bonus_amount=WELCOME_BONUS_AMOUNT)
+    return WelcomeBonusStatusResponse(
+        available=bool(data.get("available")),
+        amount=data.get("amount"),
+    )
+
+
+@router.post(
+    "/bonus/welcome-claim",
+    response_model=WelcomeBonusClaimResponse,
+    summary="Начислить приветственный бонус пользователю (однократно)",
+)
+async def welcome_bonus_claim(
+    telegram_id: int = Query(..., description="Telegram ID пользователя"),
+    db: AsyncSession = Depends(get_db),
+):
+    async with db.begin():
+        result = await apply_welcome_bonus(db, telegram_id, bonus_amount=WELCOME_BONUS_AMOUNT)
+    return WelcomeBonusClaimResponse(
+        success=bool(result.get("success")),
+        amount=result.get("amount"),
+        new_balance=result.get("new_balance"),
+        detail=result.get("detail"),
+    )

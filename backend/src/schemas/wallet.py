@@ -55,3 +55,17 @@ class InvoiceListItem(BaseModel):
 class InvoicesListResponse(BaseModel):
     """Список пополнений пользователя (NOWPayments)."""
     items: List[InvoiceListItem]
+
+
+class WelcomeBonusStatusResponse(BaseModel):
+    """Статус приветственного бонуса для пользователя."""
+    available: bool
+    amount: Decimal | None = None
+
+
+class WelcomeBonusClaimResponse(BaseModel):
+    """Результат начисления приветственного бонуса."""
+    success: bool
+    amount: Decimal | None = None
+    new_balance: Decimal | None = None
+    detail: str | None = None

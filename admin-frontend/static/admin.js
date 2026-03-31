@@ -456,6 +456,11 @@ async function handleLogin(event) {
 }
 
 async function loadDashboard() {
+  if (typeof window !== "undefined" && window.ReactAdmin && typeof window.ReactAdmin.renderDashboard === "function") {
+    // React layer takes over dashboard rendering; legacy implementation kept as fallback.
+    window.ReactAdmin.renderDashboard();
+    return;
+  }
   const section = document.getElementById("dashboard-section");
   section.innerHTML = "<h1>Дашборд</h1><p>Загрузка...</p>";
   try {

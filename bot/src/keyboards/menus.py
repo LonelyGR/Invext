@@ -6,17 +6,23 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeybo
 from src.config.settings import ALLOWED_CURRENCIES
 
 
-def main_menu_kb(is_admin: bool = False) -> ReplyKeyboardMarkup:
-    """Главное меню: финансы, сделка, партнёрка, настройки, статистика, админка (только для админов)."""
+def main_menu_kb(is_admin: bool = False, show_welcome_bonus: bool = False) -> ReplyKeyboardMarkup:
+    """Главное меню: финансы, сделка, бонус, партнёрка, настройки, статистика, админка (только для админов)."""
     keyboard: list[list[KeyboardButton]] = [
         # ФИНАНСЫ
         [KeyboardButton(text="💰 Баланс"), KeyboardButton(text="📈 Сделка")],
-        [KeyboardButton(text="📥 Пополнить"), KeyboardButton(text="📤 Вывести")],
-        # ПАРТНЁРКА / НАСТРОЙКИ
-        [KeyboardButton(text="👥 Партнёры"), KeyboardButton(text="⚙️ Кошелёк")],
-        # СТАТИСТИКА
-        [KeyboardButton(text="📊 Статистика"), KeyboardButton(text="🆘 Саппорт")],
     ]
+    if show_welcome_bonus:
+        keyboard.append([KeyboardButton(text="🎁 Бонус 100")])
+    keyboard.extend(
+        [
+            [KeyboardButton(text="📥 Пополнить"), KeyboardButton(text="📤 Вывести")],
+            # ПАРТНЁРКА / НАСТРОЙКИ
+            [KeyboardButton(text="👥 Партнёры"), KeyboardButton(text="⚙️ Кошелёк")],
+            # СТАТИСТИКА
+            [KeyboardButton(text="📊 Статистика"), KeyboardButton(text="🆘 Саппорт")],
+        ]
+    )
     if is_admin:
         # АДМИН (только для админов)
         keyboard.append([KeyboardButton(text="🔧 Админка")])
@@ -138,6 +144,8 @@ def fin_settings_kb() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="Изменить макс. вывод", callback_data="fin_set_max_withdraw")],
             [InlineKeyboardButton(text="Изменить мин. инвестицию", callback_data="fin_set_min_invest")],
             [InlineKeyboardButton(text="Изменить макс. инвестицию", callback_data="fin_set_max_invest")],
+            [InlineKeyboardButton(text="Включить приветственный бонус 100 USDT", callback_data="fin_bonus_on")],
+            [InlineKeyboardButton(text="Выключить приветственный бонус 100 USDT", callback_data="fin_bonus_off")],
             [InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_menu")],
         ]
     )

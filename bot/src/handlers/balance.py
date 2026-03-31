@@ -18,10 +18,45 @@ async def balance_main(message: Message):
     try:
         balances = await api.get_balances(telegram_id)
     except Exception as e:
-        await message.answer(f"Ошибка: {e}", reply_markup=main_menu_kb(telegram_id in ADMIN_TELEGRAM_IDS))
+        await message.answer(
+            f"Ошибка: {e}",
+            reply_markup=main_menu_kb(telegram_id in ADMIN_TELEGRAM_IDS),
+        )
         return
 
     usdt = balances.get("USDT", 0)
     text = make_balance_text(usdt)
-    await message.answer(text, reply_markup=main_menu_kb(telegram_id in ADMIN_TELEGRAM_IDS))
+    show_bonus = False
+    try:
+        bonus_status = await api.get_welcome_bonus_status(telegram_id)
+        show_bonus = bool(bonus_status.get("available"))
+    except Exception:
+        show_bonus = False
+
+    await message.answer(
+        text,
+        reply_markup=main_menu_kb(telegram_id in ADMIN_TELEGRAM_IDS, show_welcome_bonus=show_bonus),
+    )
+
+
+@router.message(F.text == "🎁 Бонус 100")
+async def welcome_bonus_claim(message: Message):
+    telegram_id = message.from_user.id
+    try:
+        result = await api.claim_welcome_bonus(telegram_id)
+    except Exception as e:
+        await message.answer(f"Не удалось начислить бонус: {e}")
+        return
+
+    if not result.get("success"):
+        detail = result.get("detail") or "Бонус недоступен."
+        await message.answer(detail)
+        return
+
+    amount = result.get("amount") or 0
+    new_balance = result.get("new_balance") or 0
+    await message.answer(
+        f"✅ Приветственный бонус {amount} USDT начислен на ваш баланс.\n"
+        f"Текущий баланс: {new_balance} USDT"
+    )
 

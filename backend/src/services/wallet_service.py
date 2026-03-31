@@ -4,12 +4,17 @@ USDC по-прежнему из wallet_transactions для совместимо�
 """
 from decimal import Decimal
 
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, exists
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.user import User
 from src.models.wallet_transaction import WalletTransaction
-from src.services.ledger_service import get_balance_usdt
+from src.models.ledger_transaction import LedgerTransaction
+from src.models.system_settings import SystemSettings
+from src.services.ledger_service import (
+    get_balance_usdt,
+    LEDGER_TYPE_DEPOSIT,
+)
 
 
 async def get_balances(db: AsyncSession, telegram_id: int) -> dict:
@@ -48,3 +53,104 @@ async def get_balances(db: AsyncSession, telegram_id: int) -> dict:
     usdc_balance = (deposit_sum.scalar() or Decimal("0")) - (withdraw_sum.scalar() or Decimal("0"))
 
     return {"USDT": usdt_balance, "USDC": usdc_balance}
+
+
+async def get_welcome_bonus_status(db: AsyncSession, telegram_id: int, *, bonus_amount: Decimal) -> dict:
+    """
+    Проверить, доступен ли приветственный бонус пользователю.
+    Условия:
+    - глобальная настройка allow_welcome_bonus = True;
+    - пользователь существует;
+    - баланс USDT == 0;
+    - в леджере нет записей DEPOSIT с provider='WELCOME_BONUS'.
+    """
+    result = await db.execute(select(SystemSettings).limit(1))
+    settings = result.scalar_one_or_none()
+    if not settings or not bool(getattr(settings, "allow_welcome_bonus", True)):
+        return {"available": False, "amount": None}
+
+    result = await db.execute(select(User).where(User.telegram_id == telegram_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        return {"available": False, "amount": None}
+
+    balance = await get_balance_usdt(db, user.id)
+    if balance != Decimal("0"):
+        return {"available": False, "amount": None}
+
+    bonus_exists_q = await db.execute(
+        select(exists().where(
+            and_(
+                LedgerTransaction.user_id == user.id,
+                LedgerTransaction.type == LEDGER_TYPE_DEPOSIT,
+                LedgerTransaction.provider == "WELCOME_BONUS",
+            )
+        ))
+    )
+    if bool(bonus_exists_q.scalar()):
+        return {"available": False, "amount": None}
+
+    return {"available": True, "amount": bonus_amount}
+
+
+async def apply_welcome_bonus(db: AsyncSession, telegram_id: int, *, bonus_amount: Decimal) -> dict:
+    """
+    Начислить приветственный бонус пользователю, если он доступен.
+    Возвращает dict с ключами success, amount, new_balance, detail.
+    """
+    result = await db.execute(select(SystemSettings).limit(1).with_for_update())
+    settings = result.scalar_one_or_none()
+    if not settings or not bool(getattr(settings, "allow_welcome_bonus", True)):
+        return {"success": False, "amount": None, "new_balance": None, "detail": "Бонус сейчас отключён."}
+
+    result = await db.execute(select(User).where(User.telegram_id == telegram_id).with_for_update())
+    user = result.scalar_one_or_none()
+    if not user:
+        return {"success": False, "amount": None, "new_balance": None, "detail": "Пользователь не найден."}
+
+    balance = await get_balance_usdt(db, user.id)
+    if balance != Decimal("0"):
+        return {
+            "success": False,
+            "amount": None,
+            "new_balance": balance,
+            "detail": "Бонус доступен только при нулевом балансе.",
+        }
+
+    bonus_exists_q = await db.execute(
+        select(exists().where(
+            and_(
+                LedgerTransaction.user_id == user.id,
+                LedgerTransaction.type == LEDGER_TYPE_DEPOSIT,
+                LedgerTransaction.provider == "WELCOME_BONUS",
+            )
+        ))
+    )
+    if bool(bonus_exists_q.scalar()):
+        new_balance = await get_balance_usdt(db, user.id)
+        return {
+            "success": False,
+            "amount": None,
+            "new_balance": new_balance,
+            "detail": "Бонус уже был начислен ранее.",
+        }
+
+    tx = LedgerTransaction(
+        user_id=user.id,
+        type=LEDGER_TYPE_DEPOSIT,
+        amount_usdt=bonus_amount,
+        provider="WELCOME_BONUS",
+        external_payment_id=None,
+        metadata_json={"reason": "welcome_bonus"},
+    )
+    db.add(tx)
+
+    new_balance = await get_balance_usdt(db, user.id)
+    user.balance_usdt = new_balance
+
+    return {
+        "success": True,
+        "amount": bonus_amount,
+        "new_balance": new_balance,
+        "detail": None,
+    }

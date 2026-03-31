@@ -381,6 +381,22 @@ async def fin_setting_value(message: Message, state: FSMContext):
     await state.clear()
 
 
+@router.callback_query(F.data.in_({"fin_bonus_on", "fin_bonus_off"}))
+async def fin_setting_toggle_bonus(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer(make_admin_access_denied_text())
+        return
+    value = "on" if callback.data == "fin_bonus_on" else "off"
+    try:
+        await api.update_system_settings_field("allow_welcome_bonus", value)
+        data = await api.get_system_settings()
+        text = make_admin_fin_settings_text(data)
+        await callback.message.edit_text(text, reply_markup=fin_settings_kb(), parse_mode="HTML")
+    except Exception as e:
+        await callback.message.edit_text(make_admin_error_text(e))
+    await callback.answer()
+
+
 @router.callback_query(F.data.startswith("admin_w_approve_"))
 async def admin_withdraw_approve(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):

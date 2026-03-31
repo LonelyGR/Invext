@@ -45,7 +45,18 @@ async def _send_welcome_flow(message: Message, telegram_id: int):
                 ref_link = None
 
     personal_text = format_personal_data(me, balances, ref_link=ref_link)
-    await message.answer(personal_text, reply_markup=main_menu_kb(telegram_id in ADMIN_TELEGRAM_IDS))
+
+    show_bonus = False
+    try:
+        bonus_status = await api.get_welcome_bonus_status(telegram_id)
+        show_bonus = bool(bonus_status.get("available"))
+    except Exception:
+        show_bonus = False
+
+    await message.answer(
+        personal_text,
+        reply_markup=main_menu_kb(telegram_id in ADMIN_TELEGRAM_IDS, show_welcome_bonus=show_bonus),
+    )
 
 
 @router.message(CommandStart(deep_link=True))

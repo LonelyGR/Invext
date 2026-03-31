@@ -686,6 +686,8 @@ def make_admin_withdraw_card_text(item: Mapping[str, Any]) -> str:
 
 
 def make_admin_fin_settings_text(data: Mapping[str, Any]) -> str:
+    bonus_flag = data.get("allow_welcome_bonus")
+    bonus_line = "включён" if bonus_flag else "выключен"
     return (
         "⚙️ <b>Финансовые настройки</b>\n\n"
         f"Минимальный депозит: {data.get('min_deposit_usdt')} USDT\n"
@@ -694,7 +696,8 @@ def make_admin_fin_settings_text(data: Mapping[str, Any]) -> str:
         f"Максимальный вывод: {data.get('max_withdraw_usdt')} USDT\n"
         "(лимиты по сумме списания с баланса; комиссия 10%, на кошелёк — 90%)\n\n"
         f"Минимальная инвестиция: {data.get('min_invest_usdt')} USDT\n"
-        f"Максимальная инвестиция: {data.get('max_invest_usdt')} USDT"
+        f"Максимальная инвестиция: {data.get('max_invest_usdt')} USDT\n\n"
+        f"Приветственный бонус 100 USDT: {bonus_line}"
     )
 
 
