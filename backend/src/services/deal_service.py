@@ -36,7 +36,6 @@ from src.services.referral_service import (
 from src.services.settings_service import get_system_settings
 from src.services.notification_service import (
     broadcast_deal_closed,
-    broadcast_deal_opened,
     notify_payout_complete,
     send_referral_bonus_reminder,
 )
@@ -812,9 +811,10 @@ async def open_new_deal_by_schedule(
     end_at: dt.datetime,
 ) -> Optional[Deal]:
     """
-    Открыть новую сделку по расписанию (13:00 Europe/Chisinau) и разослать уведомление.
+    Открыть новую сделку по расписанию (13:00 Europe/Chisinau).
     Перед открытием обрабатываются все отложенные выплаты (in_progress_payout).
     Защита от дублей: если уже есть active сделка, перекрывающая now — не создаём новую.
+    Важно: отправка уведомлений вынесена во внешний слой после успешного commit.
     """
     await acquire_deal_open_advisory_lock(db)
 
@@ -854,16 +854,6 @@ async def open_new_deal_by_schedule(
         return None
 
     deal = await open_new_deal(db, start_at=start_at, end_at=end_at)
-
-    users_result = await db.execute(
-        select(User.telegram_id).where(User.telegram_id.isnot(None))
-    )
-    telegram_ids = [r[0] for r in users_result.all() if r[0]]
-    await broadcast_deal_opened(
-        telegram_ids,
-        deal.number,
-        close_at=deal.end_at,
-    )
 
     logger.info("Deal opened by schedule: deal_id=%s number=%s", deal.id, deal.number)
     return deal

@@ -8,6 +8,7 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import re
 import secrets
 import struct
@@ -110,6 +111,7 @@ ALLOWED_BROADCAST_TAGS = ("b", "strong", "i", "em", "u", "s", "code", "pre", "a"
 
 
 router = APIRouter(prefix="/database/api", tags=["admin-dashboard"])
+logger = logging.getLogger(__name__)
 SYSTEM_SETTINGS_FIELDS = (
     "min_deposit_usdt",
     "max_deposit_usdt",
@@ -1792,16 +1794,27 @@ async def open_deal_now(
 
     deal = await open_new_deal(db, start_at=start_at, end_at=end_at)
 
-    # Рассылка всем пользователям об открытии сделки.
-    users_result = await db.execute(
-        select(User.telegram_id).where(User.telegram_id.isnot(None))
-    )
-    telegram_ids = [r[0] for r in users_result.all() if r[0]]
-    await broadcast_deal_opened(
-        telegram_ids,
-        deal.number,
-        close_at=deal.end_at,
-    )
+    # Фиксируем сделку до рассылки: если уведомление упадёт, активная сделка должна остаться в БД.
+    await db.commit()
+
+    # Рассылка всем пользователям об открытии сделки (вне транзакции открытия).
+    try:
+        users_result = await db.execute(
+            select(User.telegram_id).where(User.telegram_id.isnot(None))
+        )
+        telegram_ids = [r[0] for r in users_result.all() if r[0]]
+        await broadcast_deal_opened(
+            telegram_ids,
+            deal.number,
+            close_at=deal.end_at,
+        )
+    except Exception:
+        # Не откатываем уже открытый сбор из-за ошибки внешнего сайд-эффекта.
+        logger.exception(
+            "open_deal_now: notification send failed after commit deal_id=%s number=%s",
+            deal.id,
+            deal.number,
+        )
 
     await log_admin_action(
         db=db,

@@ -13,6 +13,9 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
+from sqlalchemy import select
+
+from src.models import User
 from src.services.deal_service import (
     open_new_deal_by_schedule,
     process_due_deals,
@@ -21,6 +24,7 @@ from src.services.deal_service import (
     send_referral_bonus_reminders_for_active_deal,
 )
 from src.services.broadcast_service import process_pending_broadcasts
+from src.services.notification_service import broadcast_deal_opened
 from src.services.settings_service import get_system_settings
 
 logger = logging.getLogger(__name__)
@@ -61,6 +65,7 @@ def init_deal_scheduler(scheduler: AsyncIOScheduler, db_factory) -> None:
     async def _job_open_deal_1300():
         logger.info("open_deal_by_schedule job started")
         now_utc = dt.datetime.now(dt.timezone.utc)
+        opened_deal = None
 
         async with db_factory() as db:
             logger.debug("open_deal_1300: session created")
@@ -75,9 +80,10 @@ def init_deal_scheduler(scheduler: AsyncIOScheduler, db_factory) -> None:
                 start_at, end_at = window
                 logger.debug("open_deal_1300: before open_new_deal_by_schedule")
                 deal = await open_new_deal_by_schedule(db, start_at=start_at, end_at=end_at)
+                opened_deal = deal
                 if deal:
                     logger.info(
-                        "open_deal_1300: deal opened id=%s number=%s, notifications sent",
+                        "open_deal_1300: deal opened id=%s number=%s",
                         deal.id,
                         deal.number,
                     )
@@ -89,6 +95,34 @@ def init_deal_scheduler(scheduler: AsyncIOScheduler, db_factory) -> None:
             except Exception as e:
                 await db.rollback()
                 logger.exception("open_deal_1300 job failed: %s", e)
+                return
+
+        if not opened_deal:
+            return
+
+        # Важно: уведомления отправляем только после успешного commit открытия сделки.
+        try:
+            async with db_factory() as db:
+                users_result = await db.execute(
+                    select(User.telegram_id).where(User.telegram_id.isnot(None))
+                )
+                telegram_ids = [r[0] for r in users_result.all() if r[0]]
+            await broadcast_deal_opened(
+                telegram_ids,
+                opened_deal.number,
+                close_at=opened_deal.end_at,
+            )
+            logger.info(
+                "open_deal_1300: notifications sent deal_number=%s recipients=%s",
+                opened_deal.number,
+                len(telegram_ids),
+            )
+        except Exception as e:
+            logger.exception(
+                "open_deal_1300: notifications failed after commit deal_number=%s: %s",
+                opened_deal.number,
+                e,
+            )
 
     async def _job_process_broadcasts():
         logger.info("process_broadcasts job started")
