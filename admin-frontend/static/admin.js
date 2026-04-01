@@ -4433,37 +4433,48 @@ async function loadSettings() {
           <span class="env-db">БД: <strong>${escapeHtmlAttr(dangerSummary?.database || "unknown-db")}</strong></span>
         </div>
         <div class="danger-zone-note">
-          <div><strong>Будут удалены:</strong></div>
-          <ul class="danger-list">
-            ${
-              (dangerSummary?.items || [])
-                .map((x) => `<li>${escapeHtmlAttr(x.title)} — <strong>${Number(x.rows || 0).toLocaleString("ru-RU")}</strong></li>`)
-                .join("") || "<li>Нет данных preview</li>"
-            }
-          </ul>
-          <div style="margin-top:8px;"><strong>Сохранятся:</strong></div>
-          <ul class="danger-list">
-            ${(dangerSummary?.will_keep || ["Схема БД", "Финансовые настройки", "Системные конфиги"])
-              .filter((x) => x && x !== "—")
-              .map((x) => `<li>${escapeHtmlAttr(x)}</li>`)
-              .join("")}
-          </ul>
-          <div class="danger-total">Итого к удалению: ${Number(dangerSummary?.total_rows || 0).toLocaleString("ru-RU")} записей</div>
-          <div class="danger-backup-state">
-            Backup: ${
-              dangerSummary?.backup_available
-                ? `доступен · последний: ${dangerSummary?.last_backup_at ? new Date(dangerSummary.last_backup_at).toLocaleString() : "—"}`
-                : "недоступен в UI (используйте pg_dump)"
-            }
+          <div class="danger-note-grid">
+            <div class="danger-note-card">
+              <div class="danger-note-title"><strong>Будут удалены</strong></div>
+              <ul class="danger-list">
+                ${
+                  (dangerSummary?.items || [])
+                    .map((x) => `<li>${escapeHtmlAttr(x.title)} — <strong>${Number(x.rows || 0).toLocaleString("ru-RU")}</strong></li>`)
+                    .join("") || "<li>Нет данных preview</li>"
+                }
+              </ul>
+            </div>
+            <div class="danger-note-card danger-note-card--safe">
+              <div class="danger-note-title"><strong>Сохранятся</strong></div>
+              <ul class="danger-list">
+                ${(dangerSummary?.will_keep || ["Схема БД", "Финансовые настройки", "Системные конфиги"])
+                  .filter((x) => x && x !== "—")
+                  .map((x) => `<li>${escapeHtmlAttr(x)}</li>`)
+                  .join("")}
+              </ul>
+            </div>
+          </div>
+          <div class="danger-meta-row">
+            <div class="danger-total">Итого к удалению: ${Number(dangerSummary?.total_rows || 0).toLocaleString("ru-RU")} записей</div>
+            <div class="danger-backup-state">
+              Backup: ${
+                dangerSummary?.backup_available
+                  ? `доступен · последний: ${dangerSummary?.last_backup_at ? new Date(dangerSummary.last_backup_at).toLocaleString() : "—"}`
+                  : "недоступен в UI (используйте pg_dump)"
+              }
+            </div>
           </div>
         </div>
         <div class="toolbar danger-zone-toolbar danger-zone-actions">
           <button type="button" id="db-dry-run-btn" class="btn-secondary-small">Предпросмотр очистки</button>
           <button type="button" id="db-backup-btn" class="btn-secondary-small">Сделать backup</button>
+          <button type="button" id="db-restore-btn" class="btn-secondary-small">Восстановить из JSON</button>
+          <input type="file" id="db-restore-file" accept=".json,application/json" hidden />
           <button type="button" id="db-clear-logs-btn" class="btn-secondary-small">Очистить только логи</button>
           <button type="button" id="db-clear-broadcasts-btn" class="btn-secondary-small">Очистить только рассылки</button>
           <button type="button" id="db-clear-deals-btn" class="btn-secondary-small">Очистить только сделки</button>
           <button type="button" id="db-clear-payments-btn" class="btn-secondary-small">Очистить только платежи</button>
+          <button type="button" id="db-ledger-keep-profit-btn" class="btn-secondary-small">Ledger: оставить PROFIT + REF</button>
         </div>
         <div class="danger-confirm">
           <label><input type="checkbox" id="dz-check-irrev" /> Я понимаю, что действие необратимо</label>
@@ -5122,10 +5133,13 @@ async function loadSettings() {
     const resetBtn = document.getElementById("db-reset-btn");
     const dryRunBtn = document.getElementById("db-dry-run-btn");
     const backupBtn = document.getElementById("db-backup-btn");
+    const restoreBtn = document.getElementById("db-restore-btn");
+    const restoreFileInput = document.getElementById("db-restore-file");
     const clearLogsBtn = document.getElementById("db-clear-logs-btn");
     const clearBroadcastsBtn = document.getElementById("db-clear-broadcasts-btn");
     const clearDealsBtn = document.getElementById("db-clear-deals-btn");
     const clearPaymentsBtn = document.getElementById("db-clear-payments-btn");
+    const ledgerKeepProfitBtn = document.getElementById("db-ledger-keep-profit-btn");
     const dzCheckIrrev = document.getElementById("dz-check-irrev");
     const dzCheckEnv = document.getElementById("dz-check-env");
     const dzConfirmInput = document.getElementById("dz-confirm-input");
@@ -5199,6 +5213,68 @@ async function loadSettings() {
         } finally {
           backupBtn.disabled = false;
           backupBtn.textContent = "Сделать backup";
+        }
+      };
+    }
+    if (restoreBtn && restoreFileInput) {
+      restoreBtn.onclick = async () => {
+        restoreFileInput.value = "";
+        restoreFileInput.click();
+      };
+      restoreFileInput.onchange = async () => {
+        const file = restoreFileInput.files?.[0];
+        if (!file) return;
+        const first = await openUxDialog({
+          title: "Восстановление базы из JSON",
+          message:
+            "Будет выполнено восстановление данных из backup-файла.\n" +
+            "Текущие данные в maintenance-таблицах будут перезаписаны. Продолжить?",
+          confirmText: "Продолжить",
+          cancelText: "Отмена",
+        });
+        if (!first.confirmed) return;
+        const phrase = await openUxDialog({
+          title: "Подтверждение",
+          message: "Введите код подтверждения: RESTORE_JSON",
+          confirmText: "Восстановить",
+          cancelText: "Отмена",
+          inputPlaceholder: "RESTORE_JSON",
+        });
+        if (!phrase.confirmed || (phrase.value || "").trim().toUpperCase() !== "RESTORE_JSON") {
+          showToast("Восстановление отменено.", "info");
+          return;
+        }
+        try {
+          restoreBtn.disabled = true;
+          restoreBtn.textContent = "Восстановление…";
+          const fd = new FormData();
+          fd.append("confirm", "RESTORE_JSON");
+          fd.append("backup_file", file);
+          const resp = await fetch(`${API_BASE}/maintenance/restore`, {
+            method: "POST",
+            credentials: "include",
+            body: fd,
+          });
+          if (!resp.ok) {
+            const txt = await resp.text();
+            throw new Error(txt || "Ошибка восстановления");
+          }
+          const res = await resp.json();
+          const restoredTotal = Object.values(res.restored || {}).reduce((acc, x) => acc + Number(x || 0), 0);
+          showToast(`Восстановление завершено. Загружено записей: ${restoredTotal}`, "success");
+          loadSettings();
+          loadDashboard();
+          if (location.hash === "#users") loadUsers();
+          if (location.hash === "#deals") loadDeals();
+          if (location.hash === "#deposits") loadDeposits();
+          if (location.hash === "#withdrawals") loadWithdrawals();
+          if (location.hash === "#logs") loadLogs();
+          if (location.hash === "#messages") loadMessages();
+        } catch (e) {
+          showToast(e.message || "Ошибка восстановления из JSON", "error");
+        } finally {
+          restoreBtn.disabled = false;
+          restoreBtn.textContent = "Восстановить из JSON";
         }
       };
     }
@@ -5349,6 +5425,49 @@ async function loadSettings() {
         } finally {
           clearPaymentsBtn.disabled = false;
           clearPaymentsBtn.textContent = "Очистить только платежи";
+        }
+      };
+    }
+    if (ledgerKeepProfitBtn) {
+      ledgerKeepProfitBtn.onclick = async () => {
+        const first = await openUxDialog({
+          title: "Очистить ledger, оставить PROFIT + REFERRAL_BONUS",
+          message:
+            "Будут удалены все ledger-записи, кроме PROFIT и REFERRAL_BONUS.\n" +
+            "Баланс пользователей будет пересчитан из оставшихся записей.",
+          confirmText: "Продолжить",
+          cancelText: "Отмена",
+        });
+        if (!first.confirmed) return;
+        const phrase = await openUxDialog({
+          title: "Подтверждение",
+          message: "Введите код подтверждения: RESET_LEDGER_KEEP_PROFIT_REF",
+          confirmText: "Подтвердить",
+          cancelText: "Отмена",
+          inputPlaceholder: "RESET_LEDGER_KEEP_PROFIT_REF",
+        });
+        if (!phrase.confirmed || (phrase.value || "").trim().toUpperCase() !== "RESET_LEDGER_KEEP_PROFIT_REF") {
+          showToast("Операция отменена.", "info");
+          return;
+        }
+        try {
+          ledgerKeepProfitBtn.disabled = true;
+          ledgerKeepProfitBtn.textContent = "Очистка…";
+          const res = await apiRequest("/maintenance/ledger-reset-keep-profit-referrals", {
+            method: "POST",
+            body: JSON.stringify({ confirm: "RESET_LEDGER_KEEP_PROFIT_REF" }),
+          });
+          showToast(
+            `Ledger очищен: удалено ${res.deleted_ledger_rows}, оставлено ${res.kept_ledger_rows}. Балансы пересчитаны.`,
+            "success",
+          );
+          loadDashboard();
+          if (location.hash === "#users") loadUsers();
+        } catch (e) {
+          showToast(e.message || "Ошибка очистки ledger", "error");
+        } finally {
+          ledgerKeepProfitBtn.disabled = false;
+          ledgerKeepProfitBtn.textContent = "Ledger: оставить PROFIT + REF";
         }
       };
     }

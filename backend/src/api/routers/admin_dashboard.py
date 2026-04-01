@@ -20,7 +20,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status, Query, UploadFile, File, Form
 from fastapi.responses import PlainTextResponse, FileResponse
-from sqlalchemy import and_, desc, func, or_, select, String, text
+from sqlalchemy import and_, desc, delete, func, or_, select, String, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.admin_auth import (
@@ -3399,6 +3399,128 @@ async def maintenance_backup_stub(
             media_type="application/json",
             headers={"Content-Disposition": f'attachment; filename="{file_name}"'},
         )
+
+
+@router.post("/maintenance/restore")
+async def maintenance_restore_from_backup(
+    request: Request,
+    confirm: str = Form(""),
+    backup_file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+):
+    admin_token_id, _ = await get_admin_context(request)
+    require_admin_role(request)
+    if str(confirm or "").strip().upper() != "RESTORE_JSON":
+        raise HTTPException(status_code=400, detail='Подтверждение не пройдено. Передайте confirm="RESTORE_JSON"')
+    if MAINTENANCE_RESET_LOCK.locked():
+        raise HTTPException(status_code=409, detail="Сейчас выполняется другая maintenance-операция. Повторите позже.")
+
+    raw = await backup_file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="Пустой backup-файл")
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except Exception:
+        raise HTTPException(status_code=400, detail="Некорректный JSON-файл backup")
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Некорректный формат backup: ожидается JSON-объект")
+
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=400, detail="Некорректный формат backup: отсутствует поле data")
+
+    restore_models = [
+        ("system_settings", SystemSettings),
+        ("users", User),
+        ("deals", Deal),
+        ("deal_participations", DealParticipation),
+        ("payment_invoices", PaymentInvoice),
+        ("withdraw_requests", WithdrawRequest),
+        ("ledger_transactions", LedgerTransaction),
+        ("admin_logs", AdminLog),
+        ("admin_login_events", AdminLoginEvent),
+        ("broadcast_messages", BroadcastMessage),
+        ("broadcast_deliveries", BroadcastDelivery),
+    ]
+
+    async with MAINTENANCE_RESET_LOCK:
+        table_names = [m.__table__.name for _, m in restore_models]
+        table_names_sql = ", ".join(f'"{name}"' for name in table_names)
+        await db.execute(text(f"TRUNCATE TABLE {table_names_sql} RESTART IDENTITY CASCADE"))
+        restored_counts: dict[str, int] = {}
+        for key, model in restore_models:
+            rows = data.get(key, [])
+            if not isinstance(rows, list):
+                raise HTTPException(status_code=400, detail=f"Некорректный формат backup.data.{key}: ожидается список")
+            if rows:
+                await db.execute(model.__table__.insert(), rows)
+            restored_counts[key] = len(rows)
+        await db.flush()
+        await log_admin_action(
+            db=db,
+            admin_token_id=admin_token_id,
+            action_type="MAINTENANCE_RESTORE_FROM_JSON",
+            entity_type="DATABASE",
+            entity_id=0,
+        )
+        return {
+            "ok": True,
+            "restored": restored_counts,
+            "snapshot_at": payload.get("snapshot_at"),
+            "environment": payload.get("environment"),
+            "database": payload.get("database"),
+        }
+
+
+@router.post("/maintenance/ledger-reset-keep-profit-referrals")
+async def maintenance_ledger_reset_keep_profit_referrals(
+    request: Request,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    admin_token_id, _ = await get_admin_context(request)
+    require_admin_role(request)
+    confirm = str(body.get("confirm", "")).strip().upper()
+    if confirm != "RESET_LEDGER_KEEP_PROFIT_REF":
+        raise HTTPException(
+            status_code=400,
+            detail='Подтверждение не пройдено. Передайте confirm="RESET_LEDGER_KEEP_PROFIT_REF"',
+        )
+    if MAINTENANCE_RESET_LOCK.locked():
+        raise HTTPException(status_code=409, detail="Сейчас выполняется другая maintenance-операция. Повторите позже.")
+
+    keep_types = {LEDGER_TYPE_PROFIT, LEDGER_TYPE_REFERRAL_BONUS}
+    async with MAINTENANCE_RESET_LOCK:
+        total_before = int((await db.execute(select(func.count()).select_from(LedgerTransaction))).scalar() or 0)
+        deleted_result = await db.execute(
+            delete(LedgerTransaction).where(~LedgerTransaction.type.in_(tuple(keep_types)))
+        )
+        deleted_rows = int(deleted_result.rowcount or 0)
+
+        user_ids_result = await db.execute(select(User.id))
+        user_ids = [row[0] for row in user_ids_result.all()]
+        for uid in user_ids:
+            u = await db.get(User, uid)
+            if u is not None:
+                u.balance_usdt = await get_balance_usdt(db, uid)
+        await db.flush()
+
+        kept_after = int((await db.execute(select(func.count()).select_from(LedgerTransaction))).scalar() or 0)
+        await log_admin_action(
+            db=db,
+            admin_token_id=admin_token_id,
+            action_type="MAINTENANCE_LEDGER_RESET_KEEP_PROFIT_REF",
+            entity_type="DATABASE",
+            entity_id=0,
+        )
+        return {
+            "ok": True,
+            "deleted_ledger_rows": deleted_rows,
+            "kept_ledger_rows": kept_after,
+            "total_before": total_before,
+            "keep_types": sorted(list(keep_types)),
+            "users_rebalanced": len(user_ids),
+        }
 
 
 @router.post("/maintenance/clear-broadcasts")

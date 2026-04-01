@@ -2373,8 +2373,11 @@ tbody tr:hover .row-actions {
 
 .danger-zone-card {
   margin-top: 16px;
-  border: 1px solid rgba(220, 38, 38, 0.45);
-  background: radial-gradient(circle at 0% 0%, rgba(127, 29, 29, 0.25), rgba(2, 6, 23, 0.95));
+  border: 1px solid rgba(37, 99, 235, 0.35);
+  background:
+    radial-gradient(circle at 0% 0%, rgba(37, 99, 235, 0.2), rgba(2, 6, 23, 0.98) 58%),
+    linear-gradient(180deg, rgba(7, 12, 24, 0.96), rgba(2, 6, 23, 0.98));
+  box-shadow: inset 0 1px 0 rgba(59, 130, 246, 0.2);
 }
 
 .danger-zone-header {
@@ -2386,7 +2389,7 @@ tbody tr:hover .row-actions {
 .danger-zone-header h2 {
   margin: 0;
   font-size: 18px;
-  color: #fecaca;
+  color: #dbeafe;
 }
 
 .danger-zone-icon {
@@ -2396,17 +2399,17 @@ tbody tr:hover .row-actions {
   align-items: center;
   justify-content: center;
   border-radius: 8px;
-  background: rgba(220, 38, 38, 0.2);
-  border: 1px solid rgba(220, 38, 38, 0.4);
+  background: rgba(37, 99, 235, 0.18);
+  border: 1px solid rgba(59, 130, 246, 0.45);
 }
 
 .danger-zone-note {
   margin-top: 10px;
-  padding: 10px 12px;
+  padding: 12px 14px;
   border-radius: 10px;
-  border: 1px solid rgba(127, 29, 29, 0.45);
-  background: rgba(2, 6, 23, 0.75);
-  color: #fca5a5;
+  border: 1px solid rgba(59, 130, 246, 0.25);
+  background: rgba(2, 6, 23, 0.72);
+  color: #cbd5e1;
   font-size: 13px;
   line-height: 1.5;
 }
@@ -2435,15 +2438,15 @@ tbody tr:hover .row-actions {
 }
 
 .env-badge.safe {
-  color: #bbf7d0;
-  border-color: rgba(34, 197, 94, 0.5);
-  background: rgba(20, 83, 45, 0.45);
+  color: #bfdbfe;
+  border-color: rgba(59, 130, 246, 0.55);
+  background: rgba(30, 64, 175, 0.35);
 }
 
 .env-badge.prod {
-  color: #fecaca;
-  border-color: rgba(239, 68, 68, 0.65);
-  background: rgba(127, 29, 29, 0.55);
+  color: #fee2e2;
+  border-color: rgba(248, 113, 113, 0.75);
+  background: rgba(153, 27, 27, 0.55);
 }
 
 .env-db {
@@ -2460,15 +2463,47 @@ tbody tr:hover .row-actions {
   margin: 2px 0;
 }
 
-.danger-total {
+.danger-note-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+}
+
+.danger-note-card {
+  border: 1px solid rgba(59, 130, 246, 0.2);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: rgba(2, 6, 23, 0.55);
+}
+
+.danger-note-card--safe {
+  border-color: rgba(56, 189, 248, 0.25);
+  background: rgba(3, 19, 33, 0.52);
+}
+
+.danger-note-title {
+  color: #dbeafe;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.danger-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
   margin-top: 8px;
-  color: #fecaca;
+}
+
+.danger-total {
+  color: #dbeafe;
   font-weight: 600;
 }
 
 .danger-backup-state {
-  margin-top: 6px;
-  color: #fca5a5;
+  color: #93c5fd;
   font-size: 12px;
 }
 
@@ -2481,10 +2516,10 @@ tbody tr:hover .row-actions {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 10px 12px;
+  padding: 12px 14px;
   border-radius: 10px;
-  border: 1px solid rgba(127, 29, 29, 0.45);
-  background: rgba(2, 6, 23, 0.75);
+  border: 1px solid rgba(59, 130, 246, 0.28);
+  background: rgba(2, 6, 23, 0.8);
 }
 
 .danger-confirm label {
@@ -2494,7 +2529,7 @@ tbody tr:hover .row-actions {
 }
 
 .danger-confirm code {
-  color: #fecaca;
+  color: #93c5fd;
 }
 
 .danger-zone-toolbar {
@@ -2507,9 +2542,9 @@ tbody tr:hover .row-actions {
   min-width: 220px;
   padding: 11px 20px;
   border-radius: 999px;
-  border: 1px solid #7f1d1d;
-  background: linear-gradient(180deg, #991b1b, #7f1d1d);
-  color: #fee2e2;
+  border: 1px solid rgba(239, 68, 68, 0.7);
+  background: linear-gradient(180deg, #dc2626, #b91c1c);
+  color: #fff1f2;
   font-weight: 700;
   font-size: 14px;
   cursor: pointer;
@@ -2521,8 +2556,8 @@ tbody tr:hover .row-actions {
 }
 
 .btn-danger-wide:hover {
-  background: linear-gradient(180deg, #b91c1c, #991b1b);
-  box-shadow: 0 10px 24px rgba(185, 28, 28, 0.35);
+  background: linear-gradient(180deg, #ef4444, #dc2626);
+  box-shadow: 0 10px 24px rgba(220, 38, 38, 0.35);
 }
 
 .btn-danger-wide:active {
@@ -2532,6 +2567,29 @@ tbody tr:hover .row-actions {
 .btn-danger-wide[disabled] {
   opacity: 0.7;
   cursor: default;
+}
+
+.danger-zone-actions .btn-secondary-small {
+  border-color: rgba(59, 130, 246, 0.45);
+  background: rgba(15, 23, 42, 0.9);
+}
+
+.danger-zone-actions .btn-secondary-small:hover {
+  background: rgba(30, 64, 175, 0.28);
+}
+
+/* Hide legacy footer shortcuts if they exist in markup */
+.sidebar-footer .support-link,
+.sidebar-footer .documentation-link,
+.sidebar-footer [data-link="support"],
+.sidebar-footer [data-link="documentation"] {
+  display: none !important;
+}
+
+@media (max-width: 900px) {
+  .danger-note-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .btn-spinner {
