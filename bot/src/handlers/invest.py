@@ -152,6 +152,46 @@ def _format_pending_payout_block(pending: dict | None) -> str:
     return f"Сделка №{deal_number} — {amount} USDT\nВыплата: {when}"
 
 
+def _format_pending_payouts_block(my_deals: dict, pending: dict | None) -> str:
+    """
+    Блок «ожидает выплаты»:
+    - показывает ВСЕ участия со статусом in_progress_payout из /api/deals/my;
+    - fallback на старый single-блок из /api/deals/pending-payout-info.
+    """
+    active_items = my_deals.get("active_deals") or []
+    if not isinstance(active_items, list):
+        active_items = []
+
+    in_progress_items = [
+        item for item in active_items
+        if str(item.get("status") or "") == "in_progress_payout"
+    ]
+    if not in_progress_items:
+        return _format_pending_payout_block(pending if isinstance(pending, dict) else {})
+
+    def _sort_key(item: dict):
+        raw = item.get("payout_at")
+        try:
+            dt_obj = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+            if dt_obj.tzinfo is None:
+                dt_obj = dt_obj.replace(tzinfo=ZoneInfo("UTC"))
+            return dt_obj.astimezone(BOT_TZ)
+        except Exception:
+            return datetime.max.replace(tzinfo=BOT_TZ)
+
+    lines: list[str] = []
+    for item in sorted(in_progress_items, key=_sort_key):
+        deal_number = item.get("deal_number")
+        amount_raw = item.get("amount_usdt")
+        try:
+            amount = f"{float(amount_raw):.2f}"
+        except (TypeError, ValueError):
+            amount = str(amount_raw or "0.00")
+        when = _format_payout_at(item.get("payout_at"))
+        lines.append(f"Сделка №{deal_number} — {amount} USDT\nВыплата: {when}")
+    return "\n\n".join(lines)
+
+
 def _build_history_lines(completed_items: list[dict]) -> list[str]:
     lines: list[str] = []
     for item in completed_items[:3]:
@@ -177,7 +217,10 @@ def _build_open_deal_dashboard(dash: dict) -> tuple[str, InlineKeyboardMarkup] |
     pending_payout = dash.get("pending_payout") or {}
     settings = dash.get("settings") or {}
     usdt = float(balances.get("USDT", 0) or 0)
-    payout_block = _format_pending_payout_block(pending_payout if isinstance(pending_payout, dict) else {})
+    payout_block = _format_pending_payouts_block(
+        my_deals if isinstance(my_deals, dict) else {},
+        pending_payout if isinstance(pending_payout, dict) else {},
+    )
     deal_number = active["deal_number"]
     mode, min_invest, max_invest = _extract_invest_mode(settings)
     participate_amount = min_invest if mode == "fixed" else None
@@ -233,7 +276,10 @@ async def invest_section(message: Message, state: FSMContext):
         return
 
     usdt = float(balances.get("USDT", 0) or 0)
-    payout_block = _format_pending_payout_block(pending_payout if isinstance(pending_payout, dict) else {})
+    payout_block = _format_pending_payouts_block(
+        my_deals if isinstance(my_deals, dict) else {},
+        pending_payout if isinstance(pending_payout, dict) else {},
+    )
 
     built = _build_open_deal_dashboard(dash)
     if built is not None:
@@ -384,7 +430,10 @@ async def open_invest_from_reminder(callback: CallbackQuery, state: FSMContext):
         return
 
     usdt = float(balances.get("USDT", 0) or 0)
-    payout_block = _format_pending_payout_block(pending_payout if isinstance(pending_payout, dict) else {})
+    payout_block = _format_pending_payouts_block(
+        my_deals if isinstance(my_deals, dict) else {},
+        pending_payout if isinstance(pending_payout, dict) else {},
+    )
 
     built = _build_open_deal_dashboard(dash)
     if built is not None:
