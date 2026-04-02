@@ -3042,6 +3042,25 @@ tbody tr:hover .row-actions {
   margin: -2px 0 10px;
 }
 
+.referrals-by-level-wrap {
+  margin: 0 0 16px;
+}
+
+.referrals-level-block {
+  margin-top: 12px;
+}
+
+.referrals-level-block:first-child {
+  margin-top: 0;
+}
+
+.referrals-level-block-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e2e8f0;
+  margin-bottom: 6px;
+}
+
 .level-badge {
   display: inline-block;
   padding: 2px 8px;

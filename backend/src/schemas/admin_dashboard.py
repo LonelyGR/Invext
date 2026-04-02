@@ -101,6 +101,23 @@ class PaginatedReferralTree(BaseModel):
     summary_by_level: Dict[int, int]
 
 
+class ReferralLayerUser(BaseModel):
+    """Один пользователь в списке уровня L1..L10."""
+
+    user_id: int
+    telegram_id: int
+    username: Optional[str]
+    balance_usdt: Decimal
+    created_at: Optional[datetime]
+
+
+class ReferralLayersResponse(BaseModel):
+    """Рефералы по уровням (та же разметка уровней, что и в /referrals)."""
+
+    summary_by_level: Dict[int, int]
+    levels: Dict[str, List[ReferralLayerUser]]
+
+
 class PaginatedUsers(BaseModel):
     items: List[UserRow]
     total: int

@@ -3226,8 +3226,13 @@ async function loadUserDetail(userId) {
           </div>
         </div>
         <h2>Реферальная структура (preview)</h2>
-        <div class="referrals-preview-subtitle">Последние 5 рефералов</div>
         <div class="referrals-total">Всего рефералов: <strong>${detail.referrals_count || 0}</strong></div>
+        <div id="referrals-by-level-wrap" class="referrals-by-level-wrap">
+          <div class="referrals-preview-subtitle">По уровням</div>
+          <div class="mini-hint" id="referrals-by-level-status">Загрузка уровней…</div>
+          <div id="referrals-by-level-blocks"></div>
+        </div>
+        <div class="referrals-preview-subtitle">Последние 5 рефералов</div>
         <div class="table-wrapper">
           <div class="table-wrapper-inner">
             <table>
@@ -3356,6 +3361,67 @@ async function loadUserDetail(userId) {
         </div>
       </div>
     `;
+
+    (async () => {
+      const statusEl = document.getElementById("referrals-by-level-status");
+      const blocksEl = document.getElementById("referrals-by-level-blocks");
+      if (!blocksEl) return;
+      try {
+        const data = await apiRequest(`/users/${userId}/referrals/layers`);
+        if (statusEl) statusEl.remove();
+        const summary = data.summary_by_level || {};
+        const levels = data.levels || {};
+        let html = "";
+        for (let lv = 1; lv <= 10; lv++) {
+          const key = String(lv);
+          const users = levels[key] || [];
+          const cnt = summary[key] ?? summary[lv] ?? 0;
+          if (!users.length && cnt === 0) continue;
+          const rows = users
+            .map(
+              (u) => `
+            <tr class="${Number(u.balance_usdt) > 0 ? "referral-has-balance" : ""}">
+              <td>${u.user_id}</td>
+              <td>${u.telegram_id}</td>
+              <td>${escapeHtmlAttr(u.username || "") || "—"}</td>
+              <td class="num-cell">${u.balance_usdt ?? ""}</td>
+              <td><a href="#user-${u.user_id}" class="btn-secondary-small">Открыть</a></td>
+            </tr>`
+            )
+            .join("");
+          html += `
+            <div class="referrals-level-block">
+              <div class="referrals-level-block-title">Уровень L${lv} — ${users.length}</div>
+              <div class="table-wrapper">
+                <div class="table-wrapper-inner">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>User ID</th>
+                        <th>Telegram ID</th>
+                        <th>Username</th>
+                        <th>Баланс</th>
+                        <th>Профиль</th>
+                      </tr>
+                    </thead>
+                    <tbody>${rows}</tbody>
+                  </table>
+                </div>
+              </div>
+            </div>`;
+        }
+        if (!html) {
+          blocksEl.innerHTML = `<div class="empty-state"><strong>Рефералов пока нет</strong><span>Список заполнится после появления приглашённых пользователей.</span></div>`;
+          return;
+        }
+        blocksEl.innerHTML = html;
+      } catch (e) {
+        if (statusEl) {
+          statusEl.textContent = "Не удалось загрузить уровни";
+          statusEl.style.color = "#f87171";
+        }
+      }
+    })();
 
     const exportBtn = document.getElementById("ledger-export-btn");
     if (exportBtn) {

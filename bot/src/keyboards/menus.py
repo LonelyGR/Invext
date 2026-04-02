@@ -189,10 +189,8 @@ def partners_main_kb(share_url: str | None = None) -> InlineKeyboardMarkup:
             "Переходи по моей ссылке и начни прямо сейчас 👇\n"
             f"{share_url}"
         )
-        telegram_share = (
-            "https://t.me/share/url"
-            f"&text={quote(share_text, safe='')}"
-        )
+        # Первый query-параметр обязан начинаться с «?», иначе ссылка ломается и клиент может увести на telegram.org.
+        telegram_share = "https://t.me/share/url" f"?text={quote(share_text, safe='')}"
         rows.append([InlineKeyboardButton(text="📤 Поделиться ссылкой", url=telegram_share)])
     rows.append([InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)

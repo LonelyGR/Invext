@@ -71,6 +71,8 @@ from src.schemas.admin_dashboard import (
     PaginatedDeposits,
     PaginatedUsers,
     PaginatedReferralTree,
+    ReferralLayerUser,
+    ReferralLayersResponse,
     SendDealNotificationsResponse,
     UserActionItem,
     UserDetail,
@@ -2362,6 +2364,57 @@ async def list_user_referrals(
         page_size=page_size,
         summary_by_level=summary_by_level,
     )
+
+
+@router.get("/users/{user_id}/referrals/layers", response_model=ReferralLayersResponse)
+async def list_user_referrals_layers(
+    request: Request,
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    await get_admin_context(request)
+
+    root = await db.get(User, user_id)
+    if not root:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    referral_tree_ids, levels_map = await _collect_referral_tree_ids(db, user_id, max_levels=10)
+
+    summary_by_level: dict[int, int] = {i: 0 for i in range(1, 11)}
+    for lv in levels_map.values():
+        if 1 <= lv <= 10:
+            summary_by_level[lv] += 1
+
+    levels_out: dict[str, list[ReferralLayerUser]] = {str(i): [] for i in range(1, 11)}
+
+    if not referral_tree_ids:
+        return ReferralLayersResponse(summary_by_level=summary_by_level, levels=levels_out)
+
+    rows = (
+        await db.execute(
+            select(User).where(User.id.in_(referral_tree_ids)).order_by(desc(User.created_at))
+        )
+    ).scalars().all()
+
+    by_level: dict[int, list[User]] = {i: [] for i in range(1, 11)}
+    for r in rows:
+        lv = levels_map.get(r.id, 0)
+        if 1 <= lv <= 10:
+            by_level[lv].append(r)
+
+    for lv in range(1, 11):
+        for r in by_level[lv]:
+            levels_out[str(lv)].append(
+                ReferralLayerUser(
+                    user_id=r.id,
+                    telegram_id=r.telegram_id,
+                    username=r.username,
+                    balance_usdt=r.balance_usdt,
+                    created_at=r.created_at,
+                )
+            )
+
+    return ReferralLayersResponse(summary_by_level=summary_by_level, levels=levels_out)
 
 
 @router.get("/withdrawals")
