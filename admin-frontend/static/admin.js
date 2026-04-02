@@ -3330,6 +3330,18 @@ async function loadUserDetail(userId) {
               <button type="button" id="user-block-toggle-btn" class="btn-secondary-small">${u.is_blocked ? "Разблокировать" : "Заблокировать"}</button>
             </div>
           </div>
+          <div class="balance-adjust-form" style="margin-top:12px;">
+            <label>
+              Назначить реферера (Telegram ID или REF_CODE)
+              <input type="text" id="referrer-set-value" placeholder="Например: 123456789 или A1B2C3D4" />
+            </label>
+            <div class="user-detail-admin-actions-row">
+              <button type="button" id="referrer-set-btn" class="btn-secondary-small">Добавить реферала</button>
+            </div>
+            <div class="mini-hint" style="margin-top:6px;">
+              Если у пользователя уже есть реферер — будет предложено подтвердить перезапись (force).
+            </div>
+          </div>
           <div class="user-detail-admin-export toolbar" style="gap:8px; margin-top:12px;">
             <button type="button" id="ledger-export-btn">Экспорт CSV (ledger)</button>
             <button type="button" id="ledger-export-xls-btn" class="btn-secondary-small">Экспорт Excel (ledger)</button>
@@ -3402,6 +3414,66 @@ async function loadUserDetail(userId) {
           loadUserDetail(userId);
         } catch (e) {
           showToast(e.message || "Ошибка корректировки баланса", "error");
+        }
+      };
+    }
+    const refSetBtn = document.getElementById("referrer-set-btn");
+    if (refSetBtn) {
+      refSetBtn.onclick = async () => {
+        const inp = document.getElementById("referrer-set-value");
+        const raw = String(inp?.value || "").trim();
+        if (!raw) {
+          showToast("Введите Telegram ID или REF_CODE реферера.", "error");
+          return;
+        }
+        const isNumeric = /^[0-9]+$/.test(raw);
+        const first = await openUxDialog({
+          title: "Назначить реферера пользователю",
+          message: `Пользователь #${userId}\nРеферер: ${raw}\n\nНазначить?`,
+          confirmText: "Назначить",
+          cancelText: "Отмена",
+        });
+        if (!first.confirmed) return;
+
+        const doRequest = async (force) => {
+          const body = isNumeric
+            ? { referrer_telegram_id: raw, force }
+            : { referrer_ref_code: raw, force };
+          return apiRequest(`/users/${userId}/set-referrer`, {
+            method: "POST",
+            body: JSON.stringify(body),
+          });
+        };
+
+        try {
+          refSetBtn.disabled = true;
+          refSetBtn.textContent = "Привязка…";
+          await doRequest(false);
+          showToast("Реферер назначен.", "success");
+          loadUserDetail(userId);
+        } catch (e) {
+          const msg = String(e?.message || e || "");
+          const looksLikeAlready =
+            msg.includes("уже есть реферер") ||
+            msg.includes("already") ||
+            msg.includes("force=true");
+          if (!looksLikeAlready) {
+            showToast(msg || "Ошибка привязки реферера", "error");
+            return;
+          }
+          const rs = await openUxDialog({
+            title: "У пользователя уже есть реферер",
+            message: "Перезаписать существующего реферера? (force)",
+            confirmText: "Перезаписать",
+            cancelText: "Отмена",
+          });
+          if (!rs.confirmed) return;
+          await doRequest(true);
+          showToast("Реферер перезаписан.", "success");
+          loadUserDetail(userId);
+        } finally {
+          refSetBtn.disabled = false;
+          refSetBtn.textContent = "Добавить реферала";
         }
       };
     }

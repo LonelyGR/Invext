@@ -104,6 +104,7 @@ from src.core.config import get_settings
 from src.services.settings_service import get_system_settings, invalidate_system_settings_cache
 from src.services.broadcast_service import enqueue_broadcast, retry_failed_deliveries
 from src.models.broadcast_message import BROADCAST_STATUS_IN_PROGRESS
+from src.services.user_service import _would_create_referrer_cycle
 
 
 BROADCAST_IMAGES_DIR = Path(__file__).resolve().parents[4] / "storage" / "broadcast_images"
@@ -2567,6 +2568,79 @@ async def set_user_block_state(
         "user_id": user_id,
         "is_blocked": bool(user.is_blocked),
         "blocked_reason": user.blocked_reason,
+    }
+
+
+@router.post("/users/{user_id}/set-referrer")
+async def set_user_referrer(
+    request: Request,
+    user_id: int,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Вручную привязать реферера пользователю.
+    Можно указать либо referrer_telegram_id, либо referrer_ref_code.
+    По умолчанию запрещает перезапись существующего referrer_id (force=false).
+    """
+    admin_token_id, _ = await get_admin_context(request)
+    require_admin_role(request)
+
+    user = await db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    force = bool(body.get("force", False))
+    if user.referrer_id is not None and not force:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="У пользователя уже есть реферер. Используйте force=true для перезаписи.",
+        )
+
+    ref_tg_raw = body.get("referrer_telegram_id")
+    ref_code_raw = body.get("referrer_ref_code")
+    referrer: User | None = None
+
+    if ref_tg_raw is not None and str(ref_tg_raw).strip() != "":
+        try:
+            ref_tg = int(str(ref_tg_raw).strip())
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="referrer_telegram_id должен быть числом")
+        ref_q = await db.execute(select(User).where(User.telegram_id == ref_tg))
+        referrer = ref_q.scalar_one_or_none()
+    elif ref_code_raw is not None and str(ref_code_raw).strip() != "":
+        code = str(ref_code_raw).upper().strip()
+        ref_q = await db.execute(select(User).where(User.ref_code == code))
+        referrer = ref_q.scalar_one_or_none()
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Передайте referrer_telegram_id или referrer_ref_code",
+        )
+
+    if not referrer:
+        raise HTTPException(status_code=404, detail="Referrer not found")
+    if referrer.id == user.id:
+        raise HTTPException(status_code=400, detail="Нельзя назначить пользователя реферером самому себе")
+    if await _would_create_referrer_cycle(db, user_id=user.id, candidate_referrer_id=referrer.id):
+        raise HTTPException(status_code=400, detail="Нельзя назначить реферера: получится цикл в реф. цепочке")
+
+    user.referrer_id = referrer.id
+    await db.flush()
+
+    await log_admin_action(
+        db=db,
+        admin_token_id=admin_token_id,
+        action_type="SET_REFERRER",
+        entity_type="USER",
+        entity_id=user_id,
+    )
+    return {
+        "ok": True,
+        "user_id": user_id,
+        "referrer_id": user.referrer_id,
+        "referrer_user_id": referrer.id,
+        "force": force,
     }
 
 

@@ -44,10 +44,9 @@ async def partners(message: Message):
 
     ref_code = me.get("ref_code", "")
     link = await _build_ref_link(message.bot, ref_code)
-    open_ref_url = f"https://t.me/invext_bot?start={ref_code}" if ref_code else None
 
     text = make_partners_main_text(me, link, REFERRAL_LEVELS)
-    await message.answer(text, reply_markup=partners_main_kb(share_url=link, open_ref_url=open_ref_url))
+    await message.answer(text, reply_markup=partners_main_kb(share_url=link))
 
 
 @router.callback_query(F.data == "partners_back")
@@ -65,13 +64,12 @@ async def partners_back(callback: CallbackQuery):
 
     ref_code = me.get("ref_code", "")
     link = await _build_ref_link(callback.bot, ref_code)
-    open_ref_url = f"https://t.me/invext_bot?start={ref_code}" if ref_code else None
 
     text = make_partners_main_text(me, link, REFERRAL_LEVELS)
     try:
-        await callback.message.edit_text(text, reply_markup=partners_main_kb(share_url=link, open_ref_url=open_ref_url))
+        await callback.message.edit_text(text, reply_markup=partners_main_kb(share_url=link))
     except Exception:
-        await callback.message.answer(text, reply_markup=partners_main_kb(share_url=link, open_ref_url=open_ref_url))
+        await callback.message.answer(text, reply_markup=partners_main_kb(share_url=link))
     await callback.answer()
 
 
