@@ -3459,7 +3459,7 @@ async def maintenance_restore_from_backup(
         await log_admin_action(
             db=db,
             admin_token_id=admin_token_id,
-            action_type="MAINTENANCE_RESTORE_FROM_JSON",
+            action_type="MAINT_RESTORE_JSON",
             entity_type="DATABASE",
             entity_id=0,
         )
@@ -3509,7 +3509,7 @@ async def maintenance_ledger_reset_keep_profit_referrals(
         await log_admin_action(
             db=db,
             admin_token_id=admin_token_id,
-            action_type="MAINTENANCE_LEDGER_RESET_KEEP_PROFIT_REF",
+            action_type="MAINT_LEDGER_KEEP_PR",
             entity_type="DATABASE",
             entity_id=0,
         )
