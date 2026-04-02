@@ -179,7 +179,14 @@ def partners_main_kb(share_url: str | None = None) -> InlineKeyboardMarkup:
     ]
     if share_url:
         from urllib.parse import quote
-        telegram_share = f"https://t.me/share/url?url={quote(share_url, safe='')}"
+        share_text = (
+            "Присоединяйся к Invext через моего бота по реферальной ссылке:"
+        )
+        telegram_share = (
+            "https://t.me/share/url"
+            f"?url={quote(share_url, safe='')}"
+            f"&text={quote(share_text, safe='')}"
+        )
         rows.append([InlineKeyboardButton(text="📤 Поделиться ссылкой", url=telegram_share)])
     rows.append([InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)

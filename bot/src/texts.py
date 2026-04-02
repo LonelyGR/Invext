@@ -417,8 +417,6 @@ def make_partners_main_text(me: Mapping[str, Any], link: str | None, levels: lis
     lines: list[str] = [
         "<b>👥 Партнёрская программа</b>",
         "",
-        link_block,
-        "",
         sep,
         "",
         "📊 <b>Уровни рефералов</b>",
