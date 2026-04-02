@@ -1,14 +1,13 @@
 """
 Инлайн-клавиатуры и кнопки меню бота.
 """
-from urllib.parse import quote
+from urllib.parse import urlencode
 
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 
 from src.config.settings import ALLOWED_CURRENCIES
 
 # Лимит URL у inline-кнопки в Telegram Bot API (байты). Берём запас — длинный query ломает клиенты.
-_TELEGRAM_INLINE_URL_MAX_BYTES = 2048
 _TELEGRAM_SHARE_URL_SAFE_BYTES = 2000
 
 
@@ -18,59 +17,41 @@ def _telegram_share_href_fits(href: str) -> bool:
 
 def _telegram_share_link(ref_url: str) -> str:
     """
-    Шаринг «текст сверху, ссылка снизу» в поле сообщения.
+    Шаринг: только query-параметр text (без url=), чтобы ссылка не подставлялась в начало сообщения.
 
-    С `?url=…&text=…` клиент Telegram часто ставит ссылку первой строкой, текст — ниже.
-    Нужен один параметр: весь текст одним куском — маркетинг, пустая строка, реферальная ссылка:
-
-        https://t.me/share/url?text=<quote(текст + \\n\\n + url)>
-
-    Длинный query ломает кнопку и редиректы — укладываемся в лимит, иначе запасные варианты.
+    Сборка: маркетинговый текст, пустая строка, реферальная ссылка внизу. Кодирование — urlencode.
     """
-    enc_ref = quote(ref_url, safe="")
+    def _href_text_only(full_message: str) -> str:
+        return f"https://t.me/share/url?{urlencode({'text': full_message})}"
+
     bodies = (
         (
-            "🔥 Я уже использую Invext для заработка — попробуй и ты.\n\n"
-            "Это простой способ участвовать в инвестиционных сделках и получать доход без сложных действий. "
-            "Всё работает по чёткому расписанию, а интерфейс максимально удобный.\n\n"
-            "📈 Выбираешь сделку — заходишь — получаешь прибыль\n"
-            "💰 Не требует огромных вложений\n"
-            "🚀 Подходит даже если ты новичок\n\n"
-            "Переходи по моей ссылке и начни прямо сейчас 👇"
+            "🚀 Присоединяйся к Invext по моей реферальной ссылке.\n\n"
+            "Участвуй в инвестиционных сделках, получай прибыль по расписанию и пользуйся удобным ботом с простым стартом."
         ),
         (
-            "🔥 Invext — заработок на инвестиционных сделках по расписанию. "
-            "Попробуй по моей ссылке 👇"
+            "🚀 Присоединяйся к Invext по моей ссылке.\n\n"
+            "Сделки и прибыль по расписанию — удобный старт в боте."
         ),
-        "Invext — моя реферальная ссылка 👇",
+        "🚀 Invext — заходи по реферальной ссылке ниже 👇",
     )
 
     for body in bodies:
         full_message = f"{body}\n\n{ref_url}"
-        href = f"https://t.me/share/url?text={quote(full_message, safe='')}"
+        href = _href_text_only(full_message)
         if _telegram_share_href_fits(href):
             return href
 
-    tiny = f"🔥 Invext — заработок по расписанию 👇\n\n{ref_url}"
-    href = f"https://t.me/share/url?text={quote(tiny, safe='')}"
+    tiny = f"🚀 Invext 👇\n\n{ref_url}"
+    href = _href_text_only(tiny)
     if _telegram_share_href_fits(href):
         return href
 
-    # Только ссылка в сообщении — порядок не важен, главное коротко.
-    href = f"https://t.me/share/url?text={enc_ref}"
+    href = _href_text_only(ref_url)
     if _telegram_share_href_fits(href):
         return href
 
-    # Запас: виджет Telegram (ссылка может оказаться выше текста в превью).
-    for txt in (
-        "🔥 Invext — заработок по расписанию. Попробуй по моей ссылке 👇",
-        "Invext",
-    ):
-        href = f"https://t.me/share/url?url={enc_ref}&text={quote(txt, safe='')}"
-        if len(href.encode("utf-8")) <= _TELEGRAM_INLINE_URL_MAX_BYTES:
-            return href
-
-    return f"https://t.me/share/url?url={enc_ref}"
+    return _href_text_only(ref_url)
 
 
 def main_menu_kb(is_admin: bool = False, show_welcome_bonus: bool = False) -> ReplyKeyboardMarkup:
