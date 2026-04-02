@@ -13,12 +13,17 @@ _TELEGRAM_INLINE_URL_MAX_BYTES = 2048
 
 def _telegram_share_link(ref_url: str) -> str:
     """
-    Ссылка t.me/share/url с укладыванием в лимит длины URL кнопки.
+    Официальный формат шаринга Telegram (см. core.telegram.org/widgets/share):
 
-    Используем только параметр «text»: текст + реферальная ссылка в конце.
-    Если добавить отдельный «url=», клиент Telegram часто показывает ссылку сверху (превью), а не под текстом.
+        https://t.me/share/url?url=<кодируем>&text=<кодируем>
+
+    Параметр url — что пересылается; text — подпись к ссылке. Оба кодируются.
+
+    Вариант только с ?text=… (весь текст в одном параметре) на части клиентов ломается
+    (ПК: кнопка не открывается; мобильный браузер: редирект на telegram.org из‑за битой/длинной ссылки).
     """
-    bodies = (
+    enc_ref = quote(ref_url, safe="")
+    text_candidates = (
         (
             "🔥 Я уже использую Invext для заработка — попробуй и ты.\n\n"
             "Это простой способ участвовать в инвестиционных сделках и получать доход без сложных действий. "
@@ -34,12 +39,12 @@ def _telegram_share_link(ref_url: str) -> str:
         ),
         "Invext — моя реферальная ссылка 👇",
     )
-    for body in bodies:
-        full_message = f"{body}\n\n{ref_url}"
-        u = f"https://t.me/share/url?text={quote(full_message, safe='')}"
+    for txt in text_candidates:
+        u = f"https://t.me/share/url?url={enc_ref}&text={quote(txt, safe='')}"
         if len(u.encode("utf-8")) <= _TELEGRAM_INLINE_URL_MAX_BYTES:
             return u
-    return f"https://t.me/share/url?text={quote(ref_url, safe='')}"
+    # Только ссылка — всегда коротко и совместимо со всеми клиентами.
+    return f"https://t.me/share/url?url={enc_ref}"
 
 
 def main_menu_kb(is_admin: bool = False, show_welcome_bonus: bool = False) -> ReplyKeyboardMarkup:
