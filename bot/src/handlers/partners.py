@@ -15,6 +15,15 @@ router = Router(name="partners")
 REFERRAL_LEVELS: list[tuple[float, str]] = [(0.5, "") for _ in range(10)]
 
 
+def _format_partners_invite_text(ref_link: str) -> str:
+    """Готовый текст приглашения: ссылка внизу."""
+    return (
+        "🚀 Присоединяйся к Invext по моей реферальной ссылке.\n\n"
+        "Участвуй в инвестиционных сделках, получай прибыль и пользуйся удобным ботом с простым стартом.\n\n"
+        f"{ref_link}"
+    )
+
+
 async def _build_ref_link(bot, ref_code: str) -> str | None:
     """Генерирует реферальную ссылку. Возвращает None при ошибке."""
     if not ref_code or ref_code == "—":
@@ -70,6 +79,29 @@ async def partners_back(callback: CallbackQuery):
         await callback.message.edit_text(text, reply_markup=partners_main_kb(share_url=link))
     except Exception:
         await callback.message.answer(text, reply_markup=partners_main_kb(share_url=link))
+    await callback.answer()
+
+
+@router.callback_query(F.data == "partners_invite_text")
+async def partners_invite_text(callback: CallbackQuery):
+    """Отправляет готовый текст приглашения с реферальной ссылкой внизу (без t.me/share/url)."""
+    telegram_id = callback.from_user.id
+    try:
+        me = await api.get_me(telegram_id)
+    except Exception:
+        await callback.answer("Ошибка загрузки данных", show_alert=True)
+        return
+    if not me:
+        await callback.answer("Пользователь не найден.", show_alert=True)
+        return
+
+    ref_code = me.get("ref_code", "")
+    link = await _build_ref_link(callback.bot, ref_code)
+    if not link:
+        await callback.answer("Не удалось получить реферальную ссылку.", show_alert=True)
+        return
+
+    await callback.message.answer(_format_partners_invite_text(link))
     await callback.answer()
 
 

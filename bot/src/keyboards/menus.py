@@ -1,57 +1,9 @@
 """
 Инлайн-клавиатуры и кнопки меню бота.
 """
-from urllib.parse import urlencode
-
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 
 from src.config.settings import ALLOWED_CURRENCIES
-
-# Лимит URL у inline-кнопки в Telegram Bot API (байты). Берём запас — длинный query ломает клиенты.
-_TELEGRAM_SHARE_URL_SAFE_BYTES = 2000
-
-
-def _telegram_share_href_fits(href: str) -> bool:
-    return len(href.encode("utf-8")) <= _TELEGRAM_SHARE_URL_SAFE_BYTES
-
-
-def _telegram_share_link(ref_url: str) -> str:
-    """
-    Шаринг: только query-параметр text (без url=), чтобы ссылка не подставлялась в начало сообщения.
-
-    Сборка: маркетинговый текст, пустая строка, реферальная ссылка внизу. Кодирование — urlencode.
-    """
-    def _href_text_only(full_message: str) -> str:
-        return f"https://t.me/share/url?{urlencode({'text': full_message})}"
-
-    bodies = (
-        (
-            "🚀 Присоединяйся к Invext по моей реферальной ссылке.\n\n"
-            "Участвуй в инвестиционных сделках, получай прибыль по расписанию и пользуйся удобным ботом с простым стартом."
-        ),
-        (
-            "🚀 Присоединяйся к Invext по моей ссылке.\n\n"
-            "Сделки и прибыль по расписанию — удобный старт в боте."
-        ),
-        "🚀 Invext — заходи по реферальной ссылке ниже 👇",
-    )
-
-    for body in bodies:
-        full_message = f"{body}\n\n{ref_url}"
-        href = _href_text_only(full_message)
-        if _telegram_share_href_fits(href):
-            return href
-
-    tiny = f"🚀 Invext 👇\n\n{ref_url}"
-    href = _href_text_only(tiny)
-    if _telegram_share_href_fits(href):
-        return href
-
-    href = _href_text_only(ref_url)
-    if _telegram_share_href_fits(href):
-        return href
-
-    return _href_text_only(ref_url)
 
 
 def main_menu_kb(is_admin: bool = False, show_welcome_bonus: bool = False) -> ReplyKeyboardMarkup:
@@ -221,18 +173,16 @@ def wallet_coin_kb() -> InlineKeyboardMarkup:
     )
 
 def partners_main_kb(share_url: str | None = None) -> InlineKeyboardMarkup:
-    """Партнёры: Моя команда, Поделиться ссылкой (нативный share), Назад."""
+    """Партнёры: Моя команда; текст приглашения (callback); открыть ссылку (url); Назад."""
     rows = [
         [InlineKeyboardButton(text="📊 Моя команда", callback_data="partners_team")],
     ]
     if share_url:
         rows.append(
-            [
-                InlineKeyboardButton(
-                    text="📤 Поделиться ссылкой",
-                    url=_telegram_share_link(share_url),
-                )
-            ]
+            [InlineKeyboardButton(text="📋 Текст для приглашения", callback_data="partners_invite_text")]
+        )
+        rows.append(
+            [InlineKeyboardButton(text="🚀 Открыть реферальную ссылку", url=share_url)]
         )
     rows.append([InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
