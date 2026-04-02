@@ -50,14 +50,17 @@ async def _would_create_referrer_cycle(
         if current_id == user_id:
             return True
         if current_id in visited:
-            # В цепочке уже есть цикл: считаем связь небезопасной.
-            return True
+            # В данных уже есть чужой цикл выше по дереву.
+            # Для текущей связи user -> candidate_referrer это не означает,
+            # что цикл создаётся именно с user_id.
+            return False
         visited.add(current_id)
 
         result = await db.execute(select(User.referrer_id).where(User.id == current_id))
         current_id = result.scalar_one_or_none()
-    # Защитный предел от бесконечных/грязных данных.
-    return True
+    # Защитный предел от бесконечных/грязных данных:
+    # не считаем это прямым доказательством цикла с user_id.
+    return False
 
 
 async def get_or_create_user(
