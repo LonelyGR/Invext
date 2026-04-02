@@ -33,6 +33,14 @@ from src.schemas.payments import (
     DepositHistoryResponse,
     DepositInvoiceResponse,
 )
+from src.services.nowpayments_ipn import (
+    NOWPAYMENTS_CREDIT_ELIGIBLE_STATUSES,
+    NOWPAYMENTS_PARTIAL_STATUS,
+    NOWPAYMENTS_TERMINAL_NEGATIVE_STATUSES,
+    expected_deposit_amount_for_tolerance,
+    is_paid_amount_sufficient_for_credit,
+    normalize_ipn_payment_status,
+)
 from src.services.payment_service import apply_payment_to_balance
 from src.services.settings_service import get_system_settings
 
@@ -256,11 +264,25 @@ async def get_deposit_by_id(
     )
 
 
+def _parse_actually_paid(raw: object) -> Decimal | None:
+    if raw is None:
+        return None
+    try:
+        d = Decimal(str(raw))
+        return d if d > 0 else None
+    except Exception:
+        return None
+
+
 @router.post("/webhook/nowpayments")
 async def webhook_nowpayments(request: Request, db: AsyncSession = Depends(get_db)):
     """
-    NOWPayments IPN callback. Verify signature, log event, process only 'finished' status.
-    Idempotent: duplicate webhooks do not double-credit balance.
+    NOWPayments IPN: подпись, запись события, обновление инвойса, зачисление при допустимой сумме.
+
+    partially_paid — обновляет статус/actually_paid, баланс не трогает.
+    Успешные статусы (см. NOWPAYMENTS_CREDIT_ELIGIBLE_STATUSES) — зачисление только если
+    actually_paid >= expected * tolerance; иначе статус partially_paid без кредита.
+    Идемпотентность: is_balance_applied + проверка дублей ledger.
     """
     raw_body = await request.body()
     signature = request.headers.get(IPN_SIGNATURE_HEADER)
@@ -280,11 +302,10 @@ async def webhook_nowpayments(request: Request, db: AsyncSession = Depends(get_d
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid JSON")
 
     order_id = payload.get("order_id")
-    payment_status = (payload.get("payment_status") or payload.get("status") or "").lower()
-    actually_paid = payload.get("actually_paid")
+    payment_status = normalize_ipn_payment_status(payload)
+    actually_paid_raw = payload.get("actually_paid")
     payment_id = payload.get("payment_id")
 
-    # Log webhook event
     event = PaymentWebhookEvent(
         provider=PROVIDER_NOWPAYMENTS,
         external_event_id=str(payment_id) if payment_id is not None else None,
@@ -297,23 +318,9 @@ async def webhook_nowpayments(request: Request, db: AsyncSession = Depends(get_d
 
     if not order_id:
         event.processing_status = PROCESSING_STATUS_SKIPPED
-        event.processing_error = "Missing order_id"
+        event.processing_error = "skipped:missing_order_id"
         logger.warning("NOWPayments webhook missing order_id")
         return {"ok": True}
-
-    # Only credit on final success status
-    if payment_status not in ("finished", "sent", "confirmed"):
-        event.processing_status = PROCESSING_STATUS_SKIPPED
-        event.processing_error = f"Status not applicable: {payment_status}"
-        logger.info("NOWPayments webhook order_id=%s status=%s skipped", order_id, payment_status)
-        return {"ok": True}
-
-    amount = Decimal(str(actually_paid)) if actually_paid is not None else None
-    if amount is None or amount <= 0:
-        event.processing_status = PROCESSING_STATUS_ERROR
-        event.processing_error = "Missing or invalid actually_paid"
-        logger.warning("NOWPayments webhook order_id=%s invalid actually_paid", order_id)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid amount")
 
     result = await db.execute(
         select(PaymentInvoice)
@@ -323,19 +330,71 @@ async def webhook_nowpayments(request: Request, db: AsyncSession = Depends(get_d
     invoice = result.scalar_one_or_none()
     if invoice is None:
         event.processing_status = PROCESSING_STATUS_SKIPPED
-        event.processing_error = "Invoice not found"
+        event.processing_error = "skipped:invoice_not_found"
         logger.warning("NOWPayments webhook order_id=%s invoice not found", order_id)
         return {"ok": True}
 
-    applied = await apply_payment_to_balance(
-        db,
-        invoice,
-        amount,
-        external_payment_id=str(payment_id) if payment_id is not None else None,
-        metadata={"payment_status": payment_status, "ipn_event_id": event.id},
-    )
-    event.processing_status = PROCESSING_STATUS_PROCESSED if applied else PROCESSING_STATUS_SKIPPED
-    if not applied:
-        event.processing_error = "Already applied"
+    amount = _parse_actually_paid(actually_paid_raw)
 
+    # Терминальные неуспехи: обновить статус инвойса, не кредитовать.
+    if payment_status in NOWPAYMENTS_TERMINAL_NEGATIVE_STATUSES:
+        invoice.status = payment_status
+        if amount is not None:
+            invoice.actually_paid_amount = amount
+        event.processing_status = PROCESSING_STATUS_PROCESSED
+        event.processing_error = f"terminal:{payment_status}:no_credit"
+        return {"ok": True}
+
+    # Частичная оплата (промежуточная): только отражение в инвойсе.
+    if payment_status == NOWPAYMENTS_PARTIAL_STATUS:
+        invoice.status = "partially_paid"
+        if amount is not None:
+            invoice.actually_paid_amount = amount
+        event.processing_status = PROCESSING_STATUS_PROCESSED
+        event.processing_error = "partial_only:no_credit"
+        logger.info("NOWPayments webhook order_id=%s partially_paid, invoice updated, no credit", order_id)
+        return {"ok": True}
+
+    # Статусы, при которых допускается полное зачисление (после tolerance).
+    if payment_status in NOWPAYMENTS_CREDIT_ELIGIBLE_STATUSES:
+        if amount is None:
+            event.processing_status = PROCESSING_STATUS_ERROR
+            event.processing_error = "error:credit_eligible_but_missing_or_invalid_actually_paid"
+            logger.warning("NOWPayments webhook order_id=%s status=%s missing actually_paid", order_id, payment_status)
+            return {"ok": True}
+
+        expected = expected_deposit_amount_for_tolerance(invoice)
+        if not is_paid_amount_sufficient_for_credit(amount, expected):
+            invoice.status = "partially_paid"
+            invoice.actually_paid_amount = amount
+            event.processing_status = PROCESSING_STATUS_PROCESSED
+            event.processing_error = (
+                f"insufficient_for_credit:paid={amount}:threshold_of_expected={expected}"
+            )
+            logger.info(
+                "NOWPayments webhook order_id=%s insufficient vs expected=%s, no credit",
+                order_id,
+                expected,
+            )
+            return {"ok": True}
+
+        applied = await apply_payment_to_balance(
+            db,
+            invoice,
+            amount,
+            external_payment_id=str(payment_id) if payment_id is not None else None,
+            metadata={"payment_status": payment_status, "ipn_event_id": event.id},
+        )
+        if applied:
+            event.processing_status = PROCESSING_STATUS_PROCESSED
+            event.processing_error = "credited"
+        else:
+            event.processing_status = PROCESSING_STATUS_SKIPPED
+            event.processing_error = "skipped:already_applied_or_ledger_duplicate"
+        return {"ok": True}
+
+    # waiting / confirming / прочие нефинальные — не кредитуем, статус инвойса не затираем.
+    event.processing_status = PROCESSING_STATUS_SKIPPED
+    event.processing_error = f"skipped:non_final_status:{payment_status}"
+    logger.info("NOWPayments webhook order_id=%s status=%s skipped (non-final)", order_id, payment_status)
     return {"ok": True}

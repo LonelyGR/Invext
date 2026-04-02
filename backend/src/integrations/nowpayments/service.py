@@ -20,17 +20,7 @@ logger = logging.getLogger(__name__)
 
 PROVIDER_NAME = "nowpayments"
 
-
-def _map_status(api_status: str) -> str:
-    """Map NOWPayments API status to our canonical status."""
-    s = (api_status or "").lower()
-    if s in ("finished", "sent", "confirmed"):
-        return "finished"
-    if s in ("waiting", "confirming", "partially_paid"):
-        return "waiting" if s == "waiting" else "partially_paid"
-    if s in ("failed", "expired", "refunded"):
-        return s
-    return "waiting"
+# Нормализация статусов из IPN и ветвление зачисления — см. src.services.nowpayments_ipn
 
 
 def generate_order_id(user_id: int) -> str:

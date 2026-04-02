@@ -728,7 +728,7 @@ async def get_dashboard_extended(
     )
 
     avg_deposit_result = await db.execute(
-        select(func.avg(PaymentInvoice.amount)).where(
+        select(func.avg(PaymentInvoice.price_amount)).where(
             PaymentInvoice.created_at >= since,
             PaymentInvoice.status.in_(("finished", "paid")),
         )

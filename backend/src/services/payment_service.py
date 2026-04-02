@@ -22,6 +22,40 @@ from src.services.notification_service import notify_deposit_success
 logger = logging.getLogger(__name__)
 
 
+async def ledger_nowpayments_deposit_exists(
+    db: AsyncSession,
+    user_id: int,
+    *,
+    external_payment_id: Optional[str],
+    order_id: str,
+) -> bool:
+    """
+    Защита от дубля ledger без миграции: DEPOSIT с тем же provider и тем же ключом
+    (payment_id из IPN или order_id, как в external_payment_id у записи).
+    """
+    keys: list[str] = []
+    if external_payment_id:
+        keys.append(str(external_payment_id))
+    if order_id:
+        keys.append(order_id)
+    # Уникальные непустые
+    uniq = list(dict.fromkeys(k for k in keys if k))
+    if not uniq:
+        return False
+    q = (
+        select(LedgerTransaction.id)
+        .where(
+            LedgerTransaction.user_id == user_id,
+            LedgerTransaction.type == LEDGER_TYPE_DEPOSIT,
+            LedgerTransaction.provider == PROVIDER_NOWPAYMENTS,
+            LedgerTransaction.external_payment_id.in_(uniq),
+        )
+        .limit(1)
+    )
+    r = await db.execute(q)
+    return r.scalar_one_or_none() is not None
+
+
 async def apply_payment_to_balance(
     db: AsyncSession,
     invoice: PaymentInvoice,
@@ -36,6 +70,19 @@ async def apply_payment_to_balance(
     """
     if invoice.is_balance_applied:
         logger.info("Payment invoice order_id=%s already applied, skip", invoice.order_id)
+        return False
+
+    if await ledger_nowpayments_deposit_exists(
+        db,
+        invoice.user_id,
+        external_payment_id=external_payment_id,
+        order_id=invoice.order_id,
+    ):
+        logger.warning(
+            "Ledger DEPOSIT already exists for order_id=%s user_id=%s, skip credit",
+            invoice.order_id,
+            invoice.user_id,
+        )
         return False
 
     user_result = await db.execute(
