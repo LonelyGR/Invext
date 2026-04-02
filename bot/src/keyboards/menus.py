@@ -12,9 +12,13 @@ _TELEGRAM_INLINE_URL_MAX_BYTES = 2048
 
 
 def _telegram_share_link(ref_url: str) -> str:
-    """Ссылка t.me/share/url с укладыванием в лимит длины URL кнопки."""
-    enc_url = quote(ref_url, safe="")
-    candidates = (
+    """
+    Ссылка t.me/share/url с укладыванием в лимит длины URL кнопки.
+
+    Используем только параметр «text»: текст + реферальная ссылка в конце.
+    Если добавить отдельный «url=», клиент Telegram часто показывает ссылку сверху (превью), а не под текстом.
+    """
+    bodies = (
         (
             "🔥 Я уже использую Invext для заработка — попробуй и ты.\n\n"
             "Это простой способ участвовать в инвестиционных сделках и получать доход без сложных действий. "
@@ -30,11 +34,12 @@ def _telegram_share_link(ref_url: str) -> str:
         ),
         "Invext — моя реферальная ссылка 👇",
     )
-    for body in candidates:
-        u = f"https://t.me/share/url?url={enc_url}&text={quote(body, safe='')}"
+    for body in bodies:
+        full_message = f"{body}\n\n{ref_url}"
+        u = f"https://t.me/share/url?text={quote(full_message, safe='')}"
         if len(u.encode("utf-8")) <= _TELEGRAM_INLINE_URL_MAX_BYTES:
             return u
-    return f"https://t.me/share/url?url={enc_url}"
+    return f"https://t.me/share/url?text={quote(ref_url, safe='')}"
 
 
 def main_menu_kb(is_admin: bool = False, show_welcome_bonus: bool = False) -> ReplyKeyboardMarkup:
