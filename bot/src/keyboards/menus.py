@@ -186,11 +186,11 @@ def partners_main_kb(share_url: str | None = None) -> InlineKeyboardMarkup:
             "📈 Выбираешь сделку — заходишь — получаешь прибыль\n"
             "💰 Не требует огромных вложений\n"
             "🚀 Подходит даже если ты новичок\n\n"
-            "Переходи по моей ссылке и начни прямо сейчас 👇"
+            "Переходи по моей ссылке и начни прямо сейчас 👇\n"
+            f"{share_url}"
         )
         telegram_share = (
             "https://t.me/share/url"
-            f"?url={quote(share_url, safe='')}"
             f"&text={quote(share_text, safe='')}"
         )
         rows.append([InlineKeyboardButton(text="📤 Поделиться ссылкой", url=telegram_share)])
