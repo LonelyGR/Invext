@@ -3332,14 +3332,21 @@ async function loadUserDetail(userId) {
           </div>
           <div class="balance-adjust-form" style="margin-top:12px;">
             <label>
-              Назначить реферера (Telegram ID или REF_CODE)
-              <input type="text" id="referrer-set-value" placeholder="Например: 123456789 или A1B2C3D4" />
+              Добавить реферала пользователю (L1)
+              <input type="text" id="referral-add-value" placeholder="Telegram ID или REF_CODE реферала (например 123456789 или A1B2C3D4)" />
+            </label>
+            <label style="margin-top:8px;">
+              Если у реферала уже есть реферер
+              <select id="referral-add-mode" class="settings-input">
+                <option value="if_empty">Не трогать (ошибка)</option>
+                <option value="force">Перезаписать (force)</option>
+              </select>
             </label>
             <div class="user-detail-admin-actions-row">
-              <button type="button" id="referrer-set-btn" class="btn-secondary-small">Добавить реферала</button>
+              <button type="button" id="referral-add-btn" class="btn-secondary-small">Добавить реферала</button>
             </div>
             <div class="mini-hint" style="margin-top:6px;">
-              Если у пользователя уже есть реферер — будет предложено подтвердить перезапись (force).
+              Это добавляет пользователя в L1 к текущему профилю (ставит ему referrer_id = текущий пользователь).
             </div>
           </div>
           <div class="user-detail-admin-export toolbar" style="gap:8px; margin-top:12px;">
@@ -3417,63 +3424,44 @@ async function loadUserDetail(userId) {
         }
       };
     }
-    const refSetBtn = document.getElementById("referrer-set-btn");
-    if (refSetBtn) {
-      refSetBtn.onclick = async () => {
-        const inp = document.getElementById("referrer-set-value");
+    const referralAddBtn = document.getElementById("referral-add-btn");
+    if (referralAddBtn) {
+      referralAddBtn.onclick = async () => {
+        const inp = document.getElementById("referral-add-value");
+        const modeEl = document.getElementById("referral-add-mode");
         const raw = String(inp?.value || "").trim();
         if (!raw) {
-          showToast("Введите Telegram ID или REF_CODE реферера.", "error");
+          showToast("Введите Telegram ID или REF_CODE реферала.", "error");
           return;
         }
         const isNumeric = /^[0-9]+$/.test(raw);
+        const mode = String(modeEl?.value || "if_empty");
+        const forceWanted = mode === "force";
         const first = await openUxDialog({
-          title: "Назначить реферера пользователю",
-          message: `Пользователь #${userId}\nРеферер: ${raw}\n\nНазначить?`,
-          confirmText: "Назначить",
+          title: "Добавить реферала (L1)",
+          message: `Реферер (текущий профиль): #${userId}\nРеферал: ${raw}\n\nДобавить в L1?`,
+          confirmText: "Добавить",
           cancelText: "Отмена",
         });
         if (!first.confirmed) return;
 
-        const doRequest = async (force) => {
-          const body = isNumeric
-            ? { referrer_telegram_id: raw, force }
-            : { referrer_ref_code: raw, force };
-          return apiRequest(`/users/${userId}/set-referrer`, {
+        const body = isNumeric
+          ? { referral_telegram_id: raw, force: forceWanted }
+          : { referral_ref_code: raw, force: forceWanted };
+        try {
+          referralAddBtn.disabled = true;
+          referralAddBtn.textContent = "Добавление…";
+          await apiRequest(`/users/${userId}/add-referral`, {
             method: "POST",
             body: JSON.stringify(body),
           });
-        };
-
-        try {
-          refSetBtn.disabled = true;
-          refSetBtn.textContent = "Привязка…";
-          await doRequest(false);
-          showToast("Реферер назначен.", "success");
+          showToast("Реферал добавлен (L1).", "success");
           loadUserDetail(userId);
         } catch (e) {
-          const msg = String(e?.message || e || "");
-          const looksLikeAlready =
-            msg.includes("уже есть реферер") ||
-            msg.includes("already") ||
-            msg.includes("force=true");
-          if (!looksLikeAlready) {
-            showToast(msg || "Ошибка привязки реферера", "error");
-            return;
-          }
-          const rs = await openUxDialog({
-            title: "У пользователя уже есть реферер",
-            message: "Перезаписать существующего реферера? (force)",
-            confirmText: "Перезаписать",
-            cancelText: "Отмена",
-          });
-          if (!rs.confirmed) return;
-          await doRequest(true);
-          showToast("Реферер перезаписан.", "success");
-          loadUserDetail(userId);
+          showToast(e.message || "Ошибка добавления реферала", "error");
         } finally {
-          refSetBtn.disabled = false;
-          refSetBtn.textContent = "Добавить реферала";
+          referralAddBtn.disabled = false;
+          referralAddBtn.textContent = "Добавить реферала";
         }
       };
     }

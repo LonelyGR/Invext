@@ -2644,6 +2644,77 @@ async def set_user_referrer(
     }
 
 
+@router.post("/users/{user_id}/add-referral")
+async def add_referral_to_user(
+    request: Request,
+    user_id: int,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Добавить реферала пользователю (L1).
+    user_id — это реферер (тот, кому "добавляем" реферала).
+    В body передаём либо referral_telegram_id, либо referral_ref_code.
+    По умолчанию запрещает перезапись referrer_id у реферала (force=false).
+    """
+    admin_token_id, _ = await get_admin_context(request)
+    require_admin_role(request)
+
+    referrer = await db.get(User, user_id)
+    if not referrer:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    force = bool(body.get("force", False))
+    ref_tg_raw = body.get("referral_telegram_id")
+    ref_code_raw = body.get("referral_ref_code")
+    referral: User | None = None
+
+    if ref_tg_raw is not None and str(ref_tg_raw).strip() != "":
+        try:
+            ref_tg = int(str(ref_tg_raw).strip())
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="referral_telegram_id должен быть числом")
+        q = await db.execute(select(User).where(User.telegram_id == ref_tg))
+        referral = q.scalar_one_or_none()
+    elif ref_code_raw is not None and str(ref_code_raw).strip() != "":
+        code = str(ref_code_raw).upper().strip()
+        q = await db.execute(select(User).where(User.ref_code == code))
+        referral = q.scalar_one_or_none()
+    else:
+        raise HTTPException(status_code=400, detail="Передайте referral_telegram_id или referral_ref_code")
+
+    if not referral:
+        raise HTTPException(status_code=404, detail="Referral user not found")
+    if referral.id == referrer.id:
+        raise HTTPException(status_code=400, detail="Нельзя добавить пользователя в рефералы самому себе")
+
+    if referral.referrer_id is not None and not force:
+        raise HTTPException(
+            status_code=400,
+            detail="У выбранного пользователя уже есть реферер. Используйте force=true для перезаписи.",
+        )
+
+    if await _would_create_referrer_cycle(db, user_id=referral.id, candidate_referrer_id=referrer.id):
+        raise HTTPException(status_code=400, detail="Нельзя добавить реферала: получится цикл в реф. цепочке")
+
+    referral.referrer_id = referrer.id
+    await db.flush()
+
+    await log_admin_action(
+        db=db,
+        admin_token_id=admin_token_id,
+        action_type="ADD_REFERRAL",
+        entity_type="USER",
+        entity_id=user_id,
+    )
+    return {
+        "ok": True,
+        "referrer_user_id": referrer.id,
+        "referral_user_id": referral.id,
+        "force": force,
+    }
+
+
 @router.post("/users/{user_id}/ledger-reset")
 async def reset_user_balance_only(
     request: Request,
