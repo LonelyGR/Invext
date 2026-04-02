@@ -172,29 +172,15 @@ def wallet_coin_kb() -> InlineKeyboardMarkup:
         ]
     )
 
-def partners_main_kb(share_url: str | None = None) -> InlineKeyboardMarkup:
-    """Партнёры: Моя команда; текст приглашения (callback); открыть ссылку (url); Назад."""
-    rows = [
-        [InlineKeyboardButton(text="📊 Моя команда", callback_data="partners_team")],
-    ]
-    if share_url:
+def partners_main_kb(ref_code: str | None = None) -> InlineKeyboardMarkup:
+    """Партнёры: поделиться через inline (switch_inline_query=ref_code), Назад."""
+    rows: list[list[InlineKeyboardButton]] = []
+    if ref_code and str(ref_code).strip() and ref_code != "—":
         rows.append(
-            [InlineKeyboardButton(text="📋 Текст для приглашения", callback_data="partners_invite_text")]
-        )
-        rows.append(
-            [InlineKeyboardButton(text="🚀 Открыть реферальную ссылку", url=share_url)]
+            [InlineKeyboardButton(text="📤 Поделиться ссылкой", switch_inline_query=ref_code)]
         )
     rows.append([InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
-def partners_team_kb() -> InlineKeyboardMarkup:
-    """Экран «Моя команда»: Назад."""
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="◀️ Назад", callback_data="partners_back")],
-        ]
-    )
 
 
 def withdraw_actions_kb(withdraw_id: int) -> InlineKeyboardMarkup:
