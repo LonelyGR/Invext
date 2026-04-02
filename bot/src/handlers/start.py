@@ -4,7 +4,7 @@
 from aiogram import Router
 from aiogram.types import Message
 from aiogram.filters import CommandStart, CommandObject
-from aiogram.utils.deep_linking import create_start_link
+from aiogram.utils.deep_linking import create_start_link, decode_payload
 
 from src.api_client.client import api
 from src.keyboards.menus import main_menu_kb
@@ -62,7 +62,13 @@ async def _send_welcome_flow(message: Message, telegram_id: int):
 @router.message(CommandStart(deep_link=True))
 async def cmd_start_with_ref(message: Message, command: CommandObject):
     """/start ref_code — привязка реферера, описание проекта, личные данные."""
-    ref_code = command.args
+    ref_code_raw = (command.args or "").strip()
+    # Aiogram deep links are commonly base64-encoded by create_start_link();
+    # decode defensively and fallback to raw args if decoding fails.
+    try:
+        ref_code = decode_payload(ref_code_raw)
+    except Exception:
+        ref_code = ref_code_raw
     telegram_id = message.from_user.id
     username = message.from_user.username
     name = message.from_user.full_name or message.from_user.username

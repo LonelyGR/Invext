@@ -172,11 +172,13 @@ def wallet_coin_kb() -> InlineKeyboardMarkup:
         ]
     )
 
-def partners_main_kb(share_url: str | None = None) -> InlineKeyboardMarkup:
-    """Партнёры: Моя команда, Поделиться ссылкой (нативный share), Назад."""
+def partners_main_kb(*, share_url: str | None = None, open_ref_url: str | None = None) -> InlineKeyboardMarkup:
+    """Партнёры: Моя команда, открыть реф-ссылку, поделиться ссылкой, назад."""
     rows = [
         [InlineKeyboardButton(text="📊 Моя команда", callback_data="partners_team")],
     ]
+    if open_ref_url:
+        rows.append([InlineKeyboardButton(text="🚀 Открыть реферальную ссылку", url=open_ref_url)])
     if share_url:
         from urllib.parse import quote
         telegram_share = f"https://t.me/share/url?url={quote(share_url, safe='')}"
