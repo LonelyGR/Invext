@@ -7,23 +7,28 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeybo
 
 from src.config.settings import ALLOWED_CURRENCIES
 
-# Лимит URL у inline-кнопки в Telegram Bot API (байты).
+# Лимит URL у inline-кнопки в Telegram Bot API (байты). Берём запас — длинный query ломает клиенты.
 _TELEGRAM_INLINE_URL_MAX_BYTES = 2048
+_TELEGRAM_SHARE_URL_SAFE_BYTES = 2000
+
+
+def _telegram_share_href_fits(href: str) -> bool:
+    return len(href.encode("utf-8")) <= _TELEGRAM_SHARE_URL_SAFE_BYTES
 
 
 def _telegram_share_link(ref_url: str) -> str:
     """
-    Официальный формат шаринга Telegram (см. core.telegram.org/widgets/share):
+    Шаринг «текст сверху, ссылка снизу» в поле сообщения.
 
-        https://t.me/share/url?url=<кодируем>&text=<кодируем>
+    С `?url=…&text=…` клиент Telegram часто ставит ссылку первой строкой, текст — ниже.
+    Нужен один параметр: весь текст одним куском — маркетинг, пустая строка, реферальная ссылка:
 
-    Параметр url — что пересылается; text — подпись к ссылке. Оба кодируются.
+        https://t.me/share/url?text=<quote(текст + \\n\\n + url)>
 
-    Вариант только с ?text=… (весь текст в одном параметре) на части клиентов ломается
-    (ПК: кнопка не открывается; мобильный браузер: редирект на telegram.org из‑за битой/длинной ссылки).
+    Длинный query ломает кнопку и редиректы — укладываемся в лимит, иначе запасные варианты.
     """
     enc_ref = quote(ref_url, safe="")
-    text_candidates = (
+    bodies = (
         (
             "🔥 Я уже использую Invext для заработка — попробуй и ты.\n\n"
             "Это простой способ участвовать в инвестиционных сделках и получать доход без сложных действий. "
@@ -39,11 +44,32 @@ def _telegram_share_link(ref_url: str) -> str:
         ),
         "Invext — моя реферальная ссылка 👇",
     )
-    for txt in text_candidates:
-        u = f"https://t.me/share/url?url={enc_ref}&text={quote(txt, safe='')}"
-        if len(u.encode("utf-8")) <= _TELEGRAM_INLINE_URL_MAX_BYTES:
-            return u
-    # Только ссылка — всегда коротко и совместимо со всеми клиентами.
+
+    for body in bodies:
+        full_message = f"{body}\n\n{ref_url}"
+        href = f"https://t.me/share/url?text={quote(full_message, safe='')}"
+        if _telegram_share_href_fits(href):
+            return href
+
+    tiny = f"🔥 Invext — заработок по расписанию 👇\n\n{ref_url}"
+    href = f"https://t.me/share/url?text={quote(tiny, safe='')}"
+    if _telegram_share_href_fits(href):
+        return href
+
+    # Только ссылка в сообщении — порядок не важен, главное коротко.
+    href = f"https://t.me/share/url?text={enc_ref}"
+    if _telegram_share_href_fits(href):
+        return href
+
+    # Запас: виджет Telegram (ссылка может оказаться выше текста в превью).
+    for txt in (
+        "🔥 Invext — заработок по расписанию. Попробуй по моей ссылке 👇",
+        "Invext",
+    ):
+        href = f"https://t.me/share/url?url={enc_ref}&text={quote(txt, safe='')}"
+        if len(href.encode("utf-8")) <= _TELEGRAM_INLINE_URL_MAX_BYTES:
+            return href
+
     return f"https://t.me/share/url?url={enc_ref}"
 
 
