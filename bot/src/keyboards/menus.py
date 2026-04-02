@@ -1,9 +1,40 @@
 """
 Инлайн-клавиатуры и кнопки меню бота.
 """
+from urllib.parse import quote
+
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 
 from src.config.settings import ALLOWED_CURRENCIES
+
+# Лимит URL у inline-кнопки в Telegram Bot API (байты).
+_TELEGRAM_INLINE_URL_MAX_BYTES = 2048
+
+
+def _telegram_share_link(ref_url: str) -> str:
+    """Ссылка t.me/share/url с укладыванием в лимит длины URL кнопки."""
+    enc_url = quote(ref_url, safe="")
+    candidates = (
+        (
+            "🔥 Я уже использую Invext для заработка — попробуй и ты.\n\n"
+            "Это простой способ участвовать в инвестиционных сделках и получать доход без сложных действий. "
+            "Всё работает по чёткому расписанию, а интерфейс максимально удобный.\n\n"
+            "📈 Выбираешь сделку — заходишь — получаешь прибыль\n"
+            "💰 Не требует огромных вложений\n"
+            "🚀 Подходит даже если ты новичок\n\n"
+            "Переходи по моей ссылке и начни прямо сейчас 👇"
+        ),
+        (
+            "🔥 Invext — заработок на инвестиционных сделках по расписанию. "
+            "Попробуй по моей ссылке 👇"
+        ),
+        "Invext — моя реферальная ссылка 👇",
+    )
+    for body in candidates:
+        u = f"https://t.me/share/url?url={enc_url}&text={quote(body, safe='')}"
+        if len(u.encode("utf-8")) <= _TELEGRAM_INLINE_URL_MAX_BYTES:
+            return u
+    return f"https://t.me/share/url?url={enc_url}"
 
 
 def main_menu_kb(is_admin: bool = False, show_welcome_bonus: bool = False) -> ReplyKeyboardMarkup:
@@ -178,20 +209,14 @@ def partners_main_kb(share_url: str | None = None) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="📊 Моя команда", callback_data="partners_team")],
     ]
     if share_url:
-        from urllib.parse import quote
-        share_text = (
-            "🔥 Я уже использую Invext для заработка — попробуй и ты.\n\n"
-            "Это простой способ участвовать в инвестиционных сделках и получать доход без сложных действий. "
-            "Всё работает по чёткому расписанию, а интерфейс максимально удобный.\n\n"
-            "📈 Выбираешь сделку — заходишь — получаешь прибыль\n"
-            "💰 Не требует огромных вложений\n"
-            "🚀 Подходит даже если ты новичок\n\n"
-            "Переходи по моей ссылке и начни прямо сейчас 👇\n"
-            f"{share_url}"
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text="📤 Поделиться ссылкой",
+                    url=_telegram_share_link(share_url),
+                )
+            ]
         )
-        # Первый query-параметр обязан начинаться с «?», иначе ссылка ломается и клиент может увести на telegram.org.
-        telegram_share = "https://t.me/share/url" f"?text={quote(share_text, safe='')}"
-        rows.append([InlineKeyboardButton(text="📤 Поделиться ссылкой", url=telegram_share)])
     rows.append([InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
