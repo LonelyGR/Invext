@@ -19,7 +19,7 @@ def main_menu_kb(is_admin: bool = False, show_welcome_bonus: bool = False) -> Re
             [KeyboardButton(text="👥 Партнёры"), KeyboardButton(text="⚙️ Кошелёк")],
             # СТАТИСТИКА
             [KeyboardButton(text="📊 Статистика"), KeyboardButton(text="🆘 Саппорт")],
-            [KeyboardButton(text="💬 Наш Чат", url="")],
+            [KeyboardButton(text="💬 Наш Чат")],
         ]
     )
     if is_admin:

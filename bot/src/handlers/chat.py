@@ -1,15 +1,8 @@
 """
 ссылка на наш чат
 """
-from decimal import Decimal, InvalidOperation
-
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
-
-from src.api_client.client import api
-from src.keyboards.menus import main_menu_kb
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 
 import logging
 
