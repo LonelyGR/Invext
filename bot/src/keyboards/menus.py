@@ -12,8 +12,6 @@ def main_menu_kb(is_admin: bool = False, show_welcome_bonus: bool = False) -> Re
         # ФИНАНСЫ
         [KeyboardButton(text="💰 Баланс"), KeyboardButton(text="📈 Сделка")],
     ]
-    if show_welcome_bonus:
-        keyboard.append([KeyboardButton(text="🎁 Бонус 100")])
     keyboard.extend(
         [
             [KeyboardButton(text="📥 Пополнить"), KeyboardButton(text="📤 Вывести")],
@@ -21,6 +19,7 @@ def main_menu_kb(is_admin: bool = False, show_welcome_bonus: bool = False) -> Re
             [KeyboardButton(text="👥 Партнёры"), KeyboardButton(text="⚙️ Кошелёк")],
             # СТАТИСТИКА
             [KeyboardButton(text="📊 Статистика"), KeyboardButton(text="🆘 Саппорт")],
+            [KeyboardButton(text="💬 Наш Чат", url="https://t.me/invextclub")],
         ]
     )
     if is_admin:

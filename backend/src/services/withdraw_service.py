@@ -32,9 +32,19 @@ def withdraw_fee_and_net(gross: Decimal) -> tuple[Decimal, Decimal]:
     return fee, net
 
 
+def _format_withdraw_limit(n: float) -> str:
+    i = int(n)
+    if abs(n - i) < 1e-9:
+        return str(i)
+    s = str(n).rstrip("0").rstrip(".")
+    return s
+
+
 def _validate_amount(amount: Decimal, min_val: float, max_val: float) -> None:
     if amount < Decimal(str(min_val)) or amount > Decimal(str(max_val)):
-        raise ValueError(f"Сумма должна быть от {min_val} до {max_val}")
+        raise ValueError(
+            f"Сумма вывода от {_format_withdraw_limit(min_val)}$ до {_format_withdraw_limit(max_val)}$"
+        )
 
 
 async def create_withdraw_request(
