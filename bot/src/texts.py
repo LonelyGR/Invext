@@ -300,8 +300,7 @@ def make_invest_success_text(invested: Any, new_balance: Any, payout_hint: str |
         f"💰 Сумма: {_fmt_usdt(invested)} USDT\n"
         f"📊 Баланс: {_fmt_usdt(new_balance)} USDT\n\n"
         f"{payout_line}"
-        "Средства участвуют в текущей сделке.\n"
-        "Срок выплаты после закрытия сбора задаётся расписанием в системе."
+        "Выплата согласно маркетинга"
     )
 
 
@@ -576,19 +575,24 @@ def make_unknown_callback_text() -> str:
 
 
 # === Кошельки ===
+# Сохранённые адреса и шаги добавления — только сеть BEP20 (BNB Smart Chain).
+
+_WALLET_BEP20_NOTICE = (
+    "🌐 <b>Сеть BEP20</b> (BNB Smart Chain). Все кошельки в этом разделе — только для этой сети.\n\n"
+)
+
 
 def make_wallets_list_text(wallets: Iterable[Mapping[str, Any]], text_prefix: str = "") -> str:
     wallets_list = list(wallets)
-    bep20_note = "Сеть для всех операций: BEP20.\n\n"
     if not wallets_list:
-        return (text_prefix + "💼 <b>Ваши кошельки</b>\n\n" + bep20_note + "У вас нет сохранённых кошельков.").strip()
+        return (text_prefix + "💼 <b>Ваши кошельки</b>\n\n" + _WALLET_BEP20_NOTICE + "У вас нет сохранённых кошельков.").strip()
 
     lines = []
     for w in wallets_list:
         addr = str(w.get("address", ""))
         addr_show = f"{addr[:24]}..." if len(addr) > 24 else addr
         lines.append(f"• {w.get('name', 'Без названия')} ({w.get('currency', 'USDT')}): <code>{addr_show}</code>")
-    return (text_prefix + "💼 <b>Ваши кошельки</b>\n\n" + bep20_note + "\n".join(lines)).strip()
+    return (text_prefix + "💼 <b>Ваши кошельки</b>\n\n" + _WALLET_BEP20_NOTICE + "\n".join(lines)).strip()
 
 
 def make_wallets_load_error_text(error: Any) -> str:
@@ -596,7 +600,10 @@ def make_wallets_load_error_text(error: Any) -> str:
 
 
 def make_wallet_add_enter_name_text() -> str:
-    return "Введите название для нового кошелька (например: «Мой основной кошелёк»):"
+    return (
+        _WALLET_BEP20_NOTICE
+        + "Введите название для нового кошелька (например: «Мой основной кошелёк»):"
+    )
 
 
 def make_wallet_name_empty_text() -> str:
@@ -604,7 +611,10 @@ def make_wallet_name_empty_text() -> str:
 
 
 def make_wallet_choose_currency_text() -> str:
-    return "Пожалуйста, выберите валюту в кнопочном меню:"
+    return (
+        "🌐 Валюта для кошелька в сети <b>BEP20</b>.\n\n"
+        "Выберите валюту в меню ниже:"
+    )
 
 
 def make_wallet_invalid_currency_text() -> str:
@@ -613,8 +623,8 @@ def make_wallet_invalid_currency_text() -> str:
 
 def make_wallet_currency_set_text(currency: str) -> str:
     return (
-        f"Тип кошелька успешно установлен на {currency}!\n"
-        f"Теперь отправьте адрес вашего кошелька для сети {currency}."
+        f"Тип: <b>{currency}</b> в сети <b>BEP20</b>.\n\n"
+        "Отправьте адрес кошелька (только BEP20 / BSC):"
     )
 
 
@@ -623,7 +633,10 @@ def make_wallet_cancelled_text() -> str:
 
 
 def make_wallet_invalid_address_text() -> str:
-    return "Адрес не может быть пустым и не более 512 символов."
+    return (
+        "Адрес не может быть пустым и не более 512 символов.\n"
+        "Укажите адрес кошелька в сети <b>BEP20</b>."
+    )
 
 
 def make_wallet_save_error_text(error: Any) -> str:
@@ -631,11 +644,11 @@ def make_wallet_save_error_text(error: Any) -> str:
 
 
 def make_wallet_added_text(name: str, currency: str) -> str:
-    return f"✅ Кошелёк «{name}» ({currency}) добавлен."
+    return f"✅ Кошелёк «{name}» ({currency}, <b>BEP20</b>) добавлен."
 
 
 def make_wallet_deleted_text() -> str:
-    return "Кошелёк удалён"
+    return "Кошелёк удалён из списка (адреса в разделе — только BEP20)."
 
 
 # === Админка ===
