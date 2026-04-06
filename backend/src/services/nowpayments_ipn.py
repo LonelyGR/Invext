@@ -1,15 +1,13 @@
 """
 NOWPayments IPN: нормализация статусов и проверка суммы (tolerance).
 
-Единое место для литералов статусов, чтобы webhook и остальной код не расходились.
+Сравнение для tolerance (обе стороны в USDT по смыслу депозита):
+- aggregated actually_paid из IPN — фактически получено провайдером.
+- expected_deposit_amount_for_tolerance(invoice) — номинал депозита USDT (поля expected_amount
+  или price_amount; для новых инвойсов оба задаются при создании как выбранная пользователем сумма).
 
-Сравнение для tolerance (совместимые величины — обе в валюте оплаты pay_currency):
-- actually_paid (IPN) — фактически получено в крипте (USDT BEP20 и т.д.).
-- expected_amount (инвойс) — ожидаемая сумма к оплате в той же валюте (= pay_amount при создании).
-Если expected_amount не задан (старые записи), fallback: price_amount (заказ в price_currency,
-обычно usd; численно 1:1 с намерением пополнения в USDT).
-
-Зачисление на баланс по-прежнему использует actually_paid как сумму в USDT (см. payment_service).
+Зачисление на баланс: номинал депозита при прохождении tolerance; факт IPN хранится в
+invoice.actually_paid_amount (см. payment_service.apply_payment_to_balance).
 """
 from __future__ import annotations
 
@@ -53,9 +51,9 @@ def map_ipn_to_invoice_status_for_non_credit(ipn_status: str) -> str | None:
 
 def expected_deposit_amount_for_tolerance(invoice: PaymentInvoice) -> Decimal:
     """
-    Ожидаемая сумма для сравнения с actually_paid (обе стороны — в валюте оплаты, pay_currency).
+    Номинал депозита USDT для порога и зачисления.
 
-    Приоритет: expected_amount (crypto), иначе price_amount (fallback для совместимости со старыми строками).
+    Приоритет: expected_amount, иначе price_amount (старые строки).
     """
     if invoice.expected_amount is not None and invoice.expected_amount > 0:
         return Decimal(invoice.expected_amount)

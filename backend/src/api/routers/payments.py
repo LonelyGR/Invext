@@ -138,16 +138,18 @@ async def create_deposit_invoice(
             detail="Failed to create invoice",
         ) from e
 
+    # Номинал депозита в USDT (то, что выбрал пользователь). Совпадает с price_amount в запросе к NOWPayments (usd 1:1).
+    nominal_usdt = payload.amount
     invoice = PaymentInvoice(
         user_id=user.id,
         provider=PROVIDER_NOWPAYMENTS,
         order_id=create_result.order_id,
         external_invoice_id=create_result.external_invoice_id,
         invoice_url=create_result.invoice_url,
-        price_amount=create_result.price_amount,
+        price_amount=nominal_usdt,
         price_currency=create_result.price_currency,
         pay_currency=create_result.pay_currency,
-        expected_amount=create_result.pay_amount,
+        expected_amount=nominal_usdt,
         network=create_result.network,
         status=create_result.status,
         raw_response_json=create_result.raw_response,
@@ -170,7 +172,7 @@ async def create_deposit_invoice(
         external_invoice_id=invoice.external_invoice_id,
         invoice_url=invoice.invoice_url or "",
         amount=invoice.price_amount,
-        currency=invoice.price_currency,
+        currency="usdt",
         pay_currency=invoice.pay_currency,
         network=invoice.network or "BSC",
         status=invoice.status,
@@ -353,17 +355,20 @@ async def webhook_nowpayments(request: Request, db: AsyncSession = Depends(get_d
     expected = expected_deposit_amount_for_tolerance(invoice)
 
     if is_paid_amount_sufficient_for_credit(aggregated, expected):
+        # На баланс — ровно номинал депозита; фактически полученное по IPN храним отдельно.
         applied = await apply_payment_to_balance(
             db,
             invoice,
-            aggregated,
+            expected,
             external_payment_id=str(invoice.order_id),
             metadata={
                 "payment_status": payment_status,
                 "ipn_event_id": event.id,
                 "aggregated_payment_ids": payment_ids_used,
                 "aggregation_note": agg_note,
+                "actually_paid_aggregate": str(aggregated),
             },
+            invoice_factually_paid=aggregated,
         )
         if applied:
             event.processing_status = PROCESSING_STATUS_PROCESSED

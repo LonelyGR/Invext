@@ -62,9 +62,13 @@ async def apply_payment_to_balance(
     amount: Decimal,
     external_payment_id: Optional[str] = None,
     metadata: Optional[dict] = None,
+    *,
+    invoice_factually_paid: Optional[Decimal] = None,
 ) -> bool:
     """
     If invoice not yet applied: create ledger entry, update user balance, mark invoice.
+    `amount` — сумма зачисления на баланс (номинал депозита).
+    `invoice_factually_paid` — если задано, пишется в invoice.actually_paid_amount (факт из IPN).
     Must be called within an existing transaction (e.g. db.begin()).
     Returns True if balance was applied, False if already applied or skipped.
     """
@@ -114,7 +118,7 @@ async def apply_payment_to_balance(
 
     # Отметить, что депозит применён к балансу (идемпотентность сохранена).
     invoice.is_balance_applied = True
-    invoice.actually_paid_amount = amount
+    invoice.actually_paid_amount = invoice_factually_paid if invoice_factually_paid is not None else amount
     invoice.status = "finished"
     invoice.completed_at = dt.datetime.now(dt.timezone.utc)
 

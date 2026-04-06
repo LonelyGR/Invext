@@ -49,9 +49,8 @@ class NowPaymentsService:
         order_description: Optional[str] = None,
     ) -> CreateInvoiceResult:
         """
-        Create invoice for user deposit. Sends price_currency=usd + pay_currency=usdtbsc
-        (invoice-compatible; usdt->usdtbsc fails in NOWPayments checkout). Amount sent
-        as USD; validation (min 10, step 1) done in client.
+        Create invoice for user deposit: номинал в USDT передаётся как price_amount при
+        price_currency=usd (1:1 с выбранной суммой); оплата на стороне NOWPayments — USDT в сети BSC (usdtbsc).
         """
         order_id = generate_order_id(user_id)
 
@@ -64,7 +63,6 @@ class NowPaymentsService:
             success_url=success_url,
             cancel_url=cancel_url,
             order_description=order_description or f"Deposit user {user_id}",
-            fixed_rate=True,
         )
 
         pay_amount_decimal: Optional[Decimal] = None

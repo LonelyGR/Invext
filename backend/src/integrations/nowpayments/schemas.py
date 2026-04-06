@@ -21,7 +21,6 @@ class NowPaymentsCreateInvoiceRequest(BaseModel):
     success_url: Optional[str] = None
     cancel_url: Optional[str] = None
     order_description: Optional[str] = None
-    fixed_rate: bool = True
 
 
 # --- Normalized create-invoice response (for consumers) ---

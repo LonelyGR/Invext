@@ -128,12 +128,15 @@ class NowPaymentsClient:
         success_url: Optional[str] = None,
         cancel_url: Optional[str] = None,
         order_description: Optional[str] = None,
-        fixed_rate: bool = True,
     ) -> CreateInvoiceNormalizedResponse:
         """
         Create an invoice via POST /v1/invoice.
-        Uses price_currency=usd + pay_currency=usdtbsc (invoice-compatible; usdt->usdtbsc fails).
-        price_amount as string; no pay_amount in request. Decimal used internally.
+
+        NOWPayments принимает price_amount + price_currency + pay_currency; отдельного
+        pay_amount в теле запроса в актуальной схеме API нет (см. официальный JS-клиент).
+
+        Для USDT BSC используем price_currency=usd и pay_currency=usdtbsc (1:1 с номиналом
+        депозита в USDT). Вариант price_currency=usdt + usdtbsc даёт ошибку estimate в checkout.
         """
         _validate_deposit_amount(price_amount)
         safe_order_id = _sanitize_order_id(order_id)
