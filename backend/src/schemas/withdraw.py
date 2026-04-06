@@ -7,8 +7,6 @@ from typing import Optional
 
 from pydantic import BaseModel, Field, computed_field
 
-from src.services.withdraw_service import withdraw_fee_and_net
-
 
 class WithdrawRequestIn(BaseModel):
     """Создание заявки на вывод."""
@@ -17,7 +15,7 @@ class WithdrawRequestIn(BaseModel):
     amount: Decimal = Field(
         ...,
         gt=0,
-        description="Сумма списания с баланса; комиссия 10%",
+        description="Сумма списания с баланса (к выплате на адрес — та же сумма)",
     )
     address: str = Field(..., min_length=1, max_length=512)
 
@@ -39,13 +37,11 @@ class WithdrawRequestResponse(BaseModel):
 
     @computed_field
     def fee_amount(self) -> Decimal:
-        fee, _ = withdraw_fee_and_net(self.amount)
-        return fee
+        return Decimal("0")
 
     @computed_field
     def net_amount(self) -> Decimal:
-        _, net = withdraw_fee_and_net(self.amount)
-        return net
+        return self.amount
 
 
 class WithdrawRequestWithUserResponse(WithdrawRequestResponse):

@@ -88,6 +88,7 @@ from src.services.ledger_service import (
     LEDGER_TYPE_INVEST_RETURN,
     LEDGER_TYPE_PROFIT,
     LEDGER_TYPE_WITHDRAW,
+    LEDGER_TYPE_WITHDRAW_REFUND,
     LEDGER_TYPE_REFERRAL_BONUS,
     clear_user_ledger_entries,
     get_balance_usdt,
@@ -100,7 +101,7 @@ from src.services.deal_service import (
     open_new_deal,
     process_pending_payouts,
 )
-from src.services.withdraw_service import withdraw_fee_and_net
+from src.services.withdraw_service import approve_withdraw, reject_withdraw, withdraw_fee_and_net
 from src.services.notification_service import broadcast_deal_opened, send_telegram_message, send_telegram_photo
 from src.core.config import get_settings
 from src.services.settings_service import get_system_settings, invalidate_system_settings_cache
@@ -622,6 +623,7 @@ async def get_dashboard_stats(
                 LEDGER_TYPE_DEPOSIT, LEDGER_TYPE_DEPOSIT_BLOCKCHAIN,
                 LEDGER_TYPE_INVEST_RETURN,
                 LEDGER_TYPE_PROFIT, LEDGER_TYPE_REFERRAL_BONUS,
+                LEDGER_TYPE_WITHDRAW_REFUND,
             ))
         )
     )
@@ -2855,51 +2857,22 @@ async def approve_withdrawal(
     admin_token_id, admin_telegram_id = await get_admin_context(request)
 
     async with db.begin():
-        result = await db.execute(
-            select(WithdrawRequest).where(WithdrawRequest.id == withdraw_id).with_for_update()
-        )
-        req = result.scalar_one_or_none()
-        if not req:
-            raise HTTPException(status_code=404, detail="Withdraw request not found")
-        if req.status != "PENDING":
-            # Уже обработано — идемпотентность
-            return {"status": req.status}
+        try:
+            req, applied = await approve_withdraw(db, withdraw_id, admin_token_id)
+        except ValueError as e:
+            if str(e) == "Withdraw request not found":
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        if applied:
+            await log_admin_action(
+                db=db,
+                admin_token_id=admin_token_id,
+                action_type="WITHDRAW_APPROVE",
+                entity_type="WITHDRAW",
+                entity_id=req.id,
+            )
 
-        user = await db.get(User, req.user_id)
-        if not user:
-            raise HTTPException(status_code=404, detail="User not found")
-
-        # Проверяем баланс по леджеру.
-        balance = await get_balance_usdt(db, user.id)
-        if balance < req.amount:
-            raise HTTPException(status_code=400, detail="Недостаточно средств")
-
-        # Создаём ledger WITHDRAW (списание).
-        tx = LedgerTransaction(
-            user_id=user.id,
-            type=LEDGER_TYPE_WITHDRAW,
-            amount_usdt=req.amount,
-        )
-        db.add(tx)
-
-        req.status = "APPROVED"
-        # В decided_by храним admin_token_id (int32), а telegram_id админа пишется в AdminLog.
-        req.decided_by = admin_token_id
-        req.decided_at = dt.datetime.now(dt.timezone.utc)
-
-        # Обновляем кэш баланса.
-        new_balance = balance - req.amount
-        user.balance_usdt = new_balance
-
-        await log_admin_action(
-            db=db,
-            admin_token_id=admin_token_id,
-            action_type="WITHDRAW_APPROVE",
-            entity_type="WITHDRAW",
-            entity_id=req.id,
-        )
-
-    return {"status": "APPROVED"}
+    return {"status": req.status}
 
 
 @router.post("/withdrawals/{withdraw_id}/reject")
@@ -2911,29 +2884,22 @@ async def reject_withdrawal(
     admin_token_id, admin_telegram_id = await get_admin_context(request)
 
     async with db.begin():
-        result = await db.execute(
-            select(WithdrawRequest).where(WithdrawRequest.id == withdraw_id).with_for_update()
-        )
-        req = result.scalar_one_or_none()
-        if not req:
-            raise HTTPException(status_code=404, detail="Withdraw request not found")
-        if req.status != "PENDING":
-            return {"status": req.status}
+        try:
+            req, applied = await reject_withdraw(db, withdraw_id, admin_token_id)
+        except ValueError as e:
+            if str(e) == "Withdraw request not found":
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        if applied:
+            await log_admin_action(
+                db=db,
+                admin_token_id=admin_token_id,
+                action_type="WITHDRAW_REJECT",
+                entity_type="WITHDRAW",
+                entity_id=req.id,
+            )
 
-        req.status = "REJECTED"
-        # В decided_by храним admin_token_id (int32), а telegram_id админа пишется в AdminLog.
-        req.decided_by = admin_token_id
-        req.decided_at = dt.datetime.now(dt.timezone.utc)
-
-        await log_admin_action(
-            db=db,
-            admin_token_id=admin_token_id,
-            action_type="WITHDRAW_REJECT",
-            entity_type="WITHDRAW",
-            entity_id=req.id,
-        )
-
-    return {"status": "REJECTED"}
+    return {"status": req.status}
 
 
 @router.get("/logs", response_model=PaginatedAdminLogs)

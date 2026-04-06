@@ -1,14 +1,22 @@
 """
-Партнеры: Партнёрская программа (ссылка + уровни), inline-поделиться ссылкой.
+Партнеры: Партнёрская программа (ссылка + уровни), расписание сделок.
 """
 from aiogram import Bot, F, Router
-from aiogram.types import InlineQuery, InlineQueryResultArticle, InputTextMessageContent, Message
+from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    InlineQuery,
+    InlineQueryResultArticle,
+    InputTextMessageContent,
+    Message,
+)
 
 from aiogram.utils.deep_linking import create_start_link
 
 from src.api_client.client import api
 from src.keyboards.menus import partners_main_kb
-from src.texts import make_partners_main_text
+from src.texts import make_partners_deals_schedule_text, make_partners_main_text
 
 router = Router(name="partners")
 
@@ -58,7 +66,29 @@ async def partners(message: Message):
     link = await _build_ref_link(message.bot, ref_code)
 
     text = make_partners_main_text(me, link, REFERRAL_LEVELS)
-    await message.answer(text, reply_markup=partners_main_kb(ref_code=ref_code or None))
+    await message.answer(text, reply_markup=partners_main_kb())
+
+
+@router.callback_query(F.data == "partners_deals_schedule")
+async def partners_deals_schedule(callback: CallbackQuery):
+    await callback.message.answer(
+        make_partners_deals_schedule_text(),
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="◀️ Назад", callback_data="partners_schedule_close")]
+            ]
+        ),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "partners_schedule_close")
+async def partners_schedule_close(callback: CallbackQuery):
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
+    await callback.answer()
 
 
 @router.inline_query()

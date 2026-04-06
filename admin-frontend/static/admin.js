@@ -3011,8 +3011,6 @@ async function loadUserDetail(userId) {
         <tr>
           <td>${w.id}</td>
           <td class="num-cell">${w.amount}</td>
-          <td class="num-cell">${w.fee_amount ?? "—"}</td>
-          <td class="num-cell">${w.net_amount ?? "—"}</td>
           <td>${w.currency}</td>
           <td class="cell-address">${escapeHtmlAttr(w.address || "")} <button type="button" class="btn-secondary-small copy-address-btn" data-address="${escapeHtmlAttr(w.address || "")}">Копировать</button></td>
           <td>${w.status}</td>
@@ -3024,18 +3022,18 @@ async function loadUserDetail(userId) {
     const pendingTreasuryRows = pendingShown.map(mapWithdrawalRow).join("");
     const pendingTreasuryTail =
       pendingMoreCount > 0
-        ? `<tr><td colspan="8" class="user-pending-more-row">+ ещё ${pendingMoreCount}</td></tr>`
+        ? `<tr><td colspan="6" class="user-pending-more-row">+ ещё ${pendingMoreCount}</td></tr>`
         : "";
     const pendingTbody =
       pendingList.length === 0
-        ? `<tr><td colspan="8"><div class="empty-state"><strong>Открытых заявок нет</strong><span>Статус PENDING отсутствует в выборке.</span></div></td></tr>`
+        ? `<tr><td colspan="6"><div class="empty-state"><strong>Открытых заявок нет</strong><span>Статус PENDING отсутствует в выборке.</span></div></td></tr>`
         : `${pendingTreasuryRows}${pendingTreasuryTail}`;
     const withdrawalsNonPending = (Array.isArray(detail.withdrawals) ? detail.withdrawals : []).filter(
       (w) => String(w.status || "").toUpperCase() !== "PENDING"
     );
     const wRows =
       withdrawalsNonPending.map(mapWithdrawalRow).join("") ||
-      `<tr><td colspan="8"><div class="empty-state"><strong>Нет заявок вне PENDING</strong><span>Открытые заявки перечислены выше (до 3 строк + счётчик).</span></div></td></tr>`;
+      `<tr><td colspan="6"><div class="empty-state"><strong>Нет заявок вне PENDING</strong><span>Открытые заявки перечислены выше (до 3 строк + счётчик).</span></div></td></tr>`;
     const referralsRows = (detail.referrals_preview || [])
       .map(
         (r) => `
@@ -3127,9 +3125,7 @@ async function loadUserDetail(userId) {
               <thead>
                 <tr>
                   <th>ID</th>
-                  <th>Списание</th>
-                  <th>Комиссия 10%</th>
-                  <th>К выплате</th>
+                  <th>Сумма</th>
                   <th>Валюта</th>
                   <th>Кошелёк</th>
                   <th>Статус</th>
@@ -3205,16 +3201,14 @@ async function loadUserDetail(userId) {
           </div>
         </div>
         <h2>Выводы не в статусе PENDING</h2>
-        <p class="section-desc mini-hint">Списание — с баланса; комиссия 10%; к выплате — на адрес пользователя. Открытые заявки не дублируем — см. блок выше.</p>
+        <p class="section-desc mini-hint">Сумма резервируется при создании заявки; на адрес уходит та же сумма. Открытые заявки не дублируем — см. блок выше.</p>
         <div class="table-wrapper">
           <div class="table-wrapper-inner">
             <table>
               <thead>
                 <tr>
                   <th>ID</th>
-                  <th>Списание</th>
-                  <th>Комиссия 10%</th>
-                  <th>К выплате</th>
+                  <th>Сумма</th>
                   <th>Валюта</th>
                   <th>Кошелек</th>
                   <th>Статус</th>
@@ -3870,7 +3864,7 @@ async function openWithdrawalDecisionMode(withdrawalId, { onDone }) {
       "",
       `ID: ${w.id} · статус: ${w.status}`,
       `Пользователь: ${w.user_id ?? "—"} · ${w.telegram_id}${w.username ? ` @${w.username}` : ""}`,
-      `Списание: ${w.amount} ${w.currency} · комиссия: ${w.fee_amount ?? "—"} · к выплате: ${w.net_amount ?? "—"}`,
+      `Сумма: ${w.amount} ${w.currency}`,
       `Адрес: ${w.address || "—"}`,
       "",
       `Создано: ${w.created_at ? new Date(w.created_at).toLocaleString() : "—"}`,
@@ -4055,8 +4049,7 @@ async function openWithdrawalDecisionMode(withdrawalId, { onDone }) {
       const c2 = await openUxDialog({
         title: "Финальное подтверждение выплаты",
         message: [
-          `Сумма списания: ${w.amount} ${w.currency}`,
-          `К выплате (нетто): ${w.net_amount ?? "—"} ${w.currency}`,
+          `Сумма вывода: ${w.amount} ${w.currency}`,
           `Адрес: ${w.address || "—"}`,
           "",
           `Риск-контекст:\n${riskFactors || "—"}`,
@@ -4143,7 +4136,7 @@ async function loadWithdrawals() {
         <td>${w.id}</td>
         <td>${userCell}</td>
         <td>${w.username || "—"}</td>
-        <td class="amount-negative"><div>−${w.amount} ${w.currency}</div><div class="mini-hint">комиссия ${w.fee_amount ?? "—"} · к выплате ${w.net_amount ?? "—"}</div></td>
+        <td class="amount-negative"><div>−${w.amount} ${w.currency}</div><div class="mini-hint">зарезервировано при заявке</div></td>
         <td class="cell-address">${escapeHtmlAttr(w.address || "")} <button type="button" class="btn-secondary-small copy-address-btn" data-address="${escapeHtmlAttr(w.address || "")}">Копировать</button></td>
         <td><span class="${withdrawalStatusBadge(w.status)}">${w.status}</span></td>
         <td>${flagsHtml}</td>

@@ -171,15 +171,14 @@ def wallet_coin_kb() -> InlineKeyboardMarkup:
         ]
     )
 
-def partners_main_kb(ref_code: str | None = None) -> InlineKeyboardMarkup:
-    """Партнёры: поделиться через inline (switch_inline_query=ref_code), Назад."""
-    rows: list[list[InlineKeyboardButton]] = []
-    if ref_code and str(ref_code).strip() and ref_code != "—":
-        rows.append(
-            [InlineKeyboardButton(text="📤 Поделиться ссылкой", switch_inline_query=ref_code)]
-        )
-    rows.append([InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_menu")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+def partners_main_kb() -> InlineKeyboardMarkup:
+    """Партнёры: расписание сделок, Назад."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="📅 Расписание сделок", callback_data="partners_deals_schedule")],
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_menu")],
+        ]
+    )
 
 
 def withdraw_actions_kb(withdraw_id: int) -> InlineKeyboardMarkup:

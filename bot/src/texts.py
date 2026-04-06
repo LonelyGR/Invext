@@ -182,41 +182,36 @@ def make_deposit_balance_credited_text() -> str:
 def make_withdraw_choose_currency_text() -> str:
     return (
         "Выберите валюту вывода:\n\n"
-        "ℹ️ Укажите сумму <b>списания с баланса</b>.\n\n Комиссия <b>10%</b> "
+        "ℹ️ Укажите сумму <b>списания с баланса</b> — эта сумма сразу резервируется до решения по заявке."
     )
 
 
 def make_withdraw_enter_amount_text(currency: str, min_wd: Any) -> str:
     return (
         f"💸 <b>Вывод средств ({currency})</b>\n\n"
-        "Введите сумму <b>списания с баланса</b> (полную сумму заявки):\n\n"
-        f"Минимум — {min_wd}\n\n"
-        "Комиссия — <b>10%</b> от этой суммы."
+        "Введите сумму <b>списания с баланса</b> — после подтверждения заявки на кошелёк уйдёт <b>та же сумма</b>.\n\n"
+        f"Минимум — {min_wd}."
     )
 
 
 def make_withdraw_enter_address_text() -> str:
     return (
         "🏦 <b>Адрес для вывода</b>\n\n"
-        "Введите адрес кошелька в сети BEP20, на который поступит сумма после вычета комиссии 10%."
+        "Введите адрес кошелька в сети BEP20, на который поступит сумма заявки."
     )
 
 
 def make_withdraw_success_text(
     req_id: Any,
     *,
-    gross: Any,
-    fee: Any,
-    net: Any,
+    amount: Any,
     currency: str = "USDT",
 ) -> str:
     return (
         "✅ <b>Заявка на вывод создана</b>\n\n"
-        "Заявка отправлена на проверку\n"
-        "Средства будут переведены в течение 48 часов\n\n"
-        f"Списание с баланса: <b>{gross}</b> {currency}\n"
-        f"Комиссия (10%): <b>{fee}</b> {currency}\n"
-        f"К получению на кошелёк: <b>{net}</b> {currency}\n\n"
+        "Сумма <b>зарезервирована</b> на балансе и отправлена на проверку.\n"
+        "После одобрения администратором средства будут переведены на указанный адрес (обычно до 48 ч).\n\n"
+        f"Сумма вывода: <b>{amount}</b> {currency}\n\n"
         f"🆔 ID заявки: {req_id}"
     )
 
@@ -237,7 +232,6 @@ def make_my_withdrawals_list_text(items: list) -> str:
         wid = it.get("id")
         cur = it.get("currency") or "—"
         gross = it.get("amount")
-        net = it.get("net_amount", "—")
         st = status_ru.get(str(it.get("status")), str(it.get("status")))
         created = it.get("created_at")
         created_s = ""
@@ -250,7 +244,7 @@ def make_my_withdrawals_list_text(items: list) -> str:
                 created_s = str(created)[:16]
         lines.append(
             f"🆔 <b>#{wid}</b> · {cur}\n"
-            f"   списание <b>{gross}</b> · к кошельку <b>{net}</b>\n"
+            f"   сумма <b>{gross}</b>\n"
             f"   {st}"
             + (f" · {created_s}" if created_s else "")
         )
@@ -410,12 +404,19 @@ def make_partners_main_text(me: Mapping[str, Any], link: str | None, levels: lis
         return _fmt_usdt(me.get(key, "0"))
 
     if link:
-        link_block = f"🔗 <b>Ваша ссылка</b>\n{link}"
+        link_block = (
+            f"🔗 <b>Ваша ссылка</b>\n{link}\n\n"
+            "<i>Скопируйте и отправьте её другу — при переходе он станет вашим рефералом.</i>"
+        )
     else:
         link_block = "⚠️ Ссылка временно недоступна. Попробуйте позже."
 
     lines: list[str] = [
         "<b>👥 Партнёрская программа</b>",
+        "",
+        sep,
+        "",
+        link_block,
         "",
         sep,
         "",
@@ -431,6 +432,31 @@ def make_partners_main_text(me: Mapping[str, Any], link: str | None, levels: lis
         if i == 4:
             lines.append("")
     return "\n".join(lines)
+
+
+def make_partners_deals_schedule_text() -> str:
+    """Расписание оплат/выплат по дням (экран «Расписание сделок»)."""
+    return (
+        "<b>Список сделок по дням</b>\n\n"
+        "<b>1) Понедельник</b>\n"
+        "Оплата до 12 ч — выплата во вторник после 15 ч\n"
+        "Оплата после 13 ч — выплата в среду в 15 ч\n\n"
+        "<b>2) Вторник</b>\n"
+        "Оплата до 12 ч — выплата в среду в 15 ч\n"
+        "Оплата после 13 ч — выплата в четверг в 15 ч\n\n"
+        "<b>3) Среда</b>\n"
+        "Оплата до 12 ч — выплата в четверг в 15 ч\n"
+        "Оплата после 13 ч — выплата в пятницу в 15 ч\n\n"
+        "<b>4) Четверг</b>\n"
+        "Оплата до 12 ч — выплата в пятницу в 15 ч\n"
+        "Оплата после 13 ч — выплата в понедельник в 15 ч\n\n"
+        "<b>5) Пятница</b>\n"
+        "Оплата до 12 ч — выплата в понедельник в 15 ч\n"
+        "Оплата после 13 ч — выплата во вторник в 15 ч\n\n"
+        "<b>6) Суббота, воскресенье</b>\n"
+        "Оплата по времени не имеет значения\n"
+        "Выплата во вторник в 15 ч"
+    )
 
 
 def make_partners_no_link_text() -> str:
@@ -651,12 +677,7 @@ def make_admin_pending_withdrawals_text(items: Iterable[Mapping[str, Any]]) -> s
     lines = []
     for r in items:
         addr = str(r.get("address", ""))
-        fee = r.get("fee_amount")
-        net = r.get("net_amount")
-        if fee is not None and net is not None:
-            amt = f"списание {r.get('amount')}, комиссия {fee}, к выплате {net} {r.get('currency')}"
-        else:
-            amt = f"{r.get('currency')} {r.get('amount')}"
+        amt = f"{r.get('currency')} {r.get('amount')}"
         line = (
             f"ID: {r.get('id')} | {amt} → "
             f"{addr[:20]}{'...' if len(addr) > 20 else ''} | "
@@ -670,12 +691,7 @@ def make_admin_withdraw_card_text(item: Mapping[str, Any]) -> str:
     addr = str(item.get("address", ""))
     cur = item.get("currency", "USDT")
     gross = item.get("amount")
-    fee = item.get("fee_amount")
-    net = item.get("net_amount")
-    if fee is not None and net is not None:
-        amt_part = f"списание {gross} {cur}, комиссия {fee}, к выплате {net}"
-    else:
-        amt_part = f"{cur} {gross}"
+    amt_part = f"{cur} {gross}"
     return (
         f"Вывод #{item.get('id')}: {amt_part} | "
         f"Адрес: {addr[:30]}{'...' if len(addr) > 30 else ''} | "
@@ -692,7 +708,7 @@ def make_admin_fin_settings_text(data: Mapping[str, Any]) -> str:
         f"Максимальный депозит: {data.get('max_deposit_usdt')} USDT\n\n"
         f"Минимальный вывод: {data.get('min_withdraw_usdt')} USDT\n"
         f"Максимальный вывод: {data.get('max_withdraw_usdt')} USDT\n"
-        "(лимиты по сумме списания с баланса; комиссия 10%)\n\n"
+        "(лимиты по сумме списания с баланса)\n\n"
         f"Минимальная инвестиция: {data.get('min_invest_usdt')} USDT\n"
         f"Максимальная инвестиция: {data.get('max_invest_usdt')} USDT\n\n"
         f"Приветственный бонус 100 USDT: {bonus_line}"

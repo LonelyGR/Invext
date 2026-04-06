@@ -6,8 +6,6 @@ from typing import Dict, List, Optional
 
 from pydantic import BaseModel, computed_field
 
-from src.services.withdraw_service import withdraw_fee_and_net
-
 
 class LoginRequest(BaseModel):
     token: str
@@ -171,13 +169,11 @@ class UserWithdrawRequest(BaseModel):
 
     @computed_field
     def fee_amount(self) -> Decimal:
-        fee, _ = withdraw_fee_and_net(self.amount)
-        return fee
+        return Decimal("0")
 
     @computed_field
     def net_amount(self) -> Decimal:
-        _, net = withdraw_fee_and_net(self.amount)
-        return net
+        return self.amount
 
 
 class UserActionItem(BaseModel):

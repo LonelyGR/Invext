@@ -17,6 +17,7 @@ from src.models.referral_reward import ReferralReward, STATUS_PAID
 from src.services.ledger_service import (
     LEDGER_TYPE_DEPOSIT,
     LEDGER_TYPE_WITHDRAW,
+    LEDGER_TYPE_WITHDRAW_REFUND,
     LEDGER_TYPE_INVEST,
     LEDGER_TYPE_PROFIT,
     LEDGER_TYPE_REFERRAL_BONUS,
@@ -228,6 +229,14 @@ async def get_user_with_stats(db: AsyncSession, telegram_id: int) -> Optional[di
             )
         )
     )
+    my_w_usdt_refund_res = await db.execute(
+        select(func.coalesce(func.sum(LedgerTransaction.amount_usdt), 0)).where(
+            and_(
+                LedgerTransaction.user_id == user.id,
+                LedgerTransaction.type == LEDGER_TYPE_WITHDRAW_REFUND,
+            )
+        )
+    )
 
     my_d_usdc_res = await db.execute(
         select(func.coalesce(func.sum(WalletTransaction.amount), 0)).where(
@@ -326,7 +335,8 @@ async def get_user_with_stats(db: AsyncSession, telegram_id: int) -> Optional[di
         "team_deposits_usdc": team_usdc,
         "my_deposits_total_usdt": my_d_usdt_res.scalar() or Decimal("0"),
         "my_deposits_total_usdc": my_d_usdc_res.scalar() or Decimal("0"),
-        "my_withdrawals_total_usdt": my_w_usdt_res.scalar() or Decimal("0"),
+        "my_withdrawals_total_usdt": (my_w_usdt_res.scalar() or Decimal("0"))
+        - (my_w_usdt_refund_res.scalar() or Decimal("0")),
         "my_withdrawals_total_usdc": my_w_usdc_res.scalar() or Decimal("0"),
         "balance_usdt": balance_usdt,
         "invested_total_usdt": invested_total,

@@ -1,35 +1,30 @@
 """
-Сервис заявок на вывод: создание (с проверкой баланса), список, админ approve/reject.
-При approve — создаётся запись в ledger WITHDRAW COMPLETED (баланс списывается).
-
-Сумма заявки (amount) — полное списание с баланса. Комиссия 10% от этой суммы;
-на внешний кошелёк отправляется 90% (net), 10% остаётся платформе.
+Сервис заявок на вывод: при создании заявки сумма сразу списывается с баланса (hold).
+При подтверждении — только смена статуса; при отклонении или отмене — возврат на баланс.
 """
 from datetime import datetime, timezone
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal
 
-from sqlalchemy import select, func, and_
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.user import User
 from src.models.withdraw_request import WithdrawRequest
 from src.models.wallet_transaction import WalletTransaction
+from src.models.ledger_transaction import LedgerTransaction
 from src.services.wallet_service import get_balances
 from src.services.settings_service import get_system_settings
-
-# Доля комиссии от суммы списания (gross).
-WITHDRAW_FEE_RATE = Decimal("0.10")
+from src.services.ledger_service import (
+    LEDGER_TYPE_WITHDRAW,
+    LEDGER_TYPE_WITHDRAW_REFUND,
+    get_balance_usdt,
+)
 
 
 def withdraw_fee_and_net(gross: Decimal) -> tuple[Decimal, Decimal]:
-    """
-    gross — сумма списания с баланса (как в заявке).
-    Возвращает (fee, net): комиссия 10% от gross, к выплате на адрес — net = gross − fee.
-    """
+    """Обратная совместимость API: комиссии нет, к выплате = сумма заявки."""
     g = gross.quantize(Decimal("0.01"))
-    fee = (g * WITHDRAW_FEE_RATE).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-    net = g - fee
-    return fee, net
+    return Decimal("0"), g
 
 
 def _format_withdraw_limit(n: float) -> str:
@@ -47,6 +42,60 @@ def _validate_amount(amount: Decimal, min_val: float, max_val: float) -> None:
         )
 
 
+async def _find_usdt_ledger_hold(
+    db: AsyncSession, user_id: int, withdraw_id: int
+) -> LedgerTransaction | None:
+    r = await db.execute(
+        select(LedgerTransaction).where(
+            LedgerTransaction.user_id == user_id,
+            LedgerTransaction.type == LEDGER_TYPE_WITHDRAW,
+            LedgerTransaction.metadata_json.contains({"withdraw_request_id": withdraw_id}),
+        ).limit(1)
+    )
+    return r.scalar_one_or_none()
+
+
+async def _find_usdc_withdraw_hold(
+    db: AsyncSession, withdraw_id: int
+) -> WalletTransaction | None:
+    r = await db.execute(
+        select(WalletTransaction).where(
+            WalletTransaction.related_withdraw_request_id == withdraw_id,
+            WalletTransaction.type == "WITHDRAW",
+            WalletTransaction.status == "COMPLETED",
+        ).limit(1)
+    )
+    return r.scalar_one_or_none()
+
+
+async def _refund_usdt_hold(
+    db: AsyncSession, user: User, req: WithdrawRequest, *, reason: str
+) -> None:
+    if await _find_usdt_ledger_hold(db, user.id, req.id):
+        db.add(
+            LedgerTransaction(
+                user_id=user.id,
+                type=LEDGER_TYPE_WITHDRAW_REFUND,
+                amount_usdt=req.amount,
+                metadata_json={"withdraw_request_id": req.id, "reason": reason},
+            )
+        )
+        user.balance_usdt = await get_balance_usdt(db, user.id)
+
+
+async def _refund_usdc_hold(db: AsyncSession, user: User, req: WithdrawRequest) -> None:
+    if await _find_usdc_withdraw_hold(db, req.id):
+        db.add(
+            WalletTransaction(
+                user_id=user.id,
+                currency="USDC",
+                type="DEPOSIT",
+                amount=req.amount,
+                status="COMPLETED",
+            )
+        )
+
+
 async def create_withdraw_request(
     db: AsyncSession,
     telegram_id: int,
@@ -54,22 +103,13 @@ async def create_withdraw_request(
     amount: Decimal,
     address: str,
 ) -> WithdrawRequest:
-    """Создать заявку на вывод (PENDING). Проверка баланса и лимитов.
-
-    amount — сумма полного списания с баланса (до вычета комиссии на стороне сети:
-    комиссия 10% от этой суммы, пользователю на адрес уходит 90%).
-
-    Защита от дублей: при повторной отправке тех же данных (user, currency, amount, address)
-    и статусе PENDING возвращает уже существующую заявку.
-    """
+    """Создать заявку PENDING и сразу зарезервировать сумму на балансе."""
     settings = await get_system_settings(db)
-    # Бизнес-правило: минимальная сумма вывода 50 USDT (даже если настройки меньше).
     effective_min = max(Decimal(str(settings.min_withdraw_usdt)), Decimal("50"))
     _validate_amount(amount, float(effective_min), float(settings.max_withdraw_usdt))
 
-    _, net = withdraw_fee_and_net(amount)
-    if net <= 0:
-        raise ValueError("Сумма к получению после комиссии должна быть больше 0. Увеличьте сумму вывода.")
+    if amount <= 0:
+        raise ValueError("Сумма должна быть больше 0.")
 
     result = await db.execute(select(User).where(User.telegram_id == telegram_id))
     user = result.scalar_one_or_none()
@@ -81,7 +121,6 @@ async def create_withdraw_request(
     if available < amount:
         raise ValueError(f"Недостаточно средств. Доступно {currency}: {available}")
 
-    # Идемпотентность: если уже есть PENDING-заявка с теми же параметрами, возвращаем её.
     existing_q = await db.execute(
         select(WithdrawRequest).where(
             WithdrawRequest.user_id == user.id,
@@ -103,6 +142,32 @@ async def create_withdraw_request(
         status="PENDING",
     )
     db.add(req)
+    await db.flush()
+
+    if currency == "USDT":
+        db.add(
+            LedgerTransaction(
+                user_id=user.id,
+                type=LEDGER_TYPE_WITHDRAW,
+                amount_usdt=amount,
+                metadata_json={"withdraw_request_id": req.id},
+            )
+        )
+        user.balance_usdt = await get_balance_usdt(db, user.id)
+    elif currency == "USDC":
+        db.add(
+            WalletTransaction(
+                user_id=user.id,
+                currency=currency,
+                type="WITHDRAW",
+                amount=amount,
+                status="COMPLETED",
+                related_withdraw_request_id=req.id,
+            )
+        )
+    else:
+        raise ValueError("Unsupported currency")
+
     await db.flush()
     return req
 
@@ -133,84 +198,109 @@ async def get_pending_withdrawals_with_users(db: AsyncSession) -> list:
 async def approve_withdraw(
     db: AsyncSession,
     withdraw_id: int,
-    decided_by_telegram_id: int,
-) -> WithdrawRequest:
+    decided_by: int,
+) -> tuple[WithdrawRequest, bool]:
     """
-    Подтвердить вывод: статус APPROVED, создать ledger-транзакцию WITHDRAW COMPLETED.
-    Баланс при создании заявки уже проверялся; повторно не проверяем (админ подтверждает).
+    Подтвердить вывод: статус APPROVED.
+    Если сумма уже зарезервирована при создании заявки — новая проводка не создаётся.
+    Старые PENDING без hold: списание выполняется здесь (как раньше).
+    Второй элемент кортежа — True, если статус изменился (для логирования).
     """
-    async with db.begin():
-        result = await db.execute(
-            select(WithdrawRequest).where(WithdrawRequest.id == withdraw_id).with_for_update()
-        )
-        req = result.scalar_one_or_none()
-        if not req:
-            raise ValueError("Withdraw request not found")
-        if req.status != "PENDING":
-            raise ValueError(f"Request already {req.status}")
+    result = await db.execute(
+        select(WithdrawRequest).where(WithdrawRequest.id == withdraw_id).with_for_update()
+    )
+    req = result.scalar_one_or_none()
+    if not req:
+        raise ValueError("Withdraw request not found")
+    if req.status == "APPROVED":
+        return req, False
+    if req.status != "PENDING":
+        raise ValueError(f"Request already {req.status}")
 
-        # Лочим пользователя и повторно проверяем баланс, чтобы исключить гонки.
-        usr_result = await db.execute(
-            select(User).where(User.id == req.user_id).with_for_update()
-        )
-        usr = usr_result.scalar_one_or_none()
-        if not usr:
-            raise ValueError("User not found")
+    usr_result = await db.execute(select(User).where(User.id == req.user_id).with_for_update())
+    usr = usr_result.scalar_one_or_none()
+    if not usr:
+        raise ValueError("User not found")
 
-        balances = await get_balances(db, usr.telegram_id)
-        if balances.get(req.currency, Decimal("0")) < req.amount:
-            raise ValueError("Недостаточно средств у пользователя")
+    if req.currency == "USDT":
+        hold = await _find_usdt_ledger_hold(db, usr.id, req.id)
+        if not hold:
+            balance = await get_balance_usdt(db, usr.id)
+            if balance < req.amount:
+                raise ValueError("Недостаточно средств у пользователя")
+            db.add(
+                LedgerTransaction(
+                    user_id=usr.id,
+                    type=LEDGER_TYPE_WITHDRAW,
+                    amount_usdt=req.amount,
+                    metadata_json={"withdraw_request_id": req.id, "legacy_on_approve": True},
+                )
+            )
+        usr.balance_usdt = await get_balance_usdt(db, usr.id)
+    elif req.currency == "USDC":
+        if not await _find_usdc_withdraw_hold(db, req.id):
+            balances = await get_balances(db, usr.telegram_id)
+            if balances.get("USDC", Decimal("0")) < req.amount:
+                raise ValueError("Недостаточно средств у пользователя")
+            db.add(
+                WalletTransaction(
+                    user_id=req.user_id,
+                    currency=req.currency,
+                    type="WITHDRAW",
+                    amount=req.amount,
+                    status="COMPLETED",
+                    related_withdraw_request_id=req.id,
+                )
+            )
+    else:
+        raise ValueError("Unsupported currency")
 
-        req.status = "APPROVED"
-        req.decided_at = datetime.now(timezone.utc)
-        req.decided_by = decided_by_telegram_id
-
-        tx = WalletTransaction(
-            user_id=req.user_id,
-            currency=req.currency,
-            type="WITHDRAW",
-            amount=req.amount,
-            status="COMPLETED",
-            related_withdraw_request_id=req.id,
-        )
-        db.add(tx)
-        await db.flush()
-
-    return req
+    req.status = "APPROVED"
+    req.decided_at = datetime.now(timezone.utc)
+    req.decided_by = decided_by
+    await db.flush()
+    return req, True
 
 
 async def reject_withdraw(
     db: AsyncSession,
     withdraw_id: int,
-    decided_by_telegram_id: int,
-) -> WithdrawRequest:
-    """Отклонить заявку: только смена статуса на REJECTED."""
+    decided_by: int,
+) -> tuple[WithdrawRequest, bool]:
+    """Отклонить заявку: статус REJECTED и возврат зарезервированной суммы (если была)."""
     result = await db.execute(
-        select(WithdrawRequest).where(WithdrawRequest.id == withdraw_id)
+        select(WithdrawRequest).where(WithdrawRequest.id == withdraw_id).with_for_update()
     )
     req = result.scalar_one_or_none()
     if not req:
         raise ValueError("Withdraw request not found")
+    if req.status == "REJECTED":
+        return req, False
     if req.status != "PENDING":
         raise ValueError(f"Request already {req.status}")
 
+    user = await db.get(User, req.user_id)
+    if not user:
+        raise ValueError("User not found")
+
+    if req.currency == "USDT":
+        await _refund_usdt_hold(db, user, req, reason="reject")
+    elif req.currency == "USDC":
+        await _refund_usdc_hold(db, user, req)
+
     req.status = "REJECTED"
     req.decided_at = datetime.now(timezone.utc)
-    req.decided_by = decided_by_telegram_id
-    return req
+    req.decided_by = decided_by
+    await db.flush()
+    return req, True
 
 
-async def cancel_withdraw_request(db: AsyncSession, telegram_id: int, withdraw_id: int) -> WithdrawRequest:
+async def cancel_withdraw_request(
+    db: AsyncSession, telegram_id: int, withdraw_id: int
+) -> WithdrawRequest:
     """
-    Отмена вывода пользователем.
-
-    Важно: в текущей бухгалтерской логике средства списываются только при APPROVE
-    (создание WalletTransaction WITHDRAW). Поэтому для статуса PENDING достаточно
-    сменить статус на CANCELLED — баланс возвращать не нужно.
-
-    Транзакцию коммитит вызывающий (FastAPI get_db). Без вложенного session.begin():
-    иначе после COMMIT SAVEPOINT ORM-объект может «протухнуть», и Pydantic при
-    сериализации тронет updated_at вне async-контекста → MissingGreenlet.
+    Отмена вывода пользователем (PENDING → CANCELLED).
+    Зарезервированная сумма возвращается на баланс.
     """
     result = await db.execute(select(User).where(User.telegram_id == telegram_id))
     user = result.scalar_one_or_none()
@@ -227,6 +317,12 @@ async def cancel_withdraw_request(db: AsyncSession, telegram_id: int, withdraw_i
         return req
     if req.status != "PENDING":
         raise ValueError("Нельзя отменить: заявка уже обработана.")
+
+    if req.currency == "USDT":
+        await _refund_usdt_hold(db, user, req, reason="cancel")
+    elif req.currency == "USDC":
+        await _refund_usdc_hold(db, user, req)
+
     req.status = "CANCELLED"
     req.decided_at = datetime.now(timezone.utc)
     req.decided_by = telegram_id

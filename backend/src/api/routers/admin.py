@@ -75,7 +75,7 @@ async def admin_approve_withdraw(
 ):
     """Подтвердить заявку на вывод (создаётся ledger WITHDRAW COMPLETED)."""
     try:
-        req = await approve_withdraw(db, withdraw_id, decided_by_telegram_id)
+        req, _ = await approve_withdraw(db, withdraw_id, decided_by_telegram_id)
         return {"status": "ok", "request_id": req.id, "message": "Withdrawal approved"}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -89,7 +89,7 @@ async def admin_reject_withdraw(
 ):
     """Отклонить заявку на вывод."""
     try:
-        req = await reject_withdraw(db, withdraw_id, decided_by_telegram_id)
+        req, _ = await reject_withdraw(db, withdraw_id, decided_by_telegram_id)
         return {"status": "ok", "request_id": req.id, "message": "Withdrawal rejected"}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

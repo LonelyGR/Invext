@@ -210,9 +210,7 @@ async def withdraw_address_entered(message: Message, state: FSMContext):
         await message.answer(
             make_withdraw_success_text(
                 req_id,
-                gross=result.get("amount", amount),
-                fee=result.get("fee_amount", "—"),
-                net=result.get("net_amount", "—"),
+                amount=result.get("amount", amount),
                 currency=currency,
             ),
             reply_markup=(

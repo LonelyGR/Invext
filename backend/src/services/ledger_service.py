@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 # Типы операций в новом леджере
 LEDGER_TYPE_DEPOSIT = "DEPOSIT"
 LEDGER_TYPE_WITHDRAW = "WITHDRAW"
+LEDGER_TYPE_WITHDRAW_REFUND = "WITHDRAW_REFUND"  # возврат при отмене/отклонении заявки на вывод
 LEDGER_TYPE_INVEST = "INVEST"
 LEDGER_TYPE_INVEST_RETURN = "INVEST_RETURN"
 LEDGER_TYPE_PROFIT = "PROFIT"
@@ -40,6 +41,7 @@ async def get_balance_usdt(db: AsyncSession, user_id: int) -> Decimal:
         LEDGER_TYPE_PROFIT,
         LEDGER_TYPE_REFERRAL_BONUS,
         LEDGER_TYPE_DEPOSIT_BLOCKCHAIN,
+        LEDGER_TYPE_WITHDRAW_REFUND,
     )
     debit_types = (LEDGER_TYPE_WITHDRAW, LEDGER_TYPE_INVEST)
 
