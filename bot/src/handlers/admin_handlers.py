@@ -306,6 +306,7 @@ async def admin_list_withdrawals(callback: CallbackQuery):
         msg_text = make_admin_withdraw_card_text(r)
         await callback.message.answer(
             msg_text,
+            parse_mode="HTML",
             reply_markup=withdraw_actions_kb(r["id"]),
         )
     await callback.answer()

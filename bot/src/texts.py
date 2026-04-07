@@ -690,11 +690,14 @@ def make_admin_pending_withdrawals_text(items: Iterable[Mapping[str, Any]]) -> s
     lines = []
     for r in items:
         addr = str(r.get("address", ""))
+        username = str(r.get("user_username") or "")
+        username_part = f"@{username}" if username else "—"
         amt = f"{r.get('currency')} {r.get('amount')}"
         line = (
-            f"ID: {r.get('id')} | {amt} → "
-            f"{addr[:20]}{'...' if len(addr) > 20 else ''} | "
-            f"user_id={r.get('user_telegram_id')}"
+            f"ID: <code>{r.get('id')}</code> | {amt} → "
+            f"<code>{addr[:20]}{'...' if len(addr) > 20 else ''}</code> | "
+            f"TG: <code>{r.get('user_telegram_id')}</code> | "
+            f"Username: <code>{username_part}</code>"
         )
         lines.append(line)
     return "📤 <b>Заявки на вывод (PENDING)</b>\n\n" + "\n\n".join(lines)
@@ -702,13 +705,16 @@ def make_admin_pending_withdrawals_text(items: Iterable[Mapping[str, Any]]) -> s
 
 def make_admin_withdraw_card_text(item: Mapping[str, Any]) -> str:
     addr = str(item.get("address", ""))
+    username = str(item.get("user_username") or "")
+    username_part = f"@{username}" if username else "—"
     cur = item.get("currency", "USDT")
     gross = item.get("amount")
     amt_part = f"{cur} {gross}"
     return (
-        f"Вывод #{item.get('id')}: {amt_part} | "
-        f"Адрес: {addr[:30]}{'...' if len(addr) > 30 else ''} | "
-        f"TG: {item.get('user_telegram_id')}"
+        f"Вывод #<code>{item.get('id')}</code>: {amt_part} | "
+        f"Адрес: <code>{addr[:30]}{'...' if len(addr) > 30 else ''}</code> | "
+        f"TG: <code>{item.get('user_telegram_id')}</code> | "
+        f"Username: <code>{username_part}</code>"
     )
 
 

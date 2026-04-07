@@ -4124,6 +4124,13 @@ async function loadWithdrawals() {
         const flagsHtml = meta.flags.length
           ? meta.flags.map((f) => `<span class="risk-flag">${f}</span>`).join(" ")
           : '<span class="risk-flag risk-ok">—</span>';
+        const usernameRaw = String(w.username || "");
+        const usernameCopy = usernameRaw ? `@${usernameRaw}` : "";
+        const usernameHtml = usernameRaw
+          ? `<code class="copy-code-chip withdrawal-copy-code" title="Клик: скопировать username" data-copy-value="${escapeHtmlAttr(
+              usernameCopy
+            )}">${escapeHtmlAttr(usernameCopy)}</code>`
+          : "—";
         return `
       <tr class="withdrawal-row withdrawal-row--${meta.level}" data-withdrawal-id="${w.id}">
         <td>${
@@ -4133,11 +4140,13 @@ async function loadWithdrawals() {
         }</td>
         <td>${withdrawalSignalBadgeHtml(meta.level)}</td>
         <td>${withdrawalSlaCellLabel(meta.ageMin)}</td>
-        <td>${w.id}</td>
+        <td><code class="copy-code-chip withdrawal-copy-code" title="Клик: скопировать ID" data-copy-value="${w.id}">${w.id}</code></td>
         <td>${userCell}</td>
-        <td>${w.username || "—"}</td>
+        <td>${usernameHtml}</td>
         <td class="amount-negative"><div>−${w.amount} ${w.currency}</div><div class="mini-hint">зарезервировано при заявке</div></td>
-        <td class="cell-address">${escapeHtmlAttr(w.address || "")} <button type="button" class="btn-secondary-small copy-address-btn" data-address="${escapeHtmlAttr(w.address || "")}">Копировать</button></td>
+        <td class="cell-address"><code class="copy-code-chip withdrawal-copy-code" title="Клик: скопировать адрес" data-copy-value="${escapeHtmlAttr(
+          w.address || ""
+        )}">${escapeHtmlAttr(w.address || "")}</code></td>
         <td><span class="${withdrawalStatusBadge(w.status)}">${w.status}</span></td>
         <td>${flagsHtml}</td>
         <td>
@@ -4240,11 +4249,12 @@ async function loadWithdrawals() {
       saveState(WITHDRAWALS_FILTERS_KEY, { status, amount_min, amount_max, currency_filter });
       loadWithdrawals();
     });
-    section.querySelectorAll(".copy-address-btn").forEach((btn) => {
-      btn.addEventListener("click", async () => {
-        const addr = btn.getAttribute("data-address") || "";
-        const ok = await copyTextToClipboard(addr);
-        showToast(ok ? "Адрес скопирован" : "Не удалось скопировать адрес", ok ? "success" : "error");
+    section.querySelectorAll(".withdrawal-copy-code").forEach((el) => {
+      el.addEventListener("click", async () => {
+        const value = el.getAttribute("data-copy-value") || "";
+        if (!value) return;
+        const ok = await copyTextToClipboard(value);
+        showToast(ok ? "Скопировано" : "Не удалось скопировать", ok ? "success" : "error");
       });
     });
     section.querySelectorAll(".withdrawal-detail-btn").forEach((btn) => {
