@@ -34,8 +34,8 @@ WELCOME_ABOUT = """📊 <b>О проекте</b>
 • Минимум действий со стороны пользователя  
 
 💸 <b>Дополнительный доход:</b>
-10-уровневая реферальная система  
-+0,5% с каждой сделки партнёров  
+1 уровень реферальной системы  
++1% с суммы сделки вашего прямого реферала  
 
 🗓 <b>Торговые дни:</b> Пн–Пт  
 Выходные: Сб–Вс"""
@@ -419,7 +419,7 @@ def make_partners_main_text(me: Mapping[str, Any], link: str | None, levels: lis
         "",
         sep,
         "",
-        "📊 <b>Уровни рефералов</b>",
+        "📊 <b>Реферальный уровень</b>",
         "",
     ]
     n = min(len(levels), len(_PARTNERS_LEVEL_EMOJI))
@@ -464,11 +464,11 @@ def make_partners_no_link_text() -> str:
 
 def make_partners_team_text(me: Mapping[str, Any]) -> str:
     levels_lines: list[str] = []
-    for level in range(1, 11):
-        count = me.get(f"referrals_level_{level}", 0)
-        if level == 1 and not count:
-            count = me.get("referrals_count", 0)
-        levels_lines.append(f"{level} уровень — {int(count or 0)}")
+    level = 1
+    count = me.get(f"referrals_level_{level}", 0)
+    if not count:
+        count = me.get("referrals_count", 0)
+    levels_lines.append(f"{level} уровень — {int(count or 0)}")
 
     return "<b>📊 Моя команда</b>\n\n" + "\n".join(levels_lines)
 

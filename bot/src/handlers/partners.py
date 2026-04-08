@@ -20,8 +20,8 @@ from src.texts import make_partners_deals_schedule_text, make_partners_main_text
 
 router = Router(name="partners")
 
-# Проценты по уровням для экрана «Партнёры» (как в логике реф. бонусов по сделкам).
-REFERRAL_LEVELS: list[tuple[float, str]] = [(0.5, "") for _ in range(10)]
+# Для экрана «Партнёры»: только 1 уровень с бонусом 1%.
+REFERRAL_LEVELS: list[tuple[float, str]] = [(1.0, "")]
 
 # Запас, если create_start_link / username недоступны (совпадает с публичным ботом).
 _FALLBACK_REF_BOT = "invext_bot"
