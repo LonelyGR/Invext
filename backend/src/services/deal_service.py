@@ -78,13 +78,6 @@ def _is_weekend_chisinau(utc_dt: Optional[dt.datetime] = None) -> bool:
     return wd in (WEEKDAY_SATURDAY, WEEKDAY_SUNDAY)
 
 
-# Проценты реферального бонуса по уровням (1–10)
-REFERRAL_LEVEL_PERCENTS: List[float] = [
-    7.0, 2.0, 1.0, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5,
-]
-MAX_REFERRAL_LEVELS = 10
-
-
 def _rule_for_weekday(schedule: dict[str, dict], weekday: int) -> dict:
     """Правило дня из JSON админки; если дня нет — выключенный запасной слот (без старого недельного шаблона)."""
     r = schedule.get(str(weekday))
@@ -373,33 +366,21 @@ async def participate_in_deal(
     user_locked.balance_usdt = current_balance - amount
     await db.flush()
 
-    # Реферальные бонусы с инвестиций начисляются при закрытии сделки от фактической прибыли
-    # (см. close_deal_flow + apply_referral_rewards_for_investment).
+    # Реферальные бонусы с инвестиций начисляются при успешном входе в сделку:
+    # 1% от суммы участия только прямому рефереру.
+    await apply_referral_rewards_for_investment(
+        db,
+        investor=user_locked,
+        deal=deal,
+        deal_amount_usdt=amount,
+    )
+    await db.flush()
 
     logger.info(
         "Deal participation created: deal_id=%s user_id=%s amount=%s",
         deal.id, user_locked.id, amount,
     )
     return participation
-
-
-async def _get_referrer_chain(db: AsyncSession, user_id: int) -> List[User]:
-    """Цепочка рефереров до MAX_REFERRAL_LEVELS."""
-    chain: List[User] = []
-    current_id: Optional[int] = user_id
-    for _ in range(MAX_REFERRAL_LEVELS):
-        if current_id is None:
-            break
-        result = await db.execute(select(User).where(User.id == current_id))
-        u = result.scalar_one_or_none()
-        if not u or u.referrer_id is None:
-            break
-        current_id = u.referrer_id
-        result_ref = await db.execute(select(User).where(User.id == current_id))
-        referrer = result_ref.scalar_one_or_none()
-        if referrer:
-            chain.append(referrer)
-    return chain
 
 
 async def close_deal_flow(db: AsyncSession, deal: Deal) -> None:
@@ -439,21 +420,6 @@ async def close_deal_flow(db: AsyncSession, deal: Deal) -> None:
             p.profit_amount = Decimal("0")
         p.status = PARTICIPATION_STATUS_IN_PROGRESS
 
-    if participations:
-        await db.flush()
-
-    # Реферальная линия: рассчитываем на закрытии сделки, зачисление — в момент payout по расписанию.
-    for p in participations:
-        inv_user = await db.get(User, p.user_id)
-        if not inv_user:
-            continue
-        profit_for_ref = p.profit_amount or Decimal("0")
-        await apply_referral_rewards_for_investment(
-            db,
-            investor=inv_user,
-            deal=deal,
-            user_profit_usdt=profit_for_ref,
-        )
     if participations:
         await db.flush()
 

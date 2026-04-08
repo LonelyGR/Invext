@@ -5,71 +5,25 @@
    - отключена.
 
 2) ИНВЕСТИЦИОННАЯ ЛИНИЯ (investment_referral):
-   - До 10 уровней, каждому уровню 0.5% от фактической прибыли реферала по сделке
-     (после расчёта profit_amount при закрытии сделки).
-   - Начисление только если получатель бонуса сам участвовал в этой сделке.
-   - Если не участвовал — бонус не начисляется, но фиксируется как упущенный.
+   - только 1 уровень (прямой реферер);
+   - бонус 1% от суммы входа реферала в сделку;
+   - начисление в момент успешного открытия участия в сделке.
 """
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import List, Optional
+from typing import Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from src.models import Deal, DealParticipation, ReferralReward, User
-from src.models.referral_reward import STATUS_MISSED, STATUS_PENDING
+from src.models.referral_reward import STATUS_PENDING
 
-# Инвестиционная линия: 10 уровней по 0.5%
-INVEST_REFERRAL_LEVEL_PERCENTS: List[Decimal] = [Decimal("0.5")] * 10
-MAX_LEVELS = 10
-
-
-async def _get_referrer_chain(
-    db: AsyncSession,
-    user_id: int,
-    max_levels: int = MAX_LEVELS,
-) -> list[User]:
-    """
-    Цепочка рефереров вверх по полю User.referrer_id, максимум max_levels.
-    Защита от самореферала и циклов.
-    """
-    chain: list[User] = []
-    origin_user_id = user_id
-    current_id: Optional[int] = user_id
-    visited: set[int] = {origin_user_id}
-
-    for _ in range(max_levels):
-        if current_id is None:
-            break
-
-        res = await db.execute(select(User).where(User.id == current_id))
-        u = res.scalar_one_or_none()
-        if not u or u.referrer_id is None:
-            break
-
-        # Самореферал и очевидные циклы
-        if u.referrer_id == u.id:
-            break
-
-        next_referrer_id = u.referrer_id
-        # Защита от циклов и возврата к исходному пользователю.
-        if next_referrer_id in visited:
-            break
-
-        res_ref = await db.execute(select(User).where(User.id == next_referrer_id))
-        referrer = res_ref.scalar_one_or_none()
-        if not referrer:
-            break
-        if referrer.id == origin_user_id:
-            break
-        chain.append(referrer)
-        visited.add(referrer.id)
-        current_id = referrer.id
-
-    return chain
+# Инвестиционная линия: только прямой реферер, 1% от суммы участия в сделке.
+REFERRAL_LEVEL_1_PERCENT = Decimal("0.01")
+REFERRAL_LEVEL_1 = 1
+REFERRAL_AMOUNT_QUANT = Decimal("0.000001")
 
 
 async def apply_referral_rewards_for_deposit(
@@ -91,79 +45,53 @@ async def apply_referral_rewards_for_investment(
     db: AsyncSession,
     investor: User,
     deal: Deal,
-    user_profit_usdt: Decimal,
+    deal_amount_usdt: Decimal,
 ) -> None:
     """
     Инвестиционная реферальная линия:
-    - до 10 уровней, каждому уровню 0.5% от фактической прибыли инвестора по сделке
-      (user_profit_usdt — то же, что profit_amount у участия после закрытия сделки);
-    - если реферер участвует в этой сделке -> создаётся PENDING бонус
-      (фактическое начисление происходит в момент выплат по расписанию);
-    - иначе фиксируется запись ReferralReward со статусом MISSED (упущенная прибыль).
-
-    Вызывается из close_deal_flow после расчёта profit_amount по участию (не при вводе суммы инвестиции).
+    - только прямой реферер (level=1);
+    - бонус = 1% от суммы участия реферала в сделке;
+    - создаётся запись ReferralReward со статусом PENDING;
+    - фактическое зачисление происходит в process_pending_payouts.
     """
-    if user_profit_usdt <= 0:
+    if deal_amount_usdt <= 0:
         return
 
-    referrers = await _get_referrer_chain(db, investor.id, MAX_LEVELS)
-    if not referrers:
+    if not investor.referrer_id:
         return
 
-    # Загрузим всех участников сделки разом, чтобы быстро проверять участие.
-    participations_result = await db.execute(
-        select(DealParticipation)
-        .options(selectinload(DealParticipation.user))
-        .where(DealParticipation.deal_id == deal.id)
-    )
-    participations = participations_result.scalars().all()
-    participant_user_ids = {p.user_id for p in participations}
+    if investor.referrer_id == investor.id:
+        return
 
-    # Защита от дублей:
-    # собираем уже созданные referral_rewards по этой сделке/инвестору и пропускаем дубли.
-    referrer_ids = [r.id for r in referrers]
-    existing_rewards_result = await db.execute(
-        select(ReferralReward.to_user_id, ReferralReward.level).where(
+    referrer = await db.get(User, investor.referrer_id)
+    if not referrer:
+        return
+
+    existing_result = await db.execute(
+        select(ReferralReward.id).where(
             ReferralReward.deal_id == deal.id,
             ReferralReward.from_user_id == investor.id,
-            ReferralReward.to_user_id.in_(referrer_ids),
+            ReferralReward.to_user_id == referrer.id,
+            ReferralReward.level == REFERRAL_LEVEL_1,
         )
     )
-    existing_reward_keys = {(int(r[0]), int(r[1])) for r in existing_rewards_result.all()}
+    if existing_result.scalar_one_or_none() is not None:
+        return
 
-    for level_index, referrer in enumerate(referrers):
-        level = level_index + 1
-        if level > len(INVEST_REFERRAL_LEVEL_PERCENTS):
-            break
-        if (referrer.id, level) in existing_reward_keys:
-            continue
+    reward_amount = (deal_amount_usdt * REFERRAL_LEVEL_1_PERCENT).quantize(REFERRAL_AMOUNT_QUANT)
+    if reward_amount <= 0:
+        return
 
-        pct = INVEST_REFERRAL_LEVEL_PERCENTS[level_index]
-        reward_amount = (user_profit_usdt * pct / Decimal("100")).quantize(Decimal("0.000001"))
-        if reward_amount <= 0:
-            continue
-
-        # Проверяем: сам ли реферер участвует в этой сделке.
-        if referrer.id in participant_user_ids:
-            pending = ReferralReward(
-                deal_id=deal.id,
-                from_user_id=investor.id,
-                to_user_id=referrer.id,
-                level=level,
-                amount=reward_amount,
-                status=STATUS_PENDING,
-            )
-            db.add(pending)
-        else:
-            missed = ReferralReward(
-                deal_id=deal.id,
-                from_user_id=investor.id,
-                to_user_id=referrer.id,
-                level=level,
-                amount=reward_amount,
-                status=STATUS_MISSED,
-            )
-            db.add(missed)
+    db.add(
+        ReferralReward(
+            deal_id=deal.id,
+            from_user_id=investor.id,
+            to_user_id=referrer.id,
+            level=REFERRAL_LEVEL_1,
+            amount=reward_amount,
+            status=STATUS_PENDING,
+        )
+    )
 
 
 async def get_potential_referral_bonuses_for_deal(
@@ -171,8 +99,8 @@ async def get_potential_referral_bonuses_for_deal(
     deal: Deal,
 ) -> dict[int, Decimal]:
     """
-    Рассчитать потенциальные реферальные бонусы по текущей сделке для пользователей,
-    которые ещё НЕ участвуют в ней, но могут получить бонус, если успеют войти.
+    Рассчитать потенциальные реферальные бонусы по текущей сделке.
+    Для новой логики: 1% от суммы участия только прямому рефереру.
 
     Возвращает словарь {referrer_user_id: сумма_бонуса}.
     Ничего не записывает в БД, только считает по текущим участиям.
@@ -185,43 +113,21 @@ async def get_potential_referral_bonuses_for_deal(
     if not participations:
         return {}
 
-    participant_user_ids = {p.user_id for p in participations}
-
     bonuses: dict[int, Decimal] = {}
-
-    profit_pct = deal.profit_percent or deal.percent
     for p in participations:
         investor_id = p.user_id
         amount = p.amount
         if amount <= 0:
             continue
 
-        referrers = await _get_referrer_chain(db, investor_id, MAX_LEVELS)
-        if not referrers:
+        investor = await db.get(User, investor_id)
+        if not investor or not investor.referrer_id:
             continue
-
-        # Оценка потенциальной прибыли по текущему % сделки (для напоминания до закрытия).
-        if profit_pct is None:
-            estimated_profit = Decimal("0")
-        else:
-            estimated_profit = (
-                amount * Decimal(str(profit_pct)) / Decimal("100")
-            ).quantize(Decimal("0.000001"))
-
-        for level_index, referrer in enumerate(referrers):
-            level = level_index + 1
-            if level > len(INVEST_REFERRAL_LEVEL_PERCENTS):
-                break
-
-            # Нас интересуют только те, кто ПОКА не участвует в сделке.
-            if referrer.id in participant_user_ids:
-                continue
-
-            pct = INVEST_REFERRAL_LEVEL_PERCENTS[level_index]
-            reward_amount = (estimated_profit * pct / Decimal("100")).quantize(Decimal("0.000001"))
-            if reward_amount <= 0:
-                continue
-
-            bonuses[referrer.id] = bonuses.get(referrer.id, Decimal("0")) + reward_amount
+        if investor.referrer_id == investor.id:
+            continue
+        reward_amount = (amount * REFERRAL_LEVEL_1_PERCENT).quantize(REFERRAL_AMOUNT_QUANT)
+        if reward_amount <= 0:
+            continue
+        bonuses[investor.referrer_id] = bonuses.get(investor.referrer_id, Decimal("0")) + reward_amount
 
     return bonuses

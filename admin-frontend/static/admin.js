@@ -1148,7 +1148,7 @@ async function loadUsers() {
                 <tr>
                   <th>ID</th>
                   <th>Telegram ID</th>
-                  <th>Username</th>
+                  <th>Юзернейм</th>
                   <th>Метка</th>
                   <th>balance_usdt</th>
                   <th>ledger_balance</th>
@@ -3095,7 +3095,7 @@ async function loadUserDetail(userId) {
       <div class="panel-card">
         <div class="user-detail-identity">
           <div>Telegram ID: <strong>${u.telegram_id}</strong></div>
-          <div>Username: <strong>${u.username || ""}</strong></div>
+          <div>Юзернейм: <strong>${u.username || ""}</strong></div>
           <div>Статус: <strong>${u.is_blocked ? "Заблокирован" : "Активен"}</strong>${u.blocked_reason ? ` · ${escapeHtmlAttr(u.blocked_reason)}` : ""}</div>
           <div>Referrer: <strong>${detail.referrer ? `#${detail.referrer.id} (${detail.referrer.telegram_id})` : "—"}</strong></div>
           <div>Referrals count: <strong>${detail.referrals_count || 0}</strong></div>
@@ -3234,7 +3234,7 @@ async function loadUserDetail(userId) {
                 <tr>
                   <th>User ID</th>
                   <th>Telegram ID</th>
-                  <th>Username</th>
+                  <th>Юзернейм</th>
                   <th>Баланс</th>
                   <th>Профиль</th>
                 </tr>
@@ -3293,7 +3293,7 @@ async function loadUserDetail(userId) {
                   <tr>
                     <th>User ID</th>
                     <th>Telegram ID</th>
-                    <th>Username</th>
+                    <th>Юзернейм</th>
                     <th>Баланс</th>
                     <th>Уровень</th>
                     <th>Профиль</th>
@@ -3393,7 +3393,7 @@ async function loadUserDetail(userId) {
                       <tr>
                         <th>User ID</th>
                         <th>Telegram ID</th>
-                        <th>Username</th>
+                        <th>Юзернейм</th>
                         <th>Баланс</th>
                         <th>Профиль</th>
                       </tr>
@@ -3784,7 +3784,7 @@ function withdrawalQueueAgeMinutes(w) {
   return Math.floor((Date.now() - t) / 60000);
 }
 
-/** HIGH_AMOUNT: всегда risk approve (не запрет). Запрет только адрес / mismatch.
+/** HIGH_AMOUNT: всегда ручная проверка (не запрет). Запрет только адрес / mismatch.
  *  Нет времени / user_id не поднимают до Action сами по себе — только слабый unknown. */
 function classifyWithdrawalSignals(w) {
   const flags = getWithdrawalRiskFlags(w);
@@ -4168,7 +4168,7 @@ async function loadWithdrawals() {
 
     section.innerHTML = `
       <header class="ds-page-header">
-        <h1 class="ds-page-header__title">Treasury · выводы</h1>
+        <h1 class="ds-page-header__title">Выводы</h1>
         <p class="ds-page-header__desc">Очередь на решение: сигнал OK/Watch/Action, время в очереди, режим «Решить» перед approve/reject.</p>
       </header>
       ${escalationBanner}
@@ -4179,7 +4179,7 @@ async function loadWithdrawals() {
           <span class="withdrawal-queue-stat">Watch: <strong>${statusParam === "PENDING" ? countWatch : "—"}</strong></span>
           <span class="withdrawal-queue-stat">OK: <strong>${statusParam === "PENDING" ? countOk : "—"}</strong></span>
         </div>
-        <p class="withdrawal-queue-summary__hint">SLA: Watch &gt; ${WITHDRAWAL_SLA_WATCH_MIN} мин, Action &gt; ${WITHDRAWAL_SLA_ACTION_MIN} мин (только при валидном времени). Нет времени/user_id — бейдж «Нет данных», не Action. HIGH_AMOUNT — risk approve, не запрет.</p>
+        <p class="withdrawal-queue-summary__hint">SLA: Watch &gt; ${WITHDRAWAL_SLA_WATCH_MIN} мин, Action &gt; ${WITHDRAWAL_SLA_ACTION_MIN} мин (только при валидном времени). Нет времени/user_id — бейдж «Нет данных», не Action. HIGH_AMOUNT — ручная проверка, не запрет.</p>
       </div>
       <div class="panel-card">
         <div class="toolbar filters-toolbar withdrawal-filters-toolbar">
@@ -4226,7 +4226,7 @@ async function loadWithdrawals() {
                   <th>В очереди</th>
                   <th>ID</th>
                   <th>Кто</th>
-                  <th>Username</th>
+                  <th>Юзернейм</th>
                   <th>Суммы</th>
                   <th>Кошелёк</th>
                   <th>Статус</th>

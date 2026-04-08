@@ -1,26 +1,34 @@
 """
-Проверка формулы реферального бонуса: 0.5% от фактической прибыли реферала по сделке.
+Проверки реферальной логики:
+- только уровень 1,
+- бонус 1% от суммы сделки,
+- точность Decimal.
 
 Запуск: python -m unittest backend.tests.test_referral_profit_bonus -v
-(из корня репозитория, при необходимости PYTHONPATH=backend)
 """
 from decimal import Decimal
 import unittest
 
 
-def level_bonus_from_user_profit(user_profit: Decimal, level_pct: Decimal = Decimal("0.5")) -> Decimal:
-    """Как в referral_service: pct% от прибыли, квантование 6 знаков."""
-    return (user_profit * level_pct / Decimal("100")).quantize(Decimal("0.000001"))
+def level_1_bonus_from_deal_amount(deal_amount: Decimal) -> Decimal:
+    return (deal_amount * Decimal("0.01")).quantize(Decimal("0.000001"))
 
 
 class ReferralProfitBonusTests(unittest.TestCase):
-    def test_example_50_usd_3pct_profit(self):
-        investment = Decimal("50")
-        deal_profit_pct = Decimal("3")
-        user_profit = investment * deal_profit_pct / Decimal("100")
-        self.assertEqual(user_profit, Decimal("1.5"))
-        bonus = level_bonus_from_user_profit(user_profit)
-        self.assertEqual(bonus, Decimal("0.007500"))
+    def test_direct_referrer_gets_1_percent_from_deal_amount(self):
+        bonus = level_1_bonus_from_deal_amount(Decimal("50"))
+        self.assertEqual(bonus, Decimal("0.500000"))
+
+    def test_decimal_precision_no_float_error(self):
+        bonus = level_1_bonus_from_deal_amount(Decimal("33.33"))
+        self.assertEqual(bonus, Decimal("0.333300"))
+
+    def test_only_level_1_applies(self):
+        # Для любой суммы формула одинакова: только 1% level 1.
+        self.assertEqual(level_1_bonus_from_deal_amount(Decimal("100")), Decimal("1.000000"))
+
+    def test_no_bonus_for_zero_amount(self):
+        self.assertEqual(level_1_bonus_from_deal_amount(Decimal("0")), Decimal("0.000000"))
 
 
 if __name__ == "__main__":
