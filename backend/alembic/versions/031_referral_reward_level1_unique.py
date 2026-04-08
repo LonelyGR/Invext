@@ -1,14 +1,14 @@
 """add unique constraint for referral reward idempotency
 
-Revision ID: 031
-Revises: 030
+Revision ID: 032
+Revises: 031
 Create Date: 2026-04-07 00:00:00.000000
 """
 
 from alembic import op
 
-revision = "031"
-down_revision = "030"
+revision = "032"
+down_revision = "031"
 branch_labels = None
 depends_on = None
 
