@@ -6,10 +6,29 @@
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 from typing import Iterable, Mapping, Any
 
 
 # === formatting helpers ===
+
+def _fmt_usdt_referral(value: Any) -> str:
+    """
+    Реферальные суммы: до 6 знаков (как квант на бэкенде), без хвостовых нулей,
+    чтобы мелкие начисления не округлялись до «0.01» как у обычного баланса.
+    """
+    try:
+        d = Decimal(str(value).strip())
+    except (InvalidOperation, ValueError, TypeError, AttributeError):
+        return "0.00"
+    d = d.quantize(Decimal("0.000001"))
+    if d == 0:
+        return "0.00"
+    s = format(d, "f")
+    if "." in s:
+        s = s.rstrip("0").rstrip(".")
+    return s if s else "0.00"
+
 
 def _fmt_usdt(value: Any) -> str:
     """
@@ -379,7 +398,7 @@ def make_partners_main_text(me: Mapping[str, Any], link: str | None, levels: lis
     _ = levels  # совместимость сигнатуры; используется только один уровень
 
     direct_count = int(me.get("referrals_level_1") or me.get("referrals_count", 0) or 0)
-    earned_l1 = _fmt_usdt(me.get("referral_earned_level_1_usdt", "0"))
+    earned_l1 = _fmt_usdt_referral(me.get("referral_earned_level_1_usdt", "0"))
 
     if link:
         link_block = (
@@ -475,7 +494,7 @@ def make_stats_text(me: Mapping[str, Any]) -> str:
         "📈 <b>Инвестиции и прибыль</b>\n"
         f"Инвестировано: {_fmt_usdt(invested_total)} USDT\n"
         f"Прибыль: {_fmt_usdt(profit_total)} USDT\n"
-        f"Реферальный доход: {_fmt_usdt(referral_income)} USDT\n\n"
+        f"Реферальный доход: {_fmt_usdt_referral(referral_income)} USDT\n\n"
         
         "📄 <b>Заявки</b>\n"
         f"Пополнения: {deposits_count}\n"
