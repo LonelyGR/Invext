@@ -107,7 +107,13 @@
 
     const pending = Number(data.pending_withdrawals_count || 0);
     const usersCount = Number(data.users_count || 0);
-    const totalLedger = Number(data.total_ledger_balance_usdt || 0);
+    const totalLedger =
+      typeof globalThis.formatUsdt2 === "function"
+        ? globalThis.formatUsdt2(Number(data.total_ledger_balance_usdt || 0))
+        : Number(data.total_ledger_balance_usdt || 0).toLocaleString("ru-RU", {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+          });
     const queueLevel = computeQueueLevel(pending);
 
     return React.createElement(

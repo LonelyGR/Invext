@@ -164,6 +164,23 @@ function escapeHtmlAttr(s) {
     .replace(/>/g, "&gt;");
 }
 
+/** Суммы USDT в UI: ровно два знака после запятой (как в боте: 0,00). */
+function formatUsdt2(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "0,00";
+  return n.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+globalThis.formatUsdt2 = formatUsdt2;
+
+/** Сумма в строке вывода, если валюта USDT — иначе как есть (USDC и т.д.). */
+function formatWithdrawalAmountCell(w) {
+  const cur = String(w.currency || "USDT").toUpperCase();
+  if (cur === "USDT") return formatUsdt2(w.amount);
+  const n = Number(w.amount);
+  if (!Number.isFinite(n)) return String(w.amount ?? "");
+  return n.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
 async function apiRequest(path, options = {}) {
   const isFormData = options.body instanceof FormData;
   const headers = isFormData
@@ -370,7 +387,7 @@ function initGlobalSearch() {
             data.ledger
               .map(
                 (l) =>
-                  `<a class="global-search-item" href="#user-${l.user_id}">user #${l.user_id} · ${l.type} · ${l.amount_usdt} USDT</a>`
+                  `<a class="global-search-item" href="#user-${l.user_id}">user #${l.user_id} · ${l.type} · ${formatUsdt2(l.amount_usdt)} USDT</a>`
               )
               .join("")
           );
@@ -517,7 +534,7 @@ async function loadDashboard() {
       apiRequest(`/deposits?page=1&page_size=500&date_from=${encodeURIComponent(currentRange.from)}&date_to=${encodeURIComponent(currentRange.to)}`).catch(() => ({ items: [] })),
     ]);
     const activeDealText = data.active_deal_number
-      ? `#${data.active_deal_number} · ${data.active_deal_percent}% · инвестировано ${data.active_deal_invested_usdt} USDT`
+      ? `#${data.active_deal_number} · ${data.active_deal_percent}% · инвестировано ${formatUsdt2(data.active_deal_invested_usdt)} USDT`
       : "Нет активной сделки";
     const activeDealCloseText = data.active_deal_closes_at
       ? new Date(data.active_deal_closes_at).toLocaleString()
@@ -805,7 +822,7 @@ async function loadDashboard() {
         </div>
         <div class="stat-card">
           <div class="stat-label">Общий баланс (ledger)</div>
-          <div class="stat-value">${data.total_ledger_balance_usdt} <span class="stat-unit">USDT</span></div>
+          <div class="stat-value">${formatUsdt2(data.total_ledger_balance_usdt)} <span class="stat-unit">USDT</span></div>
         </div>
         <div class="stat-card">
           <div class="stat-label">Pending выводов</div>
@@ -887,7 +904,7 @@ async function loadDashboard() {
                       (u, idx) => `<li>
                         <span class="top-rank">#${idx + 1}</span>
                         <span class="top-name">${escapeHtmlAttr(u.username || `user_${u.user_id}`)} (${u.telegram_id})</span>
-                        <span class="top-value">${u.balance_usdt} USDT</span>
+                        <span class="top-value">${formatUsdt2(u.balance_usdt)} USDT</span>
                       </li>`
                     )
                     .join("")
@@ -905,7 +922,7 @@ async function loadDashboard() {
                       (u, idx) => `<li>
                         <span class="top-rank">#${idx + 1}</span>
                         <span class="top-name">${escapeHtmlAttr(u.username || `user_${u.user_id}`)} (${u.telegram_id})</span>
-                        <span class="top-value">${u.referrals_count} refs · ${u.referral_income_usdt} USDT</span>
+                        <span class="top-value">${u.referrals_count} refs · ${formatUsdt2(u.referral_income_usdt)} USDT</span>
                       </li>`
                     )
                     .join("")
@@ -1086,9 +1103,9 @@ async function loadUsers() {
           <td>${u.telegram_id}</td>
           <td>${u.username || ""}</td>
           <td><input type="text" class="inline-tag-input" data-user-id="${u.id}" value="${escapeHtmlAttr(tagsMap[String(u.id)] || "")}" placeholder="VIP / note" title="Локальная метка пользователя (inline edit)" /></td>
-          <td class="num-cell">${u.balance_usdt}</td>
-          <td class="num-cell">${u.ledger_balance_usdt}${mismatch}</td>
-          <td class="num-cell">${u.invested_now_usdt}</td>
+          <td class="num-cell">${formatUsdt2(u.balance_usdt)}</td>
+          <td class="num-cell">${formatUsdt2(u.ledger_balance_usdt)}${mismatch}</td>
+          <td class="num-cell">${formatUsdt2(u.invested_now_usdt)}</td>
           <td>
             <div class="row-actions">
               <button type="button" class="btn-secondary-small user-open-btn" data-user-id="${u.id}">Открыть</button>
@@ -1440,7 +1457,7 @@ function startDealsCountdownForDeal(deal) {
 
 function formatDealUsdtVolume(value) {
   const n = Number(value || 0);
-  return `${n.toLocaleString("ru-RU", { maximumFractionDigits: 2 })} USDT`;
+  return `${n.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDT`;
 }
 
 function formatDealDateShort(iso) {
@@ -2665,7 +2682,7 @@ async function loadDeposits(page = 1) {
         <td>${d.id}</td>
         <td><code class="order-id-cell">${(d.order_id || "").slice(0, 24)}${(d.order_id && d.order_id.length > 24) ? "…" : ""}</code></td>
         <td>${d.telegram_id}${d.username ? ` @${d.username}` : ""}</td>
-        <td class="amount-positive">+${d.amount} ${d.asset}</td>
+        <td class="amount-positive">+${formatUsdt2(d.amount)} ${d.asset}</td>
         <td><span class="${statusBadgeClass(d.status)}">${statusLabel(d.status)}</span></td>
         <td>${d.balance_credited ? '<span class="credited-yes">Да</span>' : '<span class="credited-no">Нет</span>'}</td>
         <td>${d.created_at ? new Date(d.created_at).toLocaleString() : ""}</td>
@@ -2894,7 +2911,7 @@ async function openDepositDetail(id) {
         <dt>Пользователь</dt>
         <dd>${d.telegram_id}${d.username ? ` @${d.username}` : ""} <a href="#user-${d.user_id}" class="link-user">Перейти к пользователю</a></dd>
         <dt>Сумма</dt>
-        <dd class="amount-positive">+${d.amount} ${d.asset} (${d.pay_currency || "usdtbsc"})</dd>
+        <dd class="amount-positive">+${formatUsdt2(d.amount)} ${d.asset} (${d.pay_currency || "usdtbsc"})</dd>
         <dt>Ожидалось к оплате</dt>
         <dd>${d.expected_amount != null ? `${d.expected_amount} ${d.pay_currency || ""}` : "—"}</dd>
         <dt>Фактически оплачено</dt>
@@ -2995,8 +3012,8 @@ async function loadUserDetail(userId) {
         <tr data-invest-status="${escapeHtmlAttr(String(i.deal_status || "").toLowerCase())}">
           <td>${i.deal_number}</td>
           <td>${i.deal_status}</td>
-          <td>${i.amount}</td>
-          <td>${i.profit_amount || ""}</td>
+          <td>${formatUsdt2(i.amount)}</td>
+          <td>${i.profit_amount != null && i.profit_amount !== "" ? formatUsdt2(i.profit_amount) : ""}</td>
           <td>${i.payout_at ? new Date(i.payout_at).toLocaleString() : "—"}</td>
           <td>${new Date(i.created_at).toLocaleString()}</td>
         </tr>`
@@ -3010,7 +3027,7 @@ async function loadUserDetail(userId) {
     const mapWithdrawalRow = (w) => `
         <tr>
           <td>${w.id}</td>
-          <td class="num-cell">${w.amount}</td>
+          <td class="num-cell">${formatWithdrawalAmountCell(w)}</td>
           <td>${w.currency}</td>
           <td class="cell-address">${escapeHtmlAttr(w.address || "")} <button type="button" class="btn-secondary-small copy-address-btn" data-address="${escapeHtmlAttr(w.address || "")}">Копировать</button></td>
           <td>${w.status}</td>
@@ -3041,7 +3058,7 @@ async function loadUserDetail(userId) {
           <td>${r.id}</td>
           <td>${r.telegram_id}</td>
           <td>${r.username || ""}</td>
-          <td class="num-cell">${r.balance_usdt}</td>
+          <td class="num-cell">${formatUsdt2(r.balance_usdt)}</td>
           <td><a href="#user-${r.id}" class="btn-secondary-small">Открыть</a></td>
         </tr>`
       )
@@ -3053,7 +3070,7 @@ async function loadUserDetail(userId) {
           <td>${a.ts ? new Date(a.ts).toLocaleString() : ""}</td>
           <td>${a.source || ""}</td>
           <td>${a.title || ""}</td>
-          <td class="num-cell">${a.amount == null ? "—" : a.amount}</td>
+          <td class="num-cell">${a.amount == null ? "—" : formatUsdt2(a.amount)}</td>
         </tr>`
       )
       .join("");
@@ -3073,7 +3090,7 @@ async function loadUserDetail(userId) {
         <tr>
           <td>${new Date(tx.created_at).toLocaleString()}</td>
           <td>${tx.type}</td>
-          <td class="${cls}">${sign}${tx.amount_usdt}</td>
+          <td class="${cls}">${sign}${formatUsdt2(tx.amount_usdt)}</td>
           <td>${deal}</td>
           <td>${commentCell}</td>
         </tr>`;
@@ -3112,11 +3129,11 @@ async function loadUserDetail(userId) {
           <div class="user-balance-split">
             <div class="user-balance-tile">
               <div class="user-balance-title">Баланс (users.balance_usdt)</div>
-              <div class="user-balance-value" id="user-balance-usdt">${u.balance_usdt}</div>
+              <div class="user-balance-value" id="user-balance-usdt">${formatUsdt2(u.balance_usdt)}</div>
             </div>
             <div class="user-balance-tile">
               <div class="user-balance-title">Баланс по ledger</div>
-              <div class="user-balance-value" id="user-ledger-balance">${u.ledger_balance_usdt}</div>
+              <div class="user-balance-value" id="user-ledger-balance">${formatUsdt2(u.ledger_balance_usdt)}</div>
             </div>
           </div>
           <p class="user-money-snapshot-note">${moneySnapText}</p>
@@ -3185,7 +3202,7 @@ async function loadUserDetail(userId) {
             </select>
           </label>
           <span class="pagination-info">Сделок: ${investments.length} · active: ${invTotals.active} · completed: ${invTotals.completed}</span>
-          <span class="pagination-info">Сумма: ${invTotals.amount.toLocaleString("ru-RU", { maximumFractionDigits: 2 })} USDT · Профит: ${invTotals.profit.toLocaleString("ru-RU", { maximumFractionDigits: 2 })} USDT</span>
+          <span class="pagination-info">Сумма: ${formatUsdt2(invTotals.amount)} USDT · Профит: ${formatUsdt2(invTotals.profit)} USDT</span>
         </div>
         <div class="table-wrapper">
           <div class="table-wrapper-inner">
@@ -3365,7 +3382,7 @@ async function loadUserDetail(userId) {
               <td>${u.user_id}</td>
               <td>${u.telegram_id}</td>
               <td>${escapeHtmlAttr(u.username || "") || "—"}</td>
-              <td class="num-cell">${u.balance_usdt ?? ""}</td>
+              <td class="num-cell">${u.balance_usdt != null && u.balance_usdt !== "" ? formatUsdt2(u.balance_usdt) : ""}</td>
               <td><a href="#user-${u.user_id}" class="btn-secondary-small">Открыть</a></td>
             </tr>`
             )
@@ -3621,7 +3638,7 @@ async function loadUserDetail(userId) {
                   <td>${r.user_id}</td>
                   <td>${r.telegram_id}</td>
                   <td>${username}</td>
-                  <td class="num-cell">${r.balance_usdt}</td>
+                  <td class="num-cell">${formatUsdt2(r.balance_usdt)}</td>
                   <td><a href="#user-${r.user_id}" class="btn-secondary-small">Открыть</a></td>
                 </tr>
               `;
@@ -3706,7 +3723,7 @@ async function loadUserDetail(userId) {
         const lines = (data.items || [])
           .map((it) => {
             const un = it.username ? `@${it.username}` : `id ${it.from_user_id}`;
-            return `${un} — ${it.amount_usdt} USDT`;
+            return `${un} — ${formatUsdt2(it.amount_usdt)} USDT`;
           })
           .join("\n");
         await openUxDialog({
@@ -3861,7 +3878,7 @@ async function openWithdrawalDecisionMode(withdrawalId, { onDone }) {
       "",
       `ID: ${w.id} · статус: ${w.status}`,
       `Пользователь: ${w.user_id ?? "—"} · ${w.telegram_id}${w.username ? ` @${w.username}` : ""}`,
-      `Сумма: ${w.amount} ${w.currency}`,
+      `Сумма: ${formatWithdrawalAmountCell(w)} ${w.currency}`,
       `Адрес: ${w.address || "—"}`,
       "",
       `Создано: ${w.created_at ? new Date(w.created_at).toLocaleString() : "—"}`,
@@ -3998,7 +4015,7 @@ async function openWithdrawalDecisionMode(withdrawalId, { onDone }) {
   backdrop.querySelector(".withdrawal-decision-btn-reject").onclick = async () => {
     const rj = await openUxDialog({
       title: "Отклонить вывод",
-      message: `Отклонить заявку #${w.id} на ${w.amount} ${w.currency}?`,
+      message: `Отклонить заявку #${w.id} на ${formatWithdrawalAmountCell(w)} ${w.currency}?`,
       confirmText: "Отклонить",
       cancelText: "Отмена",
     });
@@ -4018,7 +4035,7 @@ async function openWithdrawalDecisionMode(withdrawalId, { onDone }) {
     const riskPath = !blockApproveFinal && meta.requiresRiskApprove;
     const standardPath = !blockApproveFinal && !riskPath;
 
-    const summary = `Заявка #${w.id}: ${w.amount} ${w.currency} → ${w.address || "—"}`;
+    const summary = `Заявка #${w.id}: ${formatWithdrawalAmountCell(w)} ${w.currency} → ${w.address || "—"}`;
     if (standardPath) {
       const c1 = await openUxDialog({
         title: "Подтвердить вывод",
@@ -4046,7 +4063,7 @@ async function openWithdrawalDecisionMode(withdrawalId, { onDone }) {
       const c2 = await openUxDialog({
         title: "Финальное подтверждение выплаты",
         message: [
-          `Сумма вывода: ${w.amount} ${w.currency}`,
+          `Сумма вывода: ${formatWithdrawalAmountCell(w)} ${w.currency}`,
           `Адрес: ${w.address || "—"}`,
           "",
           `Риск-контекст:\n${riskFactors || "—"}`,
@@ -4140,7 +4157,7 @@ async function loadWithdrawals() {
         <td><code class="copy-code-chip withdrawal-copy-code" title="Клик: скопировать ID" data-copy-value="${w.id}">${w.id}</code></td>
         <td>${userCell}</td>
         <td>${usernameHtml}</td>
-        <td class="amount-negative"><div>−${w.amount} ${w.currency}</div><div class="mini-hint">зарезервировано при заявке</div></td>
+        <td class="amount-negative"><div>−${formatWithdrawalAmountCell(w)} ${w.currency}</div><div class="mini-hint">зарезервировано при заявке</div></td>
         <td class="cell-address"><code class="copy-code-chip withdrawal-copy-code" title="Клик: скопировать адрес" data-copy-value="${escapeHtmlAttr(
           w.address || ""
         )}">${escapeHtmlAttr(w.address || "")}</code></td>
@@ -5148,7 +5165,7 @@ async function loadSettings() {
             }),
           });
           showToast(
-            `Зачислено: ${res.users_affected} польз. × ${res.amount_usdt} USDT (всего ${res.total_usdt_credited} USDT)`
+            `Зачислено: ${res.users_affected} польз. × ${formatUsdt2(res.amount_usdt)} USDT (всего ${formatUsdt2(res.total_usdt_credited)} USDT)`
           );
           loadSettings();
           loadDashboard();
@@ -5201,7 +5218,7 @@ async function loadSettings() {
             }),
           });
           showToast(
-            `Списано у ${res.users_debited} польз. по ${res.amount_usdt} USDT (всего ${res.total_usdt_debited} USDT). Пропущено (мало средств): ${res.users_skipped_insufficient}`
+            `Списано у ${res.users_debited} польз. по ${formatUsdt2(res.amount_usdt)} USDT (всего ${formatUsdt2(res.total_usdt_debited)} USDT). Пропущено (мало средств): ${res.users_skipped_insufficient}`
           );
           loadSettings();
           loadDashboard();
