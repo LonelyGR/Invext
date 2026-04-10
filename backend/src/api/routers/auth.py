@@ -39,11 +39,11 @@ def _serialize_user_me(u, data: dict) -> dict:
         "invested_total_usdt": str(data["invested_total_usdt"]),
         "profit_total_usdt": str(data["profit_total_usdt"]),
         "referral_income_usdt": str(data["referral_income_usdt"]),
+        # Только прямой уровень (L1); поля 2–10 не отдаём.
+        "referrals_level_1": data.get("referrals_level_1", data.get("referrals_count", 0)),
+        "referral_rewarded_level_1_count": data.get("referral_rewarded_level_1_count", 0),
+        "referral_earned_level_1_usdt": str(data.get("referral_earned_level_1_usdt", "0")),
     }
-    for level in range(1, 11):
-        payload[f"referrals_level_{level}"] = data.get(f"referrals_level_{level}", 0)
-        payload[f"referral_rewarded_level_{level}_count"] = data.get(f"referral_rewarded_level_{level}_count", 0)
-        payload[f"referral_earned_level_{level}_usdt"] = str(data.get(f"referral_earned_level_{level}_usdt", "0"))
     return payload
 
 

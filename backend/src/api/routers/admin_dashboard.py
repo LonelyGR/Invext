@@ -66,6 +66,8 @@ from src.schemas.admin_dashboard import (
     LedgerItem,
     LedgerList,
     LoginRequest,
+    ReferralBonusLedgerDetailResponse,
+    ReferralBonusSourceItem,
     PaginatedAdminLogs,
     PaginatedBroadcasts,
     PaginatedDeposits,
@@ -107,6 +109,7 @@ from src.core.config import get_settings
 from src.services.settings_service import get_system_settings, invalidate_system_settings_cache
 from src.services.broadcast_service import enqueue_broadcast, retry_failed_deliveries
 from src.models.broadcast_message import BROADCAST_STATUS_IN_PROGRESS
+from src.models.referral_reward import STATUS_PAID as REFERRAL_REWARD_PAID
 from src.services.user_service import _would_create_referrer_cycle
 
 
@@ -265,32 +268,10 @@ async def _maintenance_preview(db: AsyncSession, keep_settings: bool) -> dict:
     }
 
 
-async def _collect_referral_tree_ids(db: AsyncSession, root_user_id: int, max_levels: int = 10) -> tuple[list[int], dict[int, int]]:
-    """
-    Собирает всю реферальную ветку до max_levels уровней:
-    - all_ids: все уникальные id потомков (уровни 1..N)
-    - levels: карта user_id -> уровень в дереве
-    """
-    visited: set[int] = {root_user_id}
-    current_level_ids: list[int] = [root_user_id]
-    all_ids: list[int] = []
-    levels: dict[int, int] = {}
-    for level in range(1, max_levels + 1):
-        if not current_level_ids:
-            break
-        rows = await db.execute(select(User.id).where(User.referrer_id.in_(current_level_ids)))
-        raw_ids = [int(r[0]) for r in rows.all()]
-        dedup_ids = list(dict.fromkeys(raw_ids))
-        level_ids = [uid for uid in dedup_ids if uid not in visited]
-        if not level_ids:
-            current_level_ids = []
-            continue
-        for uid in level_ids:
-            levels[uid] = level
-        all_ids.extend(level_ids)
-        visited.update(level_ids)
-        current_level_ids = level_ids
-    return all_ids, levels
+async def _direct_referral_user_ids(db: AsyncSession, root_user_id: int) -> list[int]:
+    """Только прямой уровень: пользователи с referrer_id == root_user_id."""
+    rows = await db.execute(select(User.id).where(User.referrer_id == root_user_id))
+    return [int(r[0]) for r in rows.all()]
 
 
 def _settings_snapshot(row: SystemSettings) -> dict:
@@ -1287,6 +1268,7 @@ async def user_ledger(
 
     # Базовый запрос: выбираем только нужные поля, без legacy-полей блокчейна.
     query = select(
+        LedgerTransaction.id,
         LedgerTransaction.created_at,
         LedgerTransaction.type,
         LedgerTransaction.amount_usdt,
@@ -1315,7 +1297,7 @@ async def user_ledger(
     rows = result.all()
 
     items = []
-    for created_at, tx_type, amount_usdt, meta in rows:
+    for tx_id, created_at, tx_type, amount_usdt, meta in rows:
         deal_id = None
         comment = None
         if isinstance(meta, dict):
@@ -1336,8 +1318,8 @@ async def user_ledger(
                 parts = []
                 if source == "deposit":
                     parts.append("Бонус с депозита реферала")
-                elif source == "investment":
-                    parts.append("Бонус с инвестиции реферала")
+                elif source in ("investment", "investment_payout"):
+                    parts.append("Бонус за сбор (реферал в сделке)")
                 else:
                     parts.append("Реферальный бонус")
                 if from_user_id is not None:
@@ -1348,6 +1330,7 @@ async def user_ledger(
 
         items.append(
             LedgerItem(
+                id=tx_id,
                 created_at=created_at,
                 type=tx_type,
                 amount_usdt=amount_usdt,
@@ -1365,6 +1348,79 @@ async def user_ledger(
     )
 
     return LedgerList(items=items)
+
+
+@router.get(
+    "/users/{user_id}/ledger/{ledger_id}/referral-bonus-detail",
+    response_model=ReferralBonusLedgerDetailResponse,
+)
+async def referral_bonus_ledger_detail(
+    request: Request,
+    user_id: int,
+    ledger_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Источники одной строки REFERRAL_BONUS: рефералы (from_user), с которых пришла сумма."""
+    await get_admin_context(request)
+
+    tx = await db.get(LedgerTransaction, ledger_id)
+    if not tx or tx.user_id != user_id:
+        raise HTTPException(status_code=404, detail="Ledger entry not found")
+    if tx.type != LEDGER_TYPE_REFERRAL_BONUS:
+        raise HTTPException(status_code=400, detail="Not a REFERRAL_BONUS entry")
+
+    meta = tx.metadata_json if isinstance(tx.metadata_json, dict) else {}
+    rewards: list[ReferralReward] = []
+
+    ids_raw = meta.get("referral_reward_ids")
+    if isinstance(ids_raw, list) and ids_raw:
+        for rid in ids_raw:
+            try:
+                rid_int = int(rid)
+            except (TypeError, ValueError):
+                continue
+            rw = await db.get(ReferralReward, rid_int)
+            if rw and rw.to_user_id == user_id:
+                rewards.append(rw)
+    else:
+        raw_deal = meta.get("deal_id")
+        if raw_deal is not None:
+            try:
+                did = int(raw_deal)
+            except (TypeError, ValueError):
+                did = None
+            if did is not None:
+                rr_res = await db.execute(
+                    select(ReferralReward).where(
+                        ReferralReward.to_user_id == user_id,
+                        ReferralReward.deal_id == did,
+                        ReferralReward.status == REFERRAL_REWARD_PAID,
+                    )
+                )
+                cand = list(rr_res.scalars().all())
+                total = sum((r.amount or Decimal("0") for r in cand), Decimal("0"))
+                q_amt = (tx.amount_usdt or Decimal("0")).quantize(Decimal("0.000001"))
+                tot_q = total.quantize(Decimal("0.000001"))
+                if cand and abs(tot_q - q_amt) <= Decimal("0.000001"):
+                    rewards = cand
+
+    by_from: dict[int, Decimal] = {}
+    for rw in rewards:
+        fid = int(rw.from_user_id)
+        by_from[fid] = by_from.get(fid, Decimal("0")) + (rw.amount or Decimal("0"))
+
+    out_items: list[ReferralBonusSourceItem] = []
+    for fid, amt in sorted(by_from.items(), key=lambda x: x[0]):
+        fu = await db.get(User, fid)
+        out_items.append(
+            ReferralBonusSourceItem(
+                from_user_id=fid,
+                username=fu.username if fu else None,
+                amount_usdt=amt.quantize(Decimal("0.000001")),
+            )
+        )
+    out_items.sort(key=lambda x: ((x.username or "").lower(), x.from_user_id))
+    return ReferralBonusLedgerDetailResponse(items=out_items)
 
 
 @router.get(
@@ -2180,13 +2236,13 @@ async def get_user_detail(
                 created_at=referrer.created_at,
             )
 
-    referral_tree_ids, _ = await _collect_referral_tree_ids(db, u.id, max_levels=10)
-    referrals_count = len(referral_tree_ids)
+    referral_ids = await _direct_referral_user_ids(db, u.id)
+    referrals_count = len(referral_ids)
     referrals_preview_users: list[User] = []
-    if referral_tree_ids:
+    if referral_ids:
         referrals_result = await db.execute(
             select(User)
-            .where(User.id.in_(referral_tree_ids))
+            .where(User.id.in_(referral_ids))
             .order_by(desc(User.created_at))
             .limit(5)
         )
@@ -2276,7 +2332,6 @@ async def get_user_detail(
 async def list_user_referrals(
     request: Request,
     user_id: int,
-    level: Optional[int] = Query(None, ge=1, le=10, description="Фильтр по уровню L1..L10"),
     q: Optional[str] = Query(None, description="Поиск по username"),
     sort: str = Query("newest", description="newest|oldest|balance"),
     page: int = Query(1, ge=1),
@@ -2289,13 +2344,8 @@ async def list_user_referrals(
     if not root:
         raise HTTPException(status_code=404, detail="User not found")
 
-    referral_tree_ids, levels_map = await _collect_referral_tree_ids(db, user_id, max_levels=10)
-
-    # Summary по уровням для всего дерева (без учёта фильтров q/level).
-    summary_by_level: dict[int, int] = {i: 0 for i in range(1, 11)}
-    for lv in levels_map.values():
-        if 1 <= lv <= 10:
-            summary_by_level[lv] += 1
+    referral_tree_ids = await _direct_referral_user_ids(db, user_id)
+    summary_by_level: dict[int, int] = {1: len(referral_tree_ids)}
 
     if not referral_tree_ids:
         return PaginatedReferralTree(
@@ -2307,8 +2357,6 @@ async def list_user_referrals(
         )
 
     filtered_ids = referral_tree_ids
-    if level is not None:
-        filtered_ids = [uid for uid in referral_tree_ids if levels_map.get(uid) == level]
     if not filtered_ids:
         return PaginatedReferralTree(
             items=[],
@@ -2345,7 +2393,7 @@ async def list_user_referrals(
             "telegram_id": r.telegram_id,
             "username": r.username,
             "balance_usdt": r.balance_usdt,
-            "level": levels_map.get(r.id, 0),
+            "level": 1,
             "created_at": r.created_at,
         }
         for r in rows
@@ -2380,12 +2428,8 @@ async def list_user_referrals_layers(
     if not root:
         raise HTTPException(status_code=404, detail="User not found")
 
-    referral_tree_ids, levels_map = await _collect_referral_tree_ids(db, user_id, max_levels=10)
-
-    summary_by_level: dict[int, int] = {i: 0 for i in range(1, 11)}
-    for lv in levels_map.values():
-        if 1 <= lv <= 10:
-            summary_by_level[lv] += 1
+    referral_tree_ids = await _direct_referral_user_ids(db, user_id)
+    summary_by_level: dict[int, int] = {1: len(referral_tree_ids)}
 
     levels_out: dict[str, list[ReferralLayerUser]] = {str(i): [] for i in range(1, 11)}
 
@@ -2398,23 +2442,16 @@ async def list_user_referrals_layers(
         )
     ).scalars().all()
 
-    by_level: dict[int, list[User]] = {i: [] for i in range(1, 11)}
     for r in rows:
-        lv = levels_map.get(r.id, 0)
-        if 1 <= lv <= 10:
-            by_level[lv].append(r)
-
-    for lv in range(1, 11):
-        for r in by_level[lv]:
-            levels_out[str(lv)].append(
-                ReferralLayerUser(
-                    user_id=r.id,
-                    telegram_id=r.telegram_id,
-                    username=r.username,
-                    balance_usdt=r.balance_usdt,
-                    created_at=r.created_at,
-                )
+        levels_out["1"].append(
+            ReferralLayerUser(
+                user_id=r.id,
+                telegram_id=r.telegram_id,
+                username=r.username,
+                balance_usdt=r.balance_usdt,
+                created_at=r.created_at,
             )
+        )
 
     return ReferralLayersResponse(summary_by_level=summary_by_level, levels=levels_out)
 

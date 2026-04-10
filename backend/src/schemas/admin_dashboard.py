@@ -100,7 +100,7 @@ class PaginatedReferralTree(BaseModel):
 
 
 class ReferralLayerUser(BaseModel):
-    """Один пользователь в списке уровня L1..L10."""
+    """Один пользователь в списке прямых рефералов (уровень 1)."""
 
     user_id: int
     telegram_id: int
@@ -110,7 +110,7 @@ class ReferralLayerUser(BaseModel):
 
 
 class ReferralLayersResponse(BaseModel):
-    """Рефералы по уровням (та же разметка уровней, что и в /referrals)."""
+    """Рефералы: заполняется только уровень «1» (прямые). Поля 2–10 — пустые списки для совместимости."""
 
     summary_by_level: Dict[int, int]
     levels: Dict[str, List[ReferralLayerUser]]
@@ -124,6 +124,7 @@ class PaginatedUsers(BaseModel):
 
 
 class LedgerItem(BaseModel):
+    id: int
     created_at: datetime
     type: str
     amount_usdt: Decimal
@@ -133,6 +134,18 @@ class LedgerItem(BaseModel):
 
 class LedgerList(BaseModel):
     items: List[LedgerItem]
+
+
+class ReferralBonusSourceItem(BaseModel):
+    """Один источник строки REFERRAL_BONUS в ledger (реферал, с которого пришёл бонус)."""
+
+    from_user_id: int
+    username: Optional[str] = None
+    amount_usdt: Decimal
+
+
+class ReferralBonusLedgerDetailResponse(BaseModel):
+    items: List[ReferralBonusSourceItem]
 
 
 class LedgerAdjustRequest(BaseModel):

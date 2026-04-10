@@ -567,6 +567,7 @@ async def process_pending_payouts(db: AsyncSession) -> int:
                             **meta_base,
                             "source": "investment_payout",
                             "pending_rewards_count": len(pending_rewards),
+                            "referral_reward_ids": [rw.id for rw in pending_rewards],
                         },
                     )
                     db.add(tx_ref)

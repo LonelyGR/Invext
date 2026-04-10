@@ -152,31 +152,10 @@ async def get_user_with_stats(db: AsyncSession, telegram_id: int) -> Optional[di
     if not user:
         return None
 
-    # Количество рефералов по уровням (1..10)
-    max_referral_levels = 10
-    level_counts: dict[int, int] = {}
-    current_level_parent_ids = [user.id]
-    # Защита от циклов/повторного учёта: каждый пользователь учитывается только один раз
-    # в рамках лесенки конкретного пользователя.
-    visited_ids: set[int] = {user.id}
-    level1_ids: list[int] = []
-    for level in range(1, max_referral_levels + 1):
-        if not current_level_parent_ids:
-            level_counts[level] = 0
-            continue
-        level_ids_result = await db.execute(
-            select(User.id).where(User.referrer_id.in_(current_level_parent_ids))
-        )
-        # Дедуп + исключение уже посещённых id для защиты от "петель" в графе.
-        raw_level_ids = [r[0] for r in level_ids_result.all()]
-        unique_level_ids = list(dict.fromkeys(raw_level_ids))
-        level_ids = [uid for uid in unique_level_ids if uid not in visited_ids]
-        level_counts[level] = len(level_ids)
-        if level == 1:
-            level1_ids = level_ids
-        visited_ids.update(level_ids)
-        current_level_parent_ids = level_ids
-    referrals_count = level_counts.get(1, 0)
+    # Только прямой уровень: пользователи с referrer_id == этот user.
+    direct_refs_result = await db.execute(select(User.id).where(User.referrer_id == user.id))
+    level1_ids = [int(r[0]) for r in direct_refs_result.all()]
+    referrals_count = len(level1_ids)
 
     # Оборот команды: сумма депозитов рефералов (USDT по ledger, USDC по wallet_transactions).
     # Подзапрос: user_id рефералов
@@ -306,27 +285,22 @@ async def get_user_with_stats(db: AsyncSession, telegram_id: int) -> Optional[di
     )
     withdrawals_count = withdrawals_count_res.scalar() or 0
 
-    referral_by_level_res = await db.execute(
+    # Заработано с реферальных бонусов по сделкам: только level=1 (единственный поддерживаемый уровень).
+    referral_l1_row = await db.execute(
         select(
-            ReferralReward.level,
             func.count(func.distinct(ReferralReward.from_user_id)),
             func.coalesce(func.sum(ReferralReward.amount), 0),
-        )
-        .where(
+        ).where(
             and_(
                 ReferralReward.to_user_id == user.id,
                 ReferralReward.status == STATUS_PAID,
+                ReferralReward.level == 1,
             )
         )
-        .group_by(ReferralReward.level)
     )
-    referral_by_level_map = {
-        int(level): {
-            "count": int(cnt or 0),
-            "amount": Decimal(str(amount or 0)),
-        }
-        for level, cnt, amount in referral_by_level_res.all()
-    }
+    l1_cnt, l1_amt = referral_l1_row.one()
+    referral_level1_count = int(l1_cnt or 0)
+    referral_level1_earned = Decimal(str(l1_amt or 0))
 
     result_payload = {
         "user": user,
@@ -345,8 +319,7 @@ async def get_user_with_stats(db: AsyncSession, telegram_id: int) -> Optional[di
         "deposits_count": deposits_count,
         "withdrawals_count": withdrawals_count,
     }
-    for level in range(1, max_referral_levels + 1):
-        result_payload[f"referrals_level_{level}"] = level_counts.get(level, 0)
-        result_payload[f"referral_rewarded_level_{level}_count"] = referral_by_level_map.get(level, {}).get("count", 0)
-        result_payload[f"referral_earned_level_{level}_usdt"] = referral_by_level_map.get(level, {}).get("amount", Decimal("0"))
+    result_payload["referrals_level_1"] = referrals_count
+    result_payload["referral_rewarded_level_1_count"] = referral_level1_count
+    result_payload["referral_earned_level_1_usdt"] = referral_level1_earned
     return result_payload

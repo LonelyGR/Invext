@@ -32,7 +32,7 @@ class ReferralReward(Base):
     from_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     to_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
 
-    level: Mapped[int] = mapped_column(nullable=False)  # 1..10
+    level: Mapped[int] = mapped_column(nullable=False)  # всегда 1 (многоуровневая схема отключена)
     amount: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default=STATUS_PAID)
 

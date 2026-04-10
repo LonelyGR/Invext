@@ -3065,13 +3065,17 @@ async function loadUserDetail(userId) {
         const sign = negative ? "-" : "+";
         const comment = tx.comment || "";
         const deal = tx.deal_id ? `#${tx.deal_id}` : "";
+        const isRefBonus = tx.type === "REFERRAL_BONUS" && tx.id != null;
+        const commentCell = isRefBonus
+          ? `<button type="button" class="btn-link ledger-ref-bonus-detail" data-ledger-id="${String(tx.id)}">${escapeHtmlAttr(comment || "Реферальный бонус")}</button>`
+          : escapeHtmlAttr(comment);
         return `
         <tr>
           <td>${new Date(tx.created_at).toLocaleString()}</td>
           <td>${tx.type}</td>
           <td class="${cls}">${sign}${tx.amount_usdt}</td>
           <td>${deal}</td>
-          <td>${comment}</td>
+          <td>${commentCell}</td>
         </tr>`;
       })
       .join("");
@@ -3222,8 +3226,8 @@ async function loadUserDetail(userId) {
         <h2>Реферальная структура (preview)</h2>
         <div class="referrals-total">Всего рефералов: <strong>${detail.referrals_count || 0}</strong></div>
         <div id="referrals-by-level-wrap" class="referrals-by-level-wrap">
-          <div class="referrals-preview-subtitle">По уровням</div>
-          <div class="mini-hint" id="referrals-by-level-status">Загрузка уровней…</div>
+          <div class="referrals-preview-subtitle">Прямые рефералы</div>
+          <div class="mini-hint" id="referrals-by-level-status">Загрузка…</div>
           <div id="referrals-by-level-blocks"></div>
         </div>
         <div class="referrals-preview-subtitle">Последние 5 рефералов</div>
@@ -3249,22 +3253,6 @@ async function loadUserDetail(userId) {
         <div id="referrals-full-section" class="referrals-full-section" style="display:none; margin-top:14px;">
           <div class="referrals-full-level-summary" id="referrals-level-summary"></div>
           <div class="toolbar" style="margin-bottom:10px;">
-            <label class="filter-label">
-              Уровень
-              <select id="referrals-level-filter" class="page-size-select">
-                <option value="">Все</option>
-                <option value="1">L1</option>
-                <option value="2">L2</option>
-                <option value="3">L3</option>
-                <option value="4">L4</option>
-                <option value="5">L5</option>
-                <option value="6">L6</option>
-                <option value="7">L7</option>
-                <option value="8">L8</option>
-                <option value="9">L9</option>
-                <option value="10">L10</option>
-              </select>
-            </label>
             <div class="search-field">
               <span class="search-field-icon"><i data-lucide="search" class="icon icon--xs icon-muted" aria-hidden="true"></i></span>
               <input id="referrals-search" type="text" placeholder="Поиск по username" />
@@ -3295,13 +3283,12 @@ async function loadUserDetail(userId) {
                     <th>Telegram ID</th>
                     <th>Юзернейм</th>
                     <th>Баланс</th>
-                    <th>Уровень</th>
                     <th>Профиль</th>
                   </tr>
                 </thead>
                 <tbody id="referrals-full-tbody">
                   <tr>
-                    <td colspan="6">
+                    <td colspan="5">
                       <div class="empty-state"><strong>Нажмите “Показать всех”</strong><span>чтобы увидеть список с пагинацией</span></div>
                     </td>
                   </tr>
@@ -3366,7 +3353,7 @@ async function loadUserDetail(userId) {
         const summary = data.summary_by_level || {};
         const levels = data.levels || {};
         let html = "";
-        for (let lv = 1; lv <= 10; lv++) {
+        for (let lv = 1; lv <= 1; lv++) {
           const key = String(lv);
           const users = levels[key] || [];
           const cnt = summary[key] ?? summary[lv] ?? 0;
@@ -3385,7 +3372,7 @@ async function loadUserDetail(userId) {
             .join("");
           html += `
             <div class="referrals-level-block">
-              <div class="referrals-level-block-title">Уровень L${lv} — ${users.length}</div>
+              <div class="referrals-level-block-title">Прямые рефералы — ${users.length}</div>
               <div class="table-wrapper">
                 <div class="table-wrapper-inner">
                   <table>
@@ -3411,7 +3398,7 @@ async function loadUserDetail(userId) {
         blocksEl.innerHTML = html;
       } catch (e) {
         if (statusEl) {
-          statusEl.textContent = "Не удалось загрузить уровни";
+          statusEl.textContent = "Не удалось загрузить список рефералов";
           statusEl.style.color = "#f87171";
         }
       }
@@ -3569,7 +3556,6 @@ async function loadUserDetail(userId) {
     const referralsState = {
       page: 1,
       pageSize: 20,
-      level: "",
       q: "",
       sort: "newest",
       isLoading: false,
@@ -3578,7 +3564,6 @@ async function loadUserDetail(userId) {
     const showAllBtn = document.getElementById("referrals-show-all-btn");
     const fullSectionEl = document.getElementById("referrals-full-section");
     const summaryEl = document.getElementById("referrals-level-summary");
-    const levelFilterEl = document.getElementById("referrals-level-filter");
     const searchEl = document.getElementById("referrals-search");
     const searchBtnEl = document.getElementById("referrals-search-btn");
     const sortEl = document.getElementById("referrals-sort-select");
@@ -3594,7 +3579,7 @@ async function loadUserDetail(userId) {
 
       referralsTbodyEl.innerHTML = `
         <tr>
-          <td colspan="6">
+          <td colspan="5">
             <div class="empty-state"><strong>Загрузка...</strong><span>Подождите</span></div>
           </td>
         </tr>
@@ -3605,7 +3590,6 @@ async function loadUserDetail(userId) {
         params.set("page", String(referralsState.page));
         params.set("page_size", String(referralsState.pageSize));
         params.set("sort", referralsState.sort);
-        if (referralsState.level) params.set("level", String(referralsState.level));
         if (referralsState.q) params.set("q", referralsState.q);
 
         const data = await apiRequest(
@@ -3614,18 +3598,14 @@ async function loadUserDetail(userId) {
 
         const summary = data.summary_by_level || {};
         if (summaryEl) {
-          const parts = [];
-          for (let l = 1; l <= 10; l++) {
-            parts.push(`Уровень ${l}: ${summary[l] || 0} чел`);
-          }
-          summaryEl.textContent = parts.join(" · ");
+          summaryEl.textContent = `Прямые рефералы: ${summary[1] || 0} чел.`;
         }
 
         const items = Array.isArray(data.items) ? data.items : [];
         if (!items.length) {
           referralsTbodyEl.innerHTML = `
             <tr>
-              <td colspan="6">
+              <td colspan="5">
                 <div class="empty-state"><strong>Рефералы пока не найдены</strong><span>Проверьте фильтры</span></div>
               </td>
             </tr>
@@ -3635,7 +3615,6 @@ async function loadUserDetail(userId) {
             .map((r) => {
               const bal = Number(r.balance_usdt || 0);
               const hasBal = bal > 0;
-              const lvl = r.level != null && r.level !== "" ? r.level : "—";
               const username = r.username ? escapeHtmlAttr(String(r.username)) : "";
               return `
                 <tr class="${hasBal ? "referral-has-balance" : ""}">
@@ -3643,7 +3622,6 @@ async function loadUserDetail(userId) {
                   <td>${r.telegram_id}</td>
                   <td>${username}</td>
                   <td class="num-cell">${r.balance_usdt}</td>
-                  <td><span class="level-badge">L${lvl}</span></td>
                   <td><a href="#user-${r.user_id}" class="btn-secondary-small">Открыть</a></td>
                 </tr>
               `;
@@ -3675,13 +3653,6 @@ async function loadUserDetail(userId) {
     if (showAllBtn && fullSectionEl) {
       showAllBtn.addEventListener("click", () => {
         fullSectionEl.style.display = "";
-        applyReferralFullQueryAndLoad(1);
-      });
-    }
-
-    if (levelFilterEl) {
-      levelFilterEl.addEventListener("change", () => {
-        referralsState.level = levelFilterEl.value || "";
         applyReferralFullQueryAndLoad(1);
       });
     }
@@ -3723,6 +3694,32 @@ async function loadUserDetail(userId) {
         loadReferralsFull();
       });
     }
+
+    section.addEventListener("click", async (ev) => {
+      const refBtn = ev.target.closest(".ledger-ref-bonus-detail");
+      if (!refBtn) return;
+      ev.preventDefault();
+      const lid = refBtn.getAttribute("data-ledger-id");
+      if (!lid) return;
+      try {
+        const data = await apiRequest(`/users/${userId}/ledger/${lid}/referral-bonus-detail`);
+        const lines = (data.items || [])
+          .map((it) => {
+            const un = it.username ? `@${it.username}` : `id ${it.from_user_id}`;
+            return `${un} — ${it.amount_usdt} USDT`;
+          })
+          .join("\n");
+        await openUxDialog({
+          title: "Реферальный бонус: источники",
+          message:
+            lines ||
+            "Нет привязки к записям referral_rewards (старые операции без списка id). Откройте сделку вручную при необходимости.",
+          confirmText: "OK",
+        });
+      } catch (e) {
+        showToast(e.message || "Ошибка загрузки деталей", "error");
+      }
+    });
 
     section.querySelectorAll(".copy-address-btn").forEach((btn) => {
       btn.addEventListener("click", async (ev) => {

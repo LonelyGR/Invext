@@ -374,33 +374,12 @@ def make_invest_deals_dashboard_text(
 
 # === Партнёрка / команда / бонусы ===
 
-_PARTNERS_LEVEL_EMOJI = (
-    "1️⃣",
-    "2️⃣",
-    "3️⃣",
-    "4️⃣",
-    "5️⃣",
-    "6️⃣",
-    "7️⃣",
-    "8️⃣",
-    "9️⃣",
-    "🔟",
-)
-
-
 def make_partners_main_text(me: Mapping[str, Any], link: str | None, levels: list[tuple[float, str]]) -> str:
     sep = "────────────────"
+    _ = levels  # совместимость сигнатуры; используется только один уровень
 
-    def _level_count(level: int) -> int:
-        value = me.get(f"referrals_level_{level}", 0)
-        if level == 1 and not value:
-            value = me.get("referrals_count", 0)
-        return int(value or 0)
-
-    def _level_earned(level: int) -> str:
-        # Источник: backend отдаёт агрегаты в /v1/telegram/me (referral_earned_level_{N}_usdt).
-        key = f"referral_earned_level_{level}_usdt"
-        return _fmt_usdt(me.get(key, "0"))
+    direct_count = int(me.get("referrals_level_1") or me.get("referrals_count", 0) or 0)
+    earned_l1 = _fmt_usdt(me.get("referral_earned_level_1_usdt", "0"))
 
     if link:
         link_block = (
@@ -419,17 +398,12 @@ def make_partners_main_text(me: Mapping[str, Any], link: str | None, levels: lis
         "",
         sep,
         "",
-        "📊 <b>Реферальный уровень</b>",
+        "📊 <b>Прямые рефералы</b>",
         "",
+        f"1️⃣ {direct_count} чел. • заработано: {earned_l1} USDT",
+        "",
+        "<i>Бонус 1% от суммы участия прямого реферала в сборе.</i>",
     ]
-    n = min(len(levels), len(_PARTNERS_LEVEL_EMOJI))
-    for i in range(n):
-        count = _level_count(i + 1)
-        emoji = _PARTNERS_LEVEL_EMOJI[i]
-        earned = _level_earned(i + 1)
-        lines.append(f"{emoji} {count} чел. • заработано: {earned} USDT")
-        if i == 4:
-            lines.append("")
     return "\n".join(lines)
 
 

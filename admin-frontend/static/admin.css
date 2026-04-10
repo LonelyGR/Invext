@@ -3411,4 +3411,19 @@ tbody tr:hover .row-actions {
   margin-top: 0.65rem;
 }
 
+.btn-link {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: #60a5fa;
+  cursor: pointer;
+  text-decoration: underline;
+  text-align: left;
+}
+.btn-link:hover {
+  color: #93c5fd;
+}
+
 
