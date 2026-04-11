@@ -855,13 +855,17 @@ async def open_new_deal(
     if start_at is not None and end_at is not None and start_at <= now < end_at:
         status = DEAL_STATUS_ACTIVE
 
+    if profit_percent is None:
+        settings = await get_system_settings(db)
+        profit_percent = settings.deal_default_profit_percent
+
     deal = Deal(
         number=number,
         title=title or f"Сделка #{number}",
         start_at=start_at,
         end_at=end_at,
         status=status,
-        profit_percent=profit_percent if profit_percent is not None else Decimal("3"),
+        profit_percent=profit_percent,
     )
     db.add(deal)
     await db.flush()

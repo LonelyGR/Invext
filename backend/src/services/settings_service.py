@@ -17,6 +17,7 @@ class SettingsDTO:
     min_invest_usdt: Decimal
     max_invest_usdt: Decimal
     deal_amount_usdt: Decimal
+    deal_default_profit_percent: Decimal
     allow_deposits: bool
     allow_investments: bool
     allow_withdrawals: bool
@@ -42,6 +43,9 @@ async def get_system_settings(db: AsyncSession) -> SettingsDTO:
         min_invest_usdt=Decimal(row.min_invest_usdt),
         max_invest_usdt=Decimal(row.max_invest_usdt),
         deal_amount_usdt=Decimal(row.deal_amount_usdt),
+        deal_default_profit_percent=Decimal(
+            getattr(row, "deal_default_profit_percent", None) or Decimal("3")
+        ),
         allow_deposits=bool(row.allow_deposits),
         allow_investments=bool(row.allow_investments),
         allow_withdrawals=bool(getattr(row, "allow_withdrawals", True)),

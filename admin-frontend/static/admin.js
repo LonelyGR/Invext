@@ -4427,11 +4427,16 @@ async function loadSettings() {
           <div class="settings-hint">Для каждого дня задайте время открытия, день/время закрытия и день/время выплаты.</div>
           <div id="deal-schedule-editor"></div>
         </div>
+        <div class="settings-field" style="margin-bottom:12px;">
+          <div class="settings-label">Дефолтный % прибыли по новым сделкам</div>
+          <div class="settings-hint">Используется при автоматическом открытии сбора и кнопке «Открыть сейчас». Уже созданные сделки не пересчитываются — поменяйте % в карточке сделки при необходимости.</div>
+          <input type="number" step="0.01" min="0.01" max="100" id="deal_default_profit_percent" class="settings-input" value="${escapeHtmlAttr(String(s.deal_default_profit_percent ?? "3"))}" />
+        </div>
         <form id="settings-form" class="settings-form">
         <div class="settings-bonus-block" style="margin-bottom:20px;padding:16px;border:1px solid var(--border-subtle, #2a2f3a);border-radius:12px;background:var(--panel-elevated, rgba(255,255,255,0.02));">
           <div class="settings-header" style="margin-bottom:12px;">
             <h2 style="margin:0 0 4px 0;font-size:1.1rem;">Приветственный бонус (USDT)</h2>
-            <p class="section-desc" style="margin:0;">Включение бонуса, сумма и кто может запросить начисление (достаточно одного из отмеченных условий).</p>
+            <p class="section-desc" style="margin:0;">Бонус доступен только если в USDT-леджере ещё нет ни одной записи. Дальше — кто именно может запросить (достаточно одного из отмеченных сценариев).</p>
           </div>
           <div class="settings-limit-card-head" style="margin-bottom:10px;">
             <div>
@@ -4450,19 +4455,19 @@ async function loadSettings() {
           <div class="settings-field" style="margin-bottom:8px;">
             <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
               <input type="checkbox" id="welcome_bonus_for_new_users" ${s.welcome_bonus_for_new_users !== false ? "checked" : ""} />
-              <span>Новые регистрации (аккаунт не старше N дней, см. ниже)</span>
+              <span>Недавняя регистрация и пустой ledger (нет операций в журнале; окно N дней ниже)</span>
             </label>
           </div>
           <div class="settings-field" style="margin-bottom:12px;">
             <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
               <input type="checkbox" id="welcome_bonus_for_zero_balance" ${s.welcome_bonus_for_zero_balance !== false ? "checked" : ""} />
-              <span>Пользователи с нулевым балансом USDT (по ledger)</span>
+              <span>Пустой ledger — ни пополнений, ни операций (не «обнулился после вывода»)</span>
             </label>
           </div>
           <div class="settings-field">
             <div class="settings-label">Окно «новый пользователь» (дней)</div>
             <input type="number" step="1" min="1" max="3650" id="welcome_bonus_new_user_days" class="settings-input" value="${escapeHtmlAttr(String(s.welcome_bonus_new_user_days ?? 30))}" />
-            <div class="settings-hint">Считается от даты регистрации в системе. Используется только если включён пункт «Новые регистрации».</div>
+            <div class="settings-hint">Только для сценария «Недавняя регистрация»: аккаунт не старше N дней и ledger по-прежнему без записей.</div>
           </div>
         </div>
           <div class="settings-limit-grid">
@@ -4895,6 +4900,13 @@ async function loadSettings() {
       payloadValues.allow_withdrawals = Boolean(document.getElementById("allow_withdrawals")?.checked);
       payloadValues.support_contact = String(document.getElementById("support_contact")?.value || "").trim();
       payloadValues.deal_schedule_json = collectScheduleJson();
+      const dealDefPct = parseFloat(
+        (document.getElementById("deal_default_profit_percent")?.value || "").replace(",", ".")
+      );
+      if (!Number.isFinite(dealDefPct) || dealDefPct <= 0 || dealDefPct > 100) {
+        throw new Error("Дефолтный % сделок: число от 0.01 до 100");
+      }
+      payloadValues.deal_default_profit_percent = dealDefPct;
       payloadValues.allow_welcome_bonus = Boolean(document.getElementById("allow_welcome_bonus")?.checked);
       payloadValues.welcome_bonus_amount_usdt = getParsedValue("welcome_bonus_amount_usdt", "Сумма бонуса");
       payloadValues.welcome_bonus_for_new_users = Boolean(
@@ -4944,6 +4956,7 @@ async function loadSettings() {
       "max_invest_usdt",
       "welcome_bonus_amount_usdt",
       "welcome_bonus_new_user_days",
+      "deal_default_profit_percent",
     ].forEach((id) => {
       document.getElementById(id)?.addEventListener("input", () => {
         updateSummaries();
@@ -4990,6 +5003,7 @@ async function loadSettings() {
         "allow_deposits","allow_investments","allow_withdrawals","support_contact",
         "allow_welcome_bonus","welcome_bonus_amount_usdt","welcome_bonus_new_user_days",
         "welcome_bonus_for_new_users","welcome_bonus_for_zero_balance",
+        "deal_default_profit_percent",
       ].forEach((id) => setInput(id, payload[id]));
       updateSummaries();
       updateSettingsSaveState();
@@ -5021,6 +5035,7 @@ async function loadSettings() {
         document.getElementById("welcome_bonus_for_zero_balance")?.checked
       );
       payload.welcome_bonus_new_user_days = document.getElementById("welcome_bonus_new_user_days")?.value ?? "";
+      payload.deal_default_profit_percent = document.getElementById("deal_default_profit_percent")?.value ?? "";
       return payload;
     };
     const readSettingsPresets = () => {
@@ -5147,6 +5162,7 @@ async function loadSettings() {
             welcome_bonus_for_new_users: Boolean(s.welcome_bonus_for_new_users !== false),
             welcome_bonus_for_zero_balance: Boolean(s.welcome_bonus_for_zero_balance !== false),
             welcome_bonus_new_user_days: Number(s.welcome_bonus_new_user_days ?? 30),
+            deal_default_profit_percent: Number(s.deal_default_profit_percent ?? 3),
           };
           const labels = {
             min_deposit_usdt: "Мин. депозит",
@@ -5161,9 +5177,10 @@ async function loadSettings() {
             support_contact: "Саппорт",
             allow_welcome_bonus: "Бонус активен",
             welcome_bonus_amount_usdt: "Сумма бонуса",
-            welcome_bonus_for_new_users: "Бонус: новые регистрации",
-            welcome_bonus_for_zero_balance: "Бонус: нулевой баланс",
+            welcome_bonus_for_new_users: "Бонус: недавняя регистрация + пустой ledger",
+            welcome_bonus_for_zero_balance: "Бонус: пустой ledger",
             welcome_bonus_new_user_days: "Окно «новый пользователь», дн.",
+            deal_default_profit_percent: "Дефолтный % сделок",
           };
           const changedLines = Object.keys(before)
             .filter((k) => String(before[k]) !== String(payloadValues[k]))

@@ -72,6 +72,10 @@ class SystemSettings(Base):
     deal_amount_usdt: Mapped[Decimal] = mapped_column(
         Numeric(18, 2), nullable=False, default=Decimal("50")
     )
+    # Процент прибыли по умолчанию для новых сделок (планировщик / «Открыть сейчас»), если не передан явно.
+    deal_default_profit_percent: Mapped[Decimal] = mapped_column(
+        Numeric(5, 2), nullable=False, default=Decimal("3")
+    )
 
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

@@ -44,6 +44,9 @@ async def get_system_settings_admin(
             getattr(row, "welcome_bonus_for_zero_balance", True)
         ),
         "welcome_bonus_new_user_days": int(getattr(row, "welcome_bonus_new_user_days", 30)),
+        "deal_default_profit_percent": str(
+            getattr(row, "deal_default_profit_percent", None) or "3"
+        ),
         "support_contact": getattr(row, "support_contact", None),
         "deal_schedule_json": getattr(row, "deal_schedule_json", None),
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
@@ -78,6 +81,7 @@ async def update_system_setting_field(
         "welcome_bonus_for_new_users",
         "welcome_bonus_for_zero_balance",
         "welcome_bonus_new_user_days",
+        "deal_default_profit_percent",
         "support_contact",
         "deal_schedule_json",
     }
@@ -189,6 +193,11 @@ async def update_system_setting_field(
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Максимальная инвестиция не может быть меньше минимальной",
+                )
+            if field == "deal_default_profit_percent" and value > Decimal("100"):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="deal_default_profit_percent must be at most 100",
                 )
 
             setattr(row, field, value)

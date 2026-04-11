@@ -64,23 +64,39 @@ def _welcome_bonus_amount_from_settings(settings: SystemSettings) -> Decimal:
     return Decimal(str(raw))
 
 
-def _user_matches_welcome_bonus_eligibility(
+async def _user_ledger_is_empty(db: AsyncSession, user_id: int) -> bool:
+    """Ни одной строки в ledger_transactions — пользователь ещё не совершал операций по USDT-леджеру."""
+    r = await db.execute(
+        select(func.count()).select_from(LedgerTransaction).where(LedgerTransaction.user_id == user_id)
+    )
+    return int(r.scalar() or 0) == 0
+
+
+async def _user_matches_welcome_bonus_eligibility(
+    db: AsyncSession,
     user: User,
-    balance: Decimal,
     settings: SystemSettings,
 ) -> bool:
     """
     Два независимых критерия (достаточно одного, если оба включены в настройках):
-    - недавняя регистрация (окно welcome_bonus_new_user_days);
-    - нулевой баланс USDT по ledger.
+
+    - «Пустой ledger» (welcome_bonus_for_zero_balance): нет ни одной записи в ledger —
+      не «нулевой баланс после операций», а отсутствие пополнений и любых проводок.
+
+    - «Новые регистрации» (welcome_bonus_for_new_users): аккаунт не старше N дней
+      и ledger по-прежнему пуст (новичок без движений по леджеру).
     """
     for_new = bool(getattr(settings, "welcome_bonus_for_new_users", True))
-    for_zero = bool(getattr(settings, "welcome_bonus_for_zero_balance", True))
-    if not for_new and not for_zero:
+    for_empty_ledger = bool(getattr(settings, "welcome_bonus_for_zero_balance", True))
+    if not for_new and not for_empty_ledger:
+        return False
+
+    empty = await _user_ledger_is_empty(db, user.id)
+    if not empty:
         return False
 
     ok = False
-    if for_zero and balance == Decimal("0"):
+    if for_empty_ledger:
         ok = True
     if for_new:
         days = int(getattr(settings, "welcome_bonus_new_user_days", 30) or 30)
@@ -101,7 +117,7 @@ async def get_welcome_bonus_status(db: AsyncSession, telegram_id: int) -> dict:
     Условия:
     - глобальная настройка allow_welcome_bonus = True;
     - пользователь существует;
-    - выполняется хотя бы один из включённых критериев (новый аккаунт / нулевой баланс);
+    - выполняется хотя бы один из включённых критериев (см. настройки: пустой ledger / недавняя регистрация при пустом ledger);
     - в леджере нет записей DEPOSIT с provider='WELCOME_BONUS'.
     """
     result = await db.execute(select(SystemSettings).limit(1))
@@ -116,8 +132,7 @@ async def get_welcome_bonus_status(db: AsyncSession, telegram_id: int) -> dict:
     if not user:
         return {"available": False, "amount": None}
 
-    balance = await get_balance_usdt(db, user.id)
-    if not _user_matches_welcome_bonus_eligibility(user, balance, settings):
+    if not await _user_matches_welcome_bonus_eligibility(db, user, settings):
         return {"available": False, "amount": None}
 
     bonus_exists_q = await db.execute(
@@ -153,12 +168,12 @@ async def apply_welcome_bonus(db: AsyncSession, telegram_id: int) -> dict:
         return {"success": False, "amount": None, "new_balance": None, "detail": "Пользователь не найден."}
 
     balance = await get_balance_usdt(db, user.id)
-    if not _user_matches_welcome_bonus_eligibility(user, balance, settings):
+    if not await _user_matches_welcome_bonus_eligibility(db, user, settings):
         return {
             "success": False,
             "amount": None,
             "new_balance": balance,
-            "detail": "Условия для бонуса не выполнены (см. настройки: новые пользователи / нулевой баланс).",
+            "detail": "Условия для бонуса не выполнены (нужен пустой ledger и подходящий сценарий в настройках).",
         }
 
     bonus_exists_q = await db.execute(

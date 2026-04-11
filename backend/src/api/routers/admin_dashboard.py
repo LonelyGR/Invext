@@ -137,6 +137,7 @@ SYSTEM_SETTINGS_FIELDS = (
     "welcome_bonus_for_new_users",
     "welcome_bonus_for_zero_balance",
     "welcome_bonus_new_user_days",
+    "deal_default_profit_percent",
 )
 SYSTEM_SETTINGS_DEFAULTS = {
     "min_deposit_usdt": "10",
@@ -155,6 +156,7 @@ SYSTEM_SETTINGS_DEFAULTS = {
     "welcome_bonus_for_new_users": True,
     "welcome_bonus_for_zero_balance": True,
     "welcome_bonus_new_user_days": 30,
+    "deal_default_profit_percent": "3",
 }
 MAINTENANCE_RESET_LOCK = asyncio.Lock()
 MAINTENANCE_TABLES = [
@@ -307,6 +309,9 @@ def _settings_snapshot(row: SystemSettings) -> dict:
             getattr(row, "welcome_bonus_for_zero_balance", True)
         ),
         "welcome_bonus_new_user_days": int(getattr(row, "welcome_bonus_new_user_days", 30)),
+        "deal_default_profit_percent": str(
+            getattr(row, "deal_default_profit_percent", None) or Decimal("3")
+        ),
     }
 
 
@@ -351,6 +356,16 @@ def _validate_full_settings_payload(payload: dict) -> dict:
             if days_val < 1 or days_val > 3650:
                 raise HTTPException(status_code=400, detail="welcome_bonus_new_user_days must be 1..3650")
             parsed[field] = days_val
+            continue
+        if field == "deal_default_profit_percent":
+            raw = str(payload.get(field, "")).replace(",", ".").strip()
+            try:
+                pct_val = Decimal(raw)
+            except Exception:
+                raise HTTPException(status_code=400, detail="deal_default_profit_percent must be a number")
+            if pct_val <= 0 or pct_val > Decimal("100"):
+                raise HTTPException(status_code=400, detail="deal_default_profit_percent must be in (0, 100]")
+            parsed[field] = pct_val
             continue
         raw = str(payload.get(field, "")).replace(",", ".").strip()
         try:
@@ -3213,6 +3228,8 @@ async def update_system_settings_admin(
                 raise HTTPException(status_code=400, detail="Минимальная инвестиция не может быть больше максимальной")
             if field == "max_invest_usdt" and value < row.min_invest_usdt:
                 raise HTTPException(status_code=400, detail="Максимальная инвестиция не может быть меньше минимальной")
+            if field == "deal_default_profit_percent" and value > Decimal("100"):
+                raise HTTPException(status_code=400, detail="deal_default_profit_percent must be at most 100")
 
             setattr(row, field, value)
 
