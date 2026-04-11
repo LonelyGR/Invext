@@ -4428,6 +4428,43 @@ async function loadSettings() {
           <div id="deal-schedule-editor"></div>
         </div>
         <form id="settings-form" class="settings-form">
+        <div class="settings-bonus-block" style="margin-bottom:20px;padding:16px;border:1px solid var(--border-subtle, #2a2f3a);border-radius:12px;background:var(--panel-elevated, rgba(255,255,255,0.02));">
+          <div class="settings-header" style="margin-bottom:12px;">
+            <h2 style="margin:0 0 4px 0;font-size:1.1rem;">Приветственный бонус (USDT)</h2>
+            <p class="section-desc" style="margin:0;">Включение бонуса, сумма и кто может запросить начисление (достаточно одного из отмеченных условий).</p>
+          </div>
+          <div class="settings-limit-card-head" style="margin-bottom:10px;">
+            <div>
+              <div class="settings-label">Бонус активен</div>
+              <div class="settings-hint">Если выключено — кнопка получения бонуса недоступна.</div>
+            </div>
+            <label class="switch settings-inline-switch">
+              <input type="checkbox" id="allow_welcome_bonus" ${s.allow_welcome_bonus !== false ? "checked" : ""} />
+              <span class="switch-slider"></span>
+            </label>
+          </div>
+          <div class="settings-field" style="margin-bottom:12px;">
+            <div class="settings-label">Сумма бонуса (USDT)</div>
+            <input type="number" step="0.01" min="0.01" id="welcome_bonus_amount_usdt" class="settings-input" value="${escapeHtmlAttr(String(s.welcome_bonus_amount_usdt ?? "100"))}" />
+          </div>
+          <div class="settings-field" style="margin-bottom:8px;">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+              <input type="checkbox" id="welcome_bonus_for_new_users" ${s.welcome_bonus_for_new_users !== false ? "checked" : ""} />
+              <span>Новые регистрации (аккаунт не старше N дней, см. ниже)</span>
+            </label>
+          </div>
+          <div class="settings-field" style="margin-bottom:12px;">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+              <input type="checkbox" id="welcome_bonus_for_zero_balance" ${s.welcome_bonus_for_zero_balance !== false ? "checked" : ""} />
+              <span>Пользователи с нулевым балансом USDT (по ledger)</span>
+            </label>
+          </div>
+          <div class="settings-field">
+            <div class="settings-label">Окно «новый пользователь» (дней)</div>
+            <input type="number" step="1" min="1" max="3650" id="welcome_bonus_new_user_days" class="settings-input" value="${escapeHtmlAttr(String(s.welcome_bonus_new_user_days ?? 30))}" />
+            <div class="settings-hint">Считается от даты регистрации в системе. Используется только если включён пункт «Новые регистрации».</div>
+          </div>
+        </div>
           <div class="settings-limit-grid">
             <div class="settings-limit-card" data-entity="deposit">
               <div class="settings-limit-card-head">
@@ -4858,6 +4895,20 @@ async function loadSettings() {
       payloadValues.allow_withdrawals = Boolean(document.getElementById("allow_withdrawals")?.checked);
       payloadValues.support_contact = String(document.getElementById("support_contact")?.value || "").trim();
       payloadValues.deal_schedule_json = collectScheduleJson();
+      payloadValues.allow_welcome_bonus = Boolean(document.getElementById("allow_welcome_bonus")?.checked);
+      payloadValues.welcome_bonus_amount_usdt = getParsedValue("welcome_bonus_amount_usdt", "Сумма бонуса");
+      payloadValues.welcome_bonus_for_new_users = Boolean(
+        document.getElementById("welcome_bonus_for_new_users")?.checked
+      );
+      payloadValues.welcome_bonus_for_zero_balance = Boolean(
+        document.getElementById("welcome_bonus_for_zero_balance")?.checked
+      );
+      const wbDaysRaw = (document.getElementById("welcome_bonus_new_user_days")?.value || "").trim();
+      const wbDays = parseInt(wbDaysRaw, 10);
+      if (!Number.isFinite(wbDays) || wbDays < 1 || wbDays > 3650) {
+        throw new Error('Поле «Окно новый пользователь»: целое число от 1 до 3650');
+      }
+      payloadValues.welcome_bonus_new_user_days = wbDays;
       return payloadValues;
     };
 
@@ -4891,13 +4942,22 @@ async function loadSettings() {
       "fixed_invest_usdt",
       "min_invest_usdt",
       "max_invest_usdt",
+      "welcome_bonus_amount_usdt",
+      "welcome_bonus_new_user_days",
     ].forEach((id) => {
       document.getElementById(id)?.addEventListener("input", () => {
         updateSummaries();
         updateSettingsSaveState();
       });
     });
-    ["allow_deposits", "allow_investments", "allow_withdrawals"].forEach((id) => {
+    [
+      "allow_deposits",
+      "allow_investments",
+      "allow_withdrawals",
+      "allow_welcome_bonus",
+      "welcome_bonus_for_new_users",
+      "welcome_bonus_for_zero_balance",
+    ].forEach((id) => {
       document.getElementById(id)?.addEventListener("change", updateSettingsSaveState);
     });
     section.querySelectorAll('[id^="schedule_"]').forEach((el) => {
@@ -4928,6 +4988,8 @@ async function loadSettings() {
         "fixed_withdraw_usdt","min_withdraw_usdt","max_withdraw_usdt",
         "fixed_invest_usdt","min_invest_usdt","max_invest_usdt",
         "allow_deposits","allow_investments","allow_withdrawals","support_contact",
+        "allow_welcome_bonus","welcome_bonus_amount_usdt","welcome_bonus_new_user_days",
+        "welcome_bonus_for_new_users","welcome_bonus_for_zero_balance",
       ].forEach((id) => setInput(id, payload[id]));
       updateSummaries();
       updateSettingsSaveState();
@@ -4952,6 +5014,13 @@ async function loadSettings() {
       payload.allow_investments = Boolean(document.getElementById("allow_investments")?.checked);
       payload.allow_withdrawals = Boolean(document.getElementById("allow_withdrawals")?.checked);
       payload.support_contact = String(document.getElementById("support_contact")?.value || "").trim();
+      payload.allow_welcome_bonus = Boolean(document.getElementById("allow_welcome_bonus")?.checked);
+      payload.welcome_bonus_amount_usdt = document.getElementById("welcome_bonus_amount_usdt")?.value ?? "";
+      payload.welcome_bonus_for_new_users = Boolean(document.getElementById("welcome_bonus_for_new_users")?.checked);
+      payload.welcome_bonus_for_zero_balance = Boolean(
+        document.getElementById("welcome_bonus_for_zero_balance")?.checked
+      );
+      payload.welcome_bonus_new_user_days = document.getElementById("welcome_bonus_new_user_days")?.value ?? "";
       return payload;
     };
     const readSettingsPresets = () => {
@@ -5073,6 +5142,11 @@ async function loadSettings() {
             allow_investments: Boolean(s.allow_investments),
             allow_withdrawals: Boolean(s.allow_withdrawals !== false),
             support_contact: String(s.support_contact || ""),
+            allow_welcome_bonus: Boolean(s.allow_welcome_bonus !== false),
+            welcome_bonus_amount_usdt: Number(s.welcome_bonus_amount_usdt ?? 100),
+            welcome_bonus_for_new_users: Boolean(s.welcome_bonus_for_new_users !== false),
+            welcome_bonus_for_zero_balance: Boolean(s.welcome_bonus_for_zero_balance !== false),
+            welcome_bonus_new_user_days: Number(s.welcome_bonus_new_user_days ?? 30),
           };
           const labels = {
             min_deposit_usdt: "Мин. депозит",
@@ -5085,6 +5159,11 @@ async function loadSettings() {
             allow_investments: "Участие в сделках",
             allow_withdrawals: "Выводы",
             support_contact: "Саппорт",
+            allow_welcome_bonus: "Бонус активен",
+            welcome_bonus_amount_usdt: "Сумма бонуса",
+            welcome_bonus_for_new_users: "Бонус: новые регистрации",
+            welcome_bonus_for_zero_balance: "Бонус: нулевой баланс",
+            welcome_bonus_new_user_days: "Окно «новый пользователь», дн.",
           };
           const changedLines = Object.keys(before)
             .filter((k) => String(before[k]) !== String(payloadValues[k]))

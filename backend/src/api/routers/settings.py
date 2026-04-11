@@ -36,6 +36,14 @@ async def get_system_settings_admin(
         "allow_investments": bool(row.allow_investments),
         "allow_withdrawals": bool(getattr(row, "allow_withdrawals", True)),
         "allow_welcome_bonus": bool(getattr(row, "allow_welcome_bonus", True)),
+        "welcome_bonus_amount_usdt": str(
+            getattr(row, "welcome_bonus_amount_usdt", None) or "100"
+        ),
+        "welcome_bonus_for_new_users": bool(getattr(row, "welcome_bonus_for_new_users", True)),
+        "welcome_bonus_for_zero_balance": bool(
+            getattr(row, "welcome_bonus_for_zero_balance", True)
+        ),
+        "welcome_bonus_new_user_days": int(getattr(row, "welcome_bonus_new_user_days", 30)),
         "support_contact": getattr(row, "support_contact", None),
         "deal_schedule_json": getattr(row, "deal_schedule_json", None),
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
@@ -66,6 +74,10 @@ async def update_system_setting_field(
         "allow_investments",
         "allow_withdrawals",
         "allow_welcome_bonus",
+        "welcome_bonus_amount_usdt",
+        "welcome_bonus_for_new_users",
+        "welcome_bonus_for_zero_balance",
+        "welcome_bonus_new_user_days",
         "support_contact",
         "deal_schedule_json",
     }
@@ -79,7 +91,14 @@ async def update_system_setting_field(
         result = await db.execute(select(SystemSettings).limit(1).with_for_update())
         row = result.scalar_one()
 
-        if field in {"allow_deposits", "allow_investments", "allow_withdrawals", "allow_welcome_bonus"}:
+        if field in {
+            "allow_deposits",
+            "allow_investments",
+            "allow_withdrawals",
+            "allow_welcome_bonus",
+            "welcome_bonus_for_new_users",
+            "welcome_bonus_for_zero_balance",
+        }:
             value_raw = payload.get("value")
             if isinstance(value_raw, bool):
                 bool_value = value_raw
@@ -100,8 +119,27 @@ async def update_system_setting_field(
                 row.allow_investments = bool_value
             elif field == "allow_withdrawals":
                 row.allow_withdrawals = bool_value
-            else:
+            elif field == "allow_welcome_bonus":
                 row.allow_welcome_bonus = bool_value
+            elif field == "welcome_bonus_for_new_users":
+                row.welcome_bonus_for_new_users = bool_value
+            else:
+                row.welcome_bonus_for_zero_balance = bool_value
+        elif field == "welcome_bonus_new_user_days":
+            vr = payload.get("value")
+            try:
+                iv = int(vr)
+            except (TypeError, ValueError):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="value must be integer",
+                )
+            if iv < 1 or iv > 3650:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="welcome_bonus_new_user_days must be 1..3650",
+                )
+            row.welcome_bonus_new_user_days = iv
         elif field == "support_contact":
             row.support_contact = (str(payload.get("value") or "").strip()[:255] or None)
         elif field == "deal_schedule_json":

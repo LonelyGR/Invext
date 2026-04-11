@@ -2,6 +2,7 @@
 Сервис кошелька: баланс USDT считается по ledger (депозиты с блокчейна минус вывод/инвестиции).
 USDC по-прежнему из wallet_transactions для совместимости.
 """
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from sqlalchemy import select, func, and_, exists
@@ -55,13 +56,51 @@ async def get_balances(db: AsyncSession, telegram_id: int) -> dict:
     return {"USDT": usdt_balance, "USDC": usdc_balance}
 
 
-async def get_welcome_bonus_status(db: AsyncSession, telegram_id: int, *, bonus_amount: Decimal) -> dict:
+def _welcome_bonus_amount_from_settings(settings: SystemSettings) -> Decimal:
+    raw = getattr(settings, "welcome_bonus_amount_usdt", None)
+    if raw is None:
+        return Decimal("100")
+    return Decimal(str(raw))
+
+
+def _user_matches_welcome_bonus_eligibility(
+    user: User,
+    balance: Decimal,
+    settings: SystemSettings,
+) -> bool:
+    """
+    Два независимых критерия (достаточно одного, если оба включены в настройках):
+    - недавняя регистрация (окно welcome_bonus_new_user_days);
+    - нулевой баланс USDT по ledger.
+    """
+    for_new = bool(getattr(settings, "welcome_bonus_for_new_users", True))
+    for_zero = bool(getattr(settings, "welcome_bonus_for_zero_balance", True))
+    if not for_new and not for_zero:
+        return False
+
+    ok = False
+    if for_zero and balance == Decimal("0"):
+        ok = True
+    if for_new:
+        days = int(getattr(settings, "welcome_bonus_new_user_days", 30) or 30)
+        days = max(1, min(days, 3650))
+        threshold = datetime.now(timezone.utc) - timedelta(days=days)
+        created = user.created_at
+        if created is not None:
+            if created.tzinfo is None:
+                created = created.replace(tzinfo=timezone.utc)
+            if created >= threshold:
+                ok = True
+    return ok
+
+
+async def get_welcome_bonus_status(db: AsyncSession, telegram_id: int) -> dict:
     """
     Проверить, доступен ли приветственный бонус пользователю.
     Условия:
     - глобальная настройка allow_welcome_bonus = True;
     - пользователь существует;
-    - баланс USDT == 0;
+    - выполняется хотя бы один из включённых критериев (новый аккаунт / нулевой баланс);
     - в леджере нет записей DEPOSIT с provider='WELCOME_BONUS'.
     """
     result = await db.execute(select(SystemSettings).limit(1))
@@ -69,13 +108,15 @@ async def get_welcome_bonus_status(db: AsyncSession, telegram_id: int, *, bonus_
     if not settings or not bool(getattr(settings, "allow_welcome_bonus", True)):
         return {"available": False, "amount": None}
 
+    bonus_amount = _welcome_bonus_amount_from_settings(settings)
+
     result = await db.execute(select(User).where(User.telegram_id == telegram_id))
     user = result.scalar_one_or_none()
     if not user:
         return {"available": False, "amount": None}
 
     balance = await get_balance_usdt(db, user.id)
-    if balance != Decimal("0"):
+    if not _user_matches_welcome_bonus_eligibility(user, balance, settings):
         return {"available": False, "amount": None}
 
     bonus_exists_q = await db.execute(
@@ -93,7 +134,7 @@ async def get_welcome_bonus_status(db: AsyncSession, telegram_id: int, *, bonus_
     return {"available": True, "amount": bonus_amount}
 
 
-async def apply_welcome_bonus(db: AsyncSession, telegram_id: int, *, bonus_amount: Decimal) -> dict:
+async def apply_welcome_bonus(db: AsyncSession, telegram_id: int) -> dict:
     """
     Начислить приветственный бонус пользователю, если он доступен.
     Возвращает dict с ключами success, amount, new_balance, detail.
@@ -103,18 +144,20 @@ async def apply_welcome_bonus(db: AsyncSession, telegram_id: int, *, bonus_amoun
     if not settings or not bool(getattr(settings, "allow_welcome_bonus", True)):
         return {"success": False, "amount": None, "new_balance": None, "detail": "Бонус сейчас отключён."}
 
+    bonus_amount = _welcome_bonus_amount_from_settings(settings)
+
     result = await db.execute(select(User).where(User.telegram_id == telegram_id).with_for_update())
     user = result.scalar_one_or_none()
     if not user:
         return {"success": False, "amount": None, "new_balance": None, "detail": "Пользователь не найден."}
 
     balance = await get_balance_usdt(db, user.id)
-    if balance != Decimal("0"):
+    if not _user_matches_welcome_bonus_eligibility(user, balance, settings):
         return {
             "success": False,
             "amount": None,
             "new_balance": balance,
-            "detail": "Бонус доступен только при нулевом балансе.",
+            "detail": "Условия для бонуса не выполнены (см. настройки: новые пользователи / нулевой баланс).",
         }
 
     bonus_exists_q = await db.execute(

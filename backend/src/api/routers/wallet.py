@@ -1,8 +1,6 @@
 """
 Эндпоинт: балансы по валютам (ledger), список пополнений пользователя.
 """
-from decimal import Decimal
-
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -74,9 +72,6 @@ async def get_my_invoices(
     return InvoicesListResponse(items=items)
 
 
-WELCOME_BONUS_AMOUNT = Decimal("100")
-
-
 @router.get(
     "/bonus/welcome-status",
     response_model=WelcomeBonusStatusResponse,
@@ -86,7 +81,7 @@ async def welcome_bonus_status(
     telegram_id: int = Query(..., description="Telegram ID пользователя"),
     db: AsyncSession = Depends(get_db),
 ):
-    data = await get_welcome_bonus_status(db, telegram_id, bonus_amount=WELCOME_BONUS_AMOUNT)
+    data = await get_welcome_bonus_status(db, telegram_id)
     return WelcomeBonusStatusResponse(
         available=bool(data.get("available")),
         amount=data.get("amount"),
@@ -103,7 +98,7 @@ async def welcome_bonus_claim(
     db: AsyncSession = Depends(get_db),
 ):
     async with db.begin():
-        result = await apply_welcome_bonus(db, telegram_id, bonus_amount=WELCOME_BONUS_AMOUNT)
+        result = await apply_welcome_bonus(db, telegram_id)
     return WelcomeBonusClaimResponse(
         success=bool(result.get("success")),
         amount=result.get("amount"),

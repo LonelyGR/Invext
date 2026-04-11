@@ -131,6 +131,11 @@ SYSTEM_SETTINGS_FIELDS = (
     "allow_withdrawals",
     "support_contact",
     "deal_schedule_json",
+    "allow_welcome_bonus",
+    "welcome_bonus_amount_usdt",
+    "welcome_bonus_for_new_users",
+    "welcome_bonus_for_zero_balance",
+    "welcome_bonus_new_user_days",
 )
 SYSTEM_SETTINGS_DEFAULTS = {
     "min_deposit_usdt": "10",
@@ -144,6 +149,11 @@ SYSTEM_SETTINGS_DEFAULTS = {
     "allow_withdrawals": True,
     "support_contact": "",
     "deal_schedule_json": "",
+    "allow_welcome_bonus": True,
+    "welcome_bonus_amount_usdt": "100",
+    "welcome_bonus_for_new_users": True,
+    "welcome_bonus_for_zero_balance": True,
+    "welcome_bonus_new_user_days": 30,
 }
 MAINTENANCE_RESET_LOCK = asyncio.Lock()
 MAINTENANCE_TABLES = [
@@ -287,6 +297,15 @@ def _settings_snapshot(row: SystemSettings) -> dict:
         "allow_withdrawals": bool(getattr(row, "allow_withdrawals", True)),
         "support_contact": str(getattr(row, "support_contact", "") or ""),
         "deal_schedule_json": str(getattr(row, "deal_schedule_json", "") or ""),
+        "allow_welcome_bonus": bool(getattr(row, "allow_welcome_bonus", True)),
+        "welcome_bonus_amount_usdt": str(
+            getattr(row, "welcome_bonus_amount_usdt", None) or Decimal("100")
+        ),
+        "welcome_bonus_for_new_users": bool(getattr(row, "welcome_bonus_for_new_users", True)),
+        "welcome_bonus_for_zero_balance": bool(
+            getattr(row, "welcome_bonus_for_zero_balance", True)
+        ),
+        "welcome_bonus_new_user_days": int(getattr(row, "welcome_bonus_new_user_days", 30)),
     }
 
 
@@ -306,7 +325,14 @@ def _validate_full_settings_payload(payload: dict) -> dict:
     for field in SYSTEM_SETTINGS_FIELDS:
         if field not in payload:
             raise HTTPException(status_code=400, detail=f"Missing field: {field}")
-        if field in {"allow_deposits", "allow_investments", "allow_withdrawals"}:
+        if field in {
+            "allow_deposits",
+            "allow_investments",
+            "allow_withdrawals",
+            "allow_welcome_bonus",
+            "welcome_bonus_for_new_users",
+            "welcome_bonus_for_zero_balance",
+        }:
             parsed[field] = _coerce_bool(payload.get(field))
             continue
         if field == "support_contact":
@@ -314,6 +340,16 @@ def _validate_full_settings_payload(payload: dict) -> dict:
             continue
         if field == "deal_schedule_json":
             parsed[field] = str(payload.get(field) or "").strip()
+            continue
+        if field == "welcome_bonus_new_user_days":
+            raw_d = payload.get(field)
+            try:
+                days_val = int(raw_d)
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=400, detail="welcome_bonus_new_user_days must be integer")
+            if days_val < 1 or days_val > 3650:
+                raise HTTPException(status_code=400, detail="welcome_bonus_new_user_days must be 1..3650")
+            parsed[field] = days_val
             continue
         raw = str(payload.get(field, "")).replace(",", ".").strip()
         try:
@@ -3106,6 +3142,26 @@ async def update_system_settings_admin(
                 row.allow_investments = bool_value
             else:
                 row.allow_withdrawals = bool_value
+        elif field in {
+            "allow_welcome_bonus",
+            "welcome_bonus_for_new_users",
+            "welcome_bonus_for_zero_balance",
+        }:
+            bool_value = _coerce_bool(body.get("value"))
+            if field == "allow_welcome_bonus":
+                row.allow_welcome_bonus = bool_value
+            elif field == "welcome_bonus_for_new_users":
+                row.welcome_bonus_for_new_users = bool_value
+            else:
+                row.welcome_bonus_for_zero_balance = bool_value
+        elif field == "welcome_bonus_new_user_days":
+            try:
+                days_val = int(body.get("value"))
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=400, detail="value must be integer")
+            if days_val < 1 or days_val > 3650:
+                raise HTTPException(status_code=400, detail="welcome_bonus_new_user_days must be 1..3650")
+            row.welcome_bonus_new_user_days = days_val
         elif field == "support_contact":
             row.support_contact = (str(body.get("value") or "").strip()[:255] or None)
         elif field == "deal_schedule_json":
