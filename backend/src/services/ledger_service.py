@@ -13,6 +13,7 @@ from sqlalchemy import select, func, and_, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.ledger_transaction import LedgerTransaction
+from src.models.user import User
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +67,19 @@ async def get_balance_usdt(db: AsyncSession, user_id: int) -> Decimal:
     credits = credit.scalar() or Decimal("0")
     debits = debit.scalar() or Decimal("0")
     return credits - debits
+
+
+async def sync_user_balance(db: AsyncSession, user_id: int) -> Decimal:
+    """
+    Обновить кэш users.balance_usdt по текущей сумме из ledger.
+    Проводки не создаёт и не меняет.
+    """
+    user = await db.get(User, user_id)
+    if user is None:
+        raise LookupError("USER_NOT_FOUND")
+    balance = await get_balance_usdt(db, user_id)
+    user.balance_usdt = balance
+    return balance
 
 
 async def clear_user_ledger_entries(db: AsyncSession, user_id: int) -> int:

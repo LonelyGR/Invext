@@ -15,6 +15,7 @@ from src.models.system_settings import SystemSettings
 from src.services.ledger_service import (
     get_balance_usdt,
     LEDGER_TYPE_DEPOSIT,
+    sync_user_balance,
 )
 
 
@@ -188,8 +189,7 @@ async def apply_welcome_bonus(db: AsyncSession, telegram_id: int) -> dict:
     )
     db.add(tx)
 
-    new_balance = await get_balance_usdt(db, user.id)
-    user.balance_usdt = new_balance
+    new_balance = await sync_user_balance(db, user.id)
 
     return {
         "success": True,

@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models import LedgerTransaction, PaymentInvoice, User
 from src.models.payment_invoice import PROVIDER_NOWPAYMENTS
-from src.services.ledger_service import LEDGER_TYPE_DEPOSIT, get_balance_usdt
+from src.services.ledger_service import LEDGER_TYPE_DEPOSIT, sync_user_balance
 from src.services.notification_service import notify_deposit_success
 
 logger = logging.getLogger(__name__)
@@ -113,8 +113,7 @@ async def apply_payment_to_balance(
     db.add(ledger_tx)
     await db.flush()
 
-    new_balance = await get_balance_usdt(db, invoice.user_id)
-    user.balance_usdt = new_balance
+    new_balance = await sync_user_balance(db, invoice.user_id)
 
     # Отметить, что депозит применён к балансу (идемпотентность сохранена).
     invoice.is_balance_applied = True

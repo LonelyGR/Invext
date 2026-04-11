@@ -94,6 +94,7 @@ from src.services.ledger_service import (
     LEDGER_TYPE_REFERRAL_BONUS,
     clear_user_ledger_entries,
     get_balance_usdt,
+    sync_user_balance,
 )
 from src.services.deal_service import (
     acquire_deal_open_advisory_lock,
@@ -1137,9 +1138,7 @@ async def bulk_ledger_credit_all_users(
     await db.flush()
 
     for uid in user_ids:
-        u = await db.get(User, uid)
-        if u:
-            u.balance_usdt = await get_balance_usdt(db, uid)
+        await sync_user_balance(db, uid)
 
     await log_admin_action(
         db=db,
@@ -1222,9 +1221,7 @@ async def bulk_ledger_debit_all_users(
     await db.flush()
 
     for uid in user_ids:
-        u = await db.get(User, uid)
-        if u:
-            u.balance_usdt = await get_balance_usdt(db, uid)
+        await sync_user_balance(db, uid)
 
     await log_admin_action(
         db=db,
@@ -1270,9 +1267,7 @@ async def bulk_ledger_reset_all_users(
     deleted_total = 0
     for uid in user_ids:
         deleted_total += await clear_user_ledger_entries(db, user_id=uid)
-        u = await db.get(User, uid)
-        if u:
-            u.balance_usdt = Decimal("0")
+        await sync_user_balance(db, uid)
     await db.flush()
 
     await log_admin_action(
@@ -2902,7 +2897,7 @@ async def reset_user_balance_only(
             )
 
         deleted_rows = await clear_user_ledger_entries(db, user_id=user_id)
-        user.balance_usdt = Decimal("0")
+        new_bal = await sync_user_balance(db, user_id)
         await db.flush()
 
         await log_admin_action(
@@ -2917,8 +2912,38 @@ async def reset_user_balance_only(
         "ok": True,
         "user_id": user_id,
         "deleted_ledger_rows": deleted_rows,
-        "new_balance_usdt": "0",
+        "new_balance_usdt": str(new_bal),
     }
+
+
+@router.post("/users/{user_id}/sync-balance-from-ledger")
+async def sync_user_balance_from_ledger_endpoint(
+    request: Request,
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Выровнять users.balance_usdt по текущей сумме из ledger.
+    Проводки не создаёт и не удаляет.
+    """
+    admin_token_id, _ = await get_admin_context(request)
+    require_admin_role(request)
+
+    async with db.begin():
+        user = await db.get(User, user_id)
+        if user is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        new_bal = await sync_user_balance(db, user_id)
+
+        await log_admin_action(
+            db=db,
+            admin_token_id=admin_token_id,
+            action_type="SYNC_USER_BALANCE_FROM_LEDGER",
+            entity_type="USER",
+            entity_id=user_id,
+        )
+
+    return {"ok": True, "user_id": user_id, "balance_usdt": str(new_bal)}
 
 
 @router.post("/withdrawals/{withdraw_id}/approve")
@@ -3757,9 +3782,7 @@ async def maintenance_ledger_reset_keep_profit_referrals(
         user_ids_result = await db.execute(select(User.id))
         user_ids = [row[0] for row in user_ids_result.all()]
         for uid in user_ids:
-            u = await db.get(User, uid)
-            if u is not None:
-                u.balance_usdt = await get_balance_usdt(db, uid)
+            await sync_user_balance(db, uid)
         await db.flush()
 
         kept_after = int((await db.execute(select(func.count()).select_from(LedgerTransaction))).scalar() or 0)

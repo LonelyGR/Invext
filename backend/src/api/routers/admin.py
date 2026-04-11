@@ -19,7 +19,7 @@ from src.models.ledger_transaction import LedgerTransaction
 from src.services.ledger_service import (
     LEDGER_TYPE_DEPOSIT,
     LEDGER_TYPE_WITHDRAW,
-    get_balance_usdt,
+    sync_user_balance,
 )
 from src.services.withdraw_service import (
     approve_withdraw,
@@ -171,8 +171,7 @@ async def admin_ledger_adjust(
             for existing_tx in existing_result.scalars().all():
                 meta = existing_tx.metadata_json or {}
                 if str(meta.get("request_tag", "")) == str(request_tag):
-                    current_balance = await get_balance_usdt(db, user.id)
-                    user.balance_usdt = current_balance
+                    current_balance = await sync_user_balance(db, user.id)
                     return {
                         "status": "ok",
                         "user_id": user_id,
@@ -201,8 +200,7 @@ async def admin_ledger_adjust(
         )
         db.add(tx)
 
-        new_balance = await get_balance_usdt(db, user.id)
-        user.balance_usdt = new_balance
+        new_balance = await sync_user_balance(db, user.id)
 
     return {
         "status": "ok",

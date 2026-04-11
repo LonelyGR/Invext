@@ -18,6 +18,7 @@ from src.services.ledger_service import (
     LEDGER_TYPE_WITHDRAW,
     LEDGER_TYPE_WITHDRAW_REFUND,
     get_balance_usdt,
+    sync_user_balance,
 )
 
 
@@ -80,7 +81,7 @@ async def _refund_usdt_hold(
                 metadata_json={"withdraw_request_id": req.id, "reason": reason},
             )
         )
-        user.balance_usdt = await get_balance_usdt(db, user.id)
+        await sync_user_balance(db, user.id)
 
 
 async def _refund_usdc_hold(db: AsyncSession, user: User, req: WithdrawRequest) -> None:
@@ -153,7 +154,7 @@ async def create_withdraw_request(
                 metadata_json={"withdraw_request_id": req.id},
             )
         )
-        user.balance_usdt = await get_balance_usdt(db, user.id)
+        await sync_user_balance(db, user.id)
     elif currency == "USDC":
         db.add(
             WalletTransaction(
@@ -236,7 +237,7 @@ async def approve_withdraw(
                     metadata_json={"withdraw_request_id": req.id, "legacy_on_approve": True},
                 )
             )
-        usr.balance_usdt = await get_balance_usdt(db, usr.id)
+        await sync_user_balance(db, usr.id)
     elif req.currency == "USDC":
         if not await _find_usdc_withdraw_hold(db, req.id):
             balances = await get_balances(db, usr.telegram_id)

@@ -28,6 +28,7 @@ from src.services.ledger_service import (
     LEDGER_TYPE_PROFIT,
     LEDGER_TYPE_REFERRAL_BONUS,
     get_balance_usdt,
+    sync_user_balance,
 )
 from src.services.referral_service import (
     apply_referral_rewards_for_investment,
@@ -363,9 +364,6 @@ async def participate_in_deal(
     db.add(participation)
     await db.flush()
 
-    user_locked.balance_usdt = current_balance - amount
-    await db.flush()
-
     # Реферальные бонусы с инвестиций начисляются при успешном входе в сделку:
     # 1% от суммы участия только прямому рефереру.
     await apply_referral_rewards_for_investment(
@@ -375,6 +373,8 @@ async def participate_in_deal(
         deal_amount_usdt=amount,
     )
     await db.flush()
+
+    await sync_user_balance(db, user_locked.id)
 
     logger.info(
         "Deal participation created: deal_id=%s user_id=%s amount=%s",
@@ -595,10 +595,7 @@ async def process_pending_payouts(db: AsyncSession) -> int:
     await db.flush()
 
     for uid in affected_user_ids:
-        user_obj = await db.get(User, uid)
-        if user_obj:
-            new_balance = await get_balance_usdt(db, uid)
-            user_obj.balance_usdt = new_balance
+        await sync_user_balance(db, uid)
 
     await db.flush()
 
