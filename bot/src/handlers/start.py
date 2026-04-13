@@ -1,6 +1,8 @@
 """
 /start [ref_code] — создание/обновление пользователя, приветствие о проекте и меню.
 """
+import asyncio
+
 from aiogram import Router
 from aiogram.types import Message
 from aiogram.filters import CommandStart, CommandObject
@@ -10,7 +12,7 @@ from src.api_client.client import api
 from src.keyboards.menus import main_menu_kb
 from src.config.settings import ADMIN_TELEGRAM_IDS
 from src.texts import (
-    WELCOME_ABOUT,
+    make_welcome_about_text,
     make_start_registration_error_text,
 )
 
@@ -20,14 +22,20 @@ router = Router(name="start")
 async def _send_welcome_flow(message: Message, telegram_id: int):
     """Одно сообщение — о проекте и нижнее меню (без дублирующего блока профиля)."""
     show_bonus = False
+    settings: dict = {}
     try:
-        bonus_status = await api.get_welcome_bonus_status(telegram_id)
+        bonus_status, settings_data = await asyncio.gather(
+            api.get_welcome_bonus_status(telegram_id),
+            api.get_system_settings(),
+        )
         show_bonus = bool(bonus_status.get("available"))
+        settings = settings_data or {}
     except Exception:
         show_bonus = False
+        settings = {}
 
     await message.answer(
-        WELCOME_ABOUT,
+        make_welcome_about_text(settings),
         reply_markup=main_menu_kb(telegram_id in ADMIN_TELEGRAM_IDS, show_welcome_bonus=show_bonus),
     )
 

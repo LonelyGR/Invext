@@ -1,8 +1,6 @@
 """
 Отправка уведомлений в Telegram. Бот расчётов не делает — только рассылка с бэкенда.
 Время форматируется в Europe/Chisinau в человекочитаемом виде (UTC+2/UTC+3 по сезону).
-Для ключевых событий поддерживаются
-Telegram message effects (только в личных чатах; с бэкенда отправка по chat_id = личный чат).
 """
 from __future__ import annotations
 
@@ -21,12 +19,6 @@ logger = logging.getLogger(__name__)
 
 # Единый TZ для пользовательского отображения времени
 DISPLAY_TZ = ZoneInfo("Europe/Chisinau")
-
-# Telegram message effect IDs (работают только в личных чатах)
-# https://core.telegram.org/api/effects
-EFFECT_CELEBRATION = "5046509860389126442"  # 🎉
-EFFECT_FIRE = "5104841245755180586"  # 🔥
-EFFECT_MONEY = "5046589136895476101"  # 💰-like / подходящий для финансов
 
 # Дни недели для русского формата
 _WEEKDAYS_RU = (
@@ -97,14 +89,11 @@ async def send_telegram_message(
     chat_id: int,
     text: str,
     *,
-    message_effect_id: Optional[str] = None,
     reply_markup: Optional[dict] = None,
     parse_mode: Optional[str] = None,
 ) -> bool:
     """
     Отправить одно сообщение в Telegram.
-    Если передан message_effect_id — эффект будет применён (для личных чатов при отправке
-    по user id эффекты поддерживаются). Если не передан — сообщение без эффекта.
     """
     settings = get_settings()
     if not settings.bot_token:
@@ -112,8 +101,6 @@ async def send_telegram_message(
         return False
     url = f"https://api.telegram.org/bot{settings.bot_token}/sendMessage"
     payload: dict = {"chat_id": chat_id, "text": text}
-    if message_effect_id:
-        payload["message_effect_id"] = message_effect_id
     if reply_markup is not None:
         payload["reply_markup"] = reply_markup
     if parse_mode:
@@ -204,7 +191,7 @@ async def broadcast_deal_opened(
 
     sent = 0
     for tid in telegram_ids:
-        if await send_telegram_message(tid, text, message_effect_id=EFFECT_CELEBRATION):
+        if await send_telegram_message(tid, text):
             sent += 1
 
     logger.info(
@@ -262,8 +249,7 @@ async def broadcast_deal_closed(
         lines.append("Используйте наш телеграм бот.")
 
         text = "\n".join(lines)
-        effect_id = None
-        if await send_telegram_message(tid, text, message_effect_id=effect_id):
+        if await send_telegram_message(tid, text):
             sent += 1
 
     logger.info(
@@ -317,7 +303,6 @@ async def notify_payout_complete(
     return await send_telegram_message(
         telegram_id,
         text,
-        message_effect_id=EFFECT_CELEBRATION,
     )
 
 
@@ -334,7 +319,6 @@ async def notify_deposit_success(telegram_id: int, amount: str) -> bool:
     return await send_telegram_message(
         telegram_id,
         text,
-        message_effect_id=EFFECT_CELEBRATION,
     )
 
 
@@ -374,6 +358,5 @@ async def send_referral_bonus_reminder(
     return await send_telegram_message(
         telegram_id,
         text,
-        message_effect_id=EFFECT_MONEY,
         reply_markup=reply_markup,
     )

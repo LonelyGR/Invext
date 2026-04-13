@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 from typing import Iterable, Mapping, Any
 
 
@@ -24,13 +25,33 @@ def _fmt_usdt(value: Any) -> str:
 
 # === /start, приветствие ===
 
-WELCOME_ABOUT = """📊 <b>О проекте</b>
+def _fmt_plain_amount(value: Any) -> str:
+    """Формат суммы без лишних нулей: 50, 50.5, 50.55."""
+    try:
+        dec = Decimal(str(value).replace(",", "."))
+    except (InvalidOperation, TypeError, ValueError):
+        return "0"
+    normalized = dec.normalize()
+    return format(normalized, "f").rstrip("0").rstrip(".") if "." in format(normalized, "f") else format(normalized, "f")
+
+
+def make_welcome_about_text(settings: Mapping[str, Any] | None = None) -> str:
+    settings = settings or {}
+    min_invest = settings.get("min_invest_usdt", 50)
+    max_invest = settings.get("max_invest_usdt", min_invest)
+    min_s = _fmt_plain_amount(min_invest)
+    max_s = _fmt_plain_amount(max_invest)
+    if min_s == max_s:
+        limit_line = f"• Фиксированный лимит — {min_s}$"
+    else:
+        limit_line = f"• Плавающий лимит — от {min_s}$ до {max_s}$"
+    return f"""📊 <b>О проекте</b>
 
 Создаём программные решения для трейдинга на биржах — спотовые и фьючерсные рынки.
 
 📈 <b>Простые условия:</b>
 • 1 сделка в сутки  
-• Фиксированный лимит — 50$  
+{limit_line}  
 • Минимум действий со стороны пользователя  
 
 💸 <b>Дополнительный доход:</b>

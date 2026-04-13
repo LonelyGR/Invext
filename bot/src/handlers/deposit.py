@@ -10,7 +10,6 @@ from aiogram.fsm.state import State, StatesGroup
 
 from src.api_client.client import api
 from src.keyboards.menus import main_menu_kb
-from src.utils.effects import send_effect_message, EFFECT_CELEBRATION
 from src.utils.locks import with_double_click_protection, release_double_click_lock
 from src.texts import (
     make_deposit_start_text,
@@ -236,12 +235,7 @@ async def check_invoice_status(callback: CallbackQuery):
     balance_credited = invoice.get("balance_credited", False)
     if status == "finished" or balance_credited:
         await callback.message.edit_text(make_deposit_invoice_confirmed_text())
-        await send_effect_message(
-            callback.bot,
-            callback.message.chat.id,
-            make_deposit_balance_credited_text(),
-            effect_id=EFFECT_CELEBRATION,
-        )
+        await callback.message.answer(make_deposit_balance_credited_text())
         await callback.answer()
     else:
         await callback.answer("Инвойс ещё не оплачен или не подтверждён в сети.", show_alert=True)

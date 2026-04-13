@@ -14,7 +14,6 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 from src.api_client.client import api
 from src.keyboards.menus import back_kb
 from src.services.fresh_data import get_invest_dashboard
-from src.utils.effects import send_effect_message, EFFECT_CELEBRATION
 from src.utils.locks import with_double_click_protection, release_double_click_lock
 from src.texts import (
     make_invest_main_text_with_deal,
@@ -399,11 +398,8 @@ async def invest_participate(callback: CallbackQuery, state: FSMContext):
         invested = result.get("invested_amount_usdt")
         payout_hint = _format_payout_at(result.get("payout_at"))
         success_text = make_invest_success_text(invested, new_balance, payout_hint=payout_hint)
-        await send_effect_message(
-            callback.message.bot,
-            callback.message.chat.id,
+        await callback.message.answer(
             success_text,
-            effect_id=EFFECT_CELEBRATION,
             reply_markup=_invest_deal_kb(with_participate=False),
         )
         await state.clear()
@@ -512,11 +508,8 @@ async def invest_amount_entered(message: Message, state: FSMContext):
         payout_hint = _format_payout_at(result.get("payout_at"))
 
         success_text = make_invest_success_text(invested, new_balance, payout_hint=payout_hint)
-        await send_effect_message(
-            message.bot,
-            message.chat.id,
+        await message.answer(
             success_text,
-            effect_id=EFFECT_CELEBRATION,
             reply_markup=_invest_deal_kb(with_participate=False),
         )
         await state.clear()
