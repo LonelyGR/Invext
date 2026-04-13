@@ -285,12 +285,10 @@ async def get_user_with_stats(db: AsyncSession, telegram_id: int) -> Optional[di
     )
     withdrawals_count = withdrawals_count_res.scalar() or 0
 
-    # Заработано с реферальных бонусов по сделкам: только level=1 (единственный поддерживаемый уровень).
+    # Заработано с реферальных бонусов (исторически) считаем по ledger как по источнику правды.
+    # Кол-во рефералов с выплатой (L1) оставляем по referral_rewards, т.к. это отдельная метрика охвата.
     referral_l1_row = await db.execute(
-        select(
-            func.count(func.distinct(ReferralReward.from_user_id)),
-            func.coalesce(func.sum(ReferralReward.amount), 0),
-        ).where(
+        select(func.count(func.distinct(ReferralReward.from_user_id))).where(
             and_(
                 ReferralReward.to_user_id == user.id,
                 ReferralReward.status == STATUS_PAID,
@@ -298,7 +296,16 @@ async def get_user_with_stats(db: AsyncSession, telegram_id: int) -> Optional[di
             )
         )
     )
-    l1_cnt, l1_amt = referral_l1_row.one()
+    referral_l1_earned_row = await db.execute(
+        select(func.coalesce(func.sum(LedgerTransaction.amount_usdt), 0)).where(
+            and_(
+                LedgerTransaction.user_id == user.id,
+                LedgerTransaction.type == LEDGER_TYPE_REFERRAL_BONUS,
+            )
+        )
+    )
+    l1_cnt = referral_l1_row.scalar() or 0
+    l1_amt = referral_l1_earned_row.scalar() or Decimal("0")
     referral_level1_count = int(l1_cnt or 0)
     referral_level1_earned = Decimal(str(l1_amt or 0))
 

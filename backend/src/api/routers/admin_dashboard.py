@@ -793,9 +793,9 @@ async def get_dashboard_extended(
         .limit(25)
     )
     ref_rewards_result = await db.execute(
-        select(ReferralReward.to_user_id, func.coalesce(func.sum(ReferralReward.amount), 0))
-        .where(ReferralReward.status == "paid")
-        .group_by(ReferralReward.to_user_id)
+        select(LedgerTransaction.user_id, func.coalesce(func.sum(LedgerTransaction.amount_usdt), 0))
+        .where(LedgerTransaction.type == LEDGER_TYPE_REFERRAL_BONUS)
+        .group_by(LedgerTransaction.user_id)
     )
     rewards_map = {int(uid): Decimal(total or 0) for uid, total in ref_rewards_result.all()}
     refs_map = {int(uid): int(cnt or 0) for uid, cnt in ref_counts_result.all() if uid is not None}

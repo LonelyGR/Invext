@@ -551,26 +551,36 @@ async def process_pending_payouts(db: AsyncSession) -> int:
             rewards_result = await db.execute(
                 select(ReferralReward).where(
                     ReferralReward.deal_id == p.deal_id,
-                    ReferralReward.to_user_id == p.user_id,
+                    ReferralReward.from_user_id == p.user_id,
                     ReferralReward.status == STATUS_PENDING,
                 )
             )
             pending_rewards = list(rewards_result.scalars().all())
             if pending_rewards:
-                referral_income = sum((rw.amount or Decimal("0") for rw in pending_rewards), Decimal("0"))
-                if referral_income > 0:
+                rewards_by_referrer: dict[int, list[ReferralReward]] = {}
+                for rw in pending_rewards:
+                    rewards_by_referrer.setdefault(int(rw.to_user_id), []).append(rw)
+
+                for referrer_user_id, rw_items in rewards_by_referrer.items():
+                    ref_amount = sum((rw.amount or Decimal("0") for rw in rw_items), Decimal("0"))
+                    if ref_amount <= 0:
+                        continue
                     tx_ref = LedgerTransaction(
-                        user_id=p.user_id,
+                        user_id=referrer_user_id,
                         type=LEDGER_TYPE_REFERRAL_BONUS,
-                        amount_usdt=referral_income,
+                        amount_usdt=ref_amount,
                         metadata_json={
                             **meta_base,
                             "source": "investment_payout",
-                            "pending_rewards_count": len(pending_rewards),
-                            "referral_reward_ids": [rw.id for rw in pending_rewards],
+                            "from_user_id": p.user_id,
+                            "pending_rewards_count": len(rw_items),
+                            "referral_reward_ids": [rw.id for rw in rw_items],
                         },
                     )
                     db.add(tx_ref)
+                    affected_user_ids.add(referrer_user_id)
+                    if referrer_user_id == p.user_id:
+                        referral_income += ref_amount
                 for rw in pending_rewards:
                     rw.status = STATUS_PAID
 
