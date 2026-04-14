@@ -34,7 +34,7 @@ class ReferralReward(Base):
 
     level: Mapped[int] = mapped_column(nullable=False)  # всегда 1 (многоуровневая схема отключена)
     amount: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
-    status: Mapped[str] = mapped_column(String(16), nullable=False, default=STATUS_PAID)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default=STATUS_PENDING)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
