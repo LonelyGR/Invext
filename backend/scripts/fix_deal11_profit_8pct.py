@@ -51,11 +51,10 @@ from src.models.deal_participation import (
 from src.models.ledger_transaction import LedgerTransaction
 from src.models.referral_reward import ReferralReward
 from src.models.referral_reward import STATUS_MISSED, STATUS_PAID, STATUS_PENDING
-from src.models.user import User
 from src.services.ledger_service import (
     LEDGER_TYPE_PROFIT,
     LEDGER_TYPE_REFERRAL_BONUS,
-    get_balance_usdt,
+    sync_user_balance,
 )
 from src.services.referral_service import INVEST_REFERRAL_LEVEL_PERCENTS
 
@@ -250,9 +249,7 @@ async def run(*, deal_number: int, apply: bool) -> None:
         await db.flush()
 
         for uid in affected_users:
-            u = await db.get(User, uid)
-            if u:
-                u.balance_usdt = await get_balance_usdt(db, uid)
+            await sync_user_balance(db, uid)
 
         await db.commit()
         print("\nПрименено: deals.profit_percent, участия in_progress, PENDING/MISSED рефералка, ledger-компенсации, балансы.")

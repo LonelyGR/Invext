@@ -69,17 +69,34 @@ async def get_balance_usdt(db: AsyncSession, user_id: int) -> Decimal:
     return credits - debits
 
 
-async def sync_user_balance(db: AsyncSession, user_id: int) -> Decimal:
+async def sync_user_balance(session: AsyncSession, user_id: int) -> Decimal:
     """
-    Обновить кэш users.balance_usdt по текущей сумме из ledger.
-    Проводки не создаёт и не меняет.
+    Обновить кэш `users.balance_usdt` по текущей сумме из `ledger_transactions`.
+
+    Важно: в проекте `autoflush=False`, поэтому перед расчётом обязательно делаем `flush()`,
+    чтобы вновь добавленные `LedgerTransaction` были учтены в запросе `sum(...)`.
     """
-    user = await db.get(User, user_id)
-    if user is None:
-        raise LookupError("USER_NOT_FOUND")
-    balance = await get_balance_usdt(db, user_id)
-    user.balance_usdt = balance
-    return balance
+
+    async def _sync() -> Decimal:
+        # Принудительно протолкнём pending-записи (иначе SELECT сумму может не видеть новые ledger-строки).
+        await session.flush()
+
+        user = await session.get(User, user_id)
+        if user is None:
+            raise LookupError("USER_NOT_FOUND")
+
+        # `get_balance_usdt` уже использует `coalesce(sum(...), 0)`, поэтому NULL -> 0.
+        balance = await get_balance_usdt(session, user_id)
+        user.balance_usdt = balance
+        return balance
+
+    # Если вызывают без явной транзакции — завернём в транзакцию.
+    # Если транзакция уже есть (typical request scope) — просто синхронизируем внутри неё.
+    if session.in_transaction():
+        return await _sync()
+
+    async with session.begin():
+        return await _sync()
 
 
 async def clear_user_ledger_entries(db: AsyncSession, user_id: int) -> int:

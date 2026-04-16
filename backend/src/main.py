@@ -16,6 +16,7 @@ from src.api.routers import (
     withdrawals,
     admin,
     invest,
+    admin_balance,
     admin_dashboard,
     payments,
     settings,
@@ -64,6 +65,7 @@ app.include_router(withdrawals.router)
 app.include_router(admin.router)
 app.include_router(invest.router)
 app.include_router(payments.router)
+app.include_router(admin_balance.router)
 app.include_router(admin_dashboard.router)
 app.include_router(settings.router)
 

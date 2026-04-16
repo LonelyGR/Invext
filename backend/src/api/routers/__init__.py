@@ -5,6 +5,7 @@ from src.api.routers import (
     withdrawals,
     admin,
     invest,
+    admin_balance,
     admin_dashboard,
     payments,
 )
@@ -16,6 +17,7 @@ __all__ = [
     "withdrawals",
     "admin",
     "invest",
+    "admin_balance",
     "admin_dashboard",
     "payments",
 ]
